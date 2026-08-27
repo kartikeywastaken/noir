@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "noir"
+version = "0.1.0"
+description = "Local-first tool for authorized APK decoding, analysis, modification, rebuilding, signing, and audit reporting"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [{ name = "NOIR Contributors" }]
+dependencies = [
+    "typer>=0.15.0,<1.0",
+    "fastapi>=0.115.0,<1.0",
+    "uvicorn[standard]>=0.32.0,<1.0",
+    "pydantic>=2.10.0,<3.0",
+    "pydantic-settings>=2.6.0,<3.0",
+    "sqlalchemy>=2.0.36,<3.0",
+    "alembic>=1.14.0,<2.0",
+    "google-genai>=1.0.0,<2.0",
+    "python-multipart>=0.0.12",
+    "httpx>=0.28.0,<1.0",
+    "rich>=13.9.0,<14.0",
+    "sse-starlette>=2.1.0,<3.0",
+    "defusedxml>=0.7.1,<1.0",
+    "PyYAML>=6.0,<7.0",
+    "keyring>=25,<26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0,<9.0",
+    "pytest-asyncio>=0.24.0,<1.0",
+    "pytest-cov>=6.0.0,<7.0",
+    "ruff>=0.8.0,<1.0",
+    "mypy>=1.13.0,<2.0",
+    "httpx>=0.28.0,<1.0",
+]
+
+[project.scripts]
+noir = "noir.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/noir"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "S", "T20"]
+ignore = ["S603", "S607", "T201"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests (no external tools)",
+    "integration: Integration tests (may need tools)",
+    "e2e: End-to-end tests",
+    "ai: Tests requiring AI credentials",
+    "device: Tests requiring connected device",
+    "apktool: Tests requiring APKTool",
+    "sdk: Tests requiring Android SDK",
+]
+asyncio_mode = "auto"

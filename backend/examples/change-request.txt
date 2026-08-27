@@ -1,0 +1,1 @@
+This is my own NOIR test fixture APK. Change the greeting returned by MainActivity.getGreeting() from NOIR_TEST_FIXTURE_OK to NOIR_AI_MODIFIED. Preserve the existing method signature and app behavior. Do not add permissions, networking, background work, or any other feature.

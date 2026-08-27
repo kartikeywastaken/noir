@@ -1,0 +1,480 @@
+"""Regression tests. Temporary inputs are test fixtures, never runtime fallbacks."""
+
+import hashlib
+import json
+import os
+import secrets
+import sys
+import threading
+import time
+
+import pytest
+
+from noir.domain.config import NoirConfig, reset_config
+from noir.domain.enums import JobState, PatchOperationType, WorkflowStage
+from noir.domain.models import JobInfo, PatchOperation, PatchSet, ProjectInfo
+from noir.infrastructure.database.engine import init_db
+from noir.infrastructure.database.repositories import (
+    FileManifestRepository,
+    JobRepository,
+    ProjectRepository,
+)
+from noir.infrastructure.filesystem.workspace import (
+    PathSecurityError,
+    ProjectWorkspace,
+    compute_file_hash,
+    safe_resolve,
+)
+from noir.patches.engine import PatchEngine, PatchError
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    monkeypatch.setenv("NOIR_DATA_DIR", str(tmp_path / "data"))
+    reset_config()
+    cfg = NoirConfig(_env_file=None, gemini_api_key="", data_dir=str(tmp_path / "data"))
+    cfg.ensure_directories()
+    init_db(cfg.effective_database_url)
+    project = ProjectInfo(package_name="com.noir.regression")
+    ProjectRepository().create(project)
+    ws = ProjectWorkspace(project.id, cfg)
+    ws.create()
+    (ws.decoded_dir / "sample.txt").write_text("before\n")
+    FileManifestRepository().save(project.id, 0, ws.build_file_manifest())
+    yield cfg, ws
+    reset_config()
+
+
+def patch_for(ws, *ops):
+    return PatchSet(
+        project_id=ws.project_id, plan_id="testplan", workspace_revision=0, operations=list(ops)
+    )
+
+
+def test_sibling_prefix_symlink_rejected(workspace):
+    _, ws = workspace
+    outside = ws.root / "decoded_outside"
+    outside.mkdir()
+    (ws.decoded_dir / "link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(PathSecurityError):
+        safe_resolve(ws.decoded_dir, "link/secret.txt")
+
+
+@pytest.mark.parametrize("project_id", ["../escape", "/absolute", "a/b", ".."])
+def test_project_id_cannot_escape(workspace, project_id):
+    cfg, _ = workspace
+    with pytest.raises(PathSecurityError):
+        ProjectWorkspace(project_id, cfg)
+
+
+def test_patch_apply_undo_retains_original_bytes(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "sample.txt"
+    original = path.read_bytes()
+    engine = PatchEngine(ws)
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="sample.txt",
+            operation=PatchOperationType.REPLACE_BLOCK,
+            match_content="before",
+            new_content="after",
+            expected_preimage_hash=compute_file_hash(path),
+        ),
+        PatchOperation(
+            relative_path="new.txt",
+            operation=PatchOperationType.CREATE_FILE,
+            new_content="created",
+        ),
+    )
+    engine.apply_patch(patch)
+    assert path.read_text() == "after\n"
+    engine.undo_patch(patch)
+    assert path.read_bytes() == original
+    assert not (ws.decoded_dir / "new.txt").exists()
+
+
+def test_undo_does_not_overwrite_later_edits(workspace):
+    _, ws = workspace
+    engine = PatchEngine(ws)
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="sample.txt",
+            operation=PatchOperationType.REPLACE_FILE,
+            new_content="after",
+        ),
+    )
+    engine.apply_patch(patch)
+    (ws.decoded_dir / "sample.txt").write_text("later user edit")
+    with pytest.raises(PatchError, match="subsequent"):
+        engine.undo_patch(patch)
+    assert (ws.decoded_dir / "sample.txt").read_text() == "later user edit"
+
+
+def test_invalid_later_operation_leaves_all_files_unchanged(workspace):
+    _, ws = workspace
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="sample.txt",
+            operation=PatchOperationType.REPLACE_FILE,
+            new_content="after",
+        ),
+        PatchOperation(
+            relative_path="missing.txt",
+            operation=PatchOperationType.DELETE_FILE,
+        ),
+    )
+    with pytest.raises(PatchError):
+        PatchEngine(ws).apply_patch(patch)
+    assert (ws.decoded_dir / "sample.txt").read_text() == "before\n"
+
+
+def test_multiple_operations_same_file_use_original_preimage(workspace):
+    _, ws = workspace
+    digest = compute_file_hash(ws.decoded_dir / "sample.txt")
+    patch = patch_for(
+        ws,
+        *[
+            PatchOperation(
+                relative_path="sample.txt",
+                operation=PatchOperationType.REPLACE_FILE,
+                new_content=text,
+                expected_preimage_hash=digest,
+            )
+            for text in ("middle", "after")
+        ],
+    )
+    PatchEngine(ws).apply_patch(patch)
+    assert (ws.decoded_dir / "sample.txt").read_text() == "after"
+
+
+def test_manifest_preview_and_undo_are_real_xml_changes(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "AndroidManifest.xml"
+    original = "<manifest><application /></manifest>"
+    path.write_text(original)
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="AndroidManifest.xml",
+            operation=PatchOperationType.MANIFEST_UPDATE,
+            xml_element="application",
+            xml_attributes={"android:label": "NOIR"},
+        ),
+    )
+    engine = PatchEngine(ws)
+    assert "NOIR" in engine.generate_diff(patch)[0]["preview"]
+    engine.apply_patch(patch)
+    assert "NOIR" in path.read_text()
+    engine.undo_patch(patch)
+    assert path.read_text() == original
+
+
+def test_smali_exact_method_replace_and_insert(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "A.smali"
+    source = ".class public Lcom/noir/A;\n.super Ljava/lang/Object;\n"
+    source += ".method public greet()V\n    .locals 0\n    return-void\n.end method\n"
+    path.write_text(source)
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="A.smali",
+            operation=PatchOperationType.SMALI_REPLACE_METHOD,
+            class_descriptor="Lcom/noir/A;",
+            method_signature="greet()V",
+            new_content=".method public greet()V\n    .locals 1\n    return-void\n.end method",
+        ),
+    )
+    engine = PatchEngine(ws)
+    engine.apply_patch(patch)
+    assert ".locals 1" in path.read_text()
+    insert = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="A.smali",
+            operation=PatchOperationType.SMALI_INSERT_AT_ANCHOR,
+            class_descriptor="Lcom/noir/A;",
+            method_signature="greet()V",
+            anchor="    .locals 1",
+            new_content="    const/4 v0, 0x0",
+        ),
+    )
+    engine.apply_patch(insert)
+    assert ".locals 1\n    const/4 v0, 0x0" in path.read_text()
+
+
+def test_xml_entities_rejected():
+    from xml.etree.ElementTree import ParseError
+
+    from noir.security.xml import fromstring
+
+    with pytest.raises(ParseError):
+        fromstring('<!DOCTYPE x [<!ENTITY x "expanded">]><x>&x;</x>')
+
+
+def test_env_file_load_and_redaction(tmp_path, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("NOIR_GEMINI_API_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("GEMINI_API_KEY=unit-test-not-a-real-key\n")
+    cfg = NoirConfig(_env_file=env_file)
+    assert cfg.gemini_api_key.get_secret_value() == "unit-test-not-a-real-key"
+    assert "unit-test-not-a-real-key" not in json.dumps(cfg.to_safe_dict())
+    assert "unit-test-not-a-real-key" not in cfg.model_dump_json()
+    monkeypatch.setenv("GEMINI_API_KEY", "environment-wins")
+    assert NoirConfig(_env_file=env_file).gemini_api_key.get_secret_value() == "environment-wins"
+
+
+def test_no_key_has_no_fake_provider_fallback():
+    from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
+
+    with pytest.raises(GeminiProviderError, match="not configured"):
+        GeminiProvider(config=NoirConfig(_env_file=None, gemini_api_key=""))
+
+
+def test_real_process_cancellation_and_streaming(workspace):
+    from noir.application.jobs import job_runtime
+    from noir.infrastructure.database.repositories import EventRepository
+    from noir.infrastructure.processes.runner import run_tool
+
+    _, ws = workspace
+    job = JobInfo(project_id=ws.project_id, stage=WorkflowStage.REBUILDING, state=JobState.RUNNING)
+    JobRepository().create(job)
+    timer = threading.Timer(0.3, lambda: JobRepository().request_cancel(job.job_id))
+    timer.start()
+    started = time.monotonic()
+    try:
+        with job_runtime(job.job_id):
+            result = run_tool(
+                [
+                    sys.executable,
+                    "-u",
+                    "-c",
+                    "import time; print('real process started'); time.sleep(20)",
+                ],
+                timeout=10,
+            )
+    finally:
+        timer.join()
+    assert result.cancelled and result.exit_code != 0
+    assert time.monotonic() - started < 5
+    assert any(
+        "real process started" in e.message for e in EventRepository().list_by_job(job.job_id)
+    )
+
+
+def test_process_credentials_are_not_inherited_or_logged(monkeypatch):
+    from noir.infrastructure.processes.runner import run_tool
+
+    monkeypatch.setenv("GEMINI_API_KEY", "should-not-reach-child")
+    result = run_tool([sys.executable, "-c", "import os; print(os.getenv('GEMINI_API_KEY'))"])
+    assert result.stdout.strip() == "None"
+    result = run_tool(
+        [sys.executable, "-c", "import os; print(os.getenv('TEST_PASSWORD'))"],
+        env={"TEST_PASSWORD": "test-secret-value"},
+    )
+    assert "test-secret-value" not in result.stdout
+    assert "test-secret-value" not in " ".join(result.command)
+
+
+def test_build_refuses_unrecorded_changes(workspace):
+    from noir.application.build_service import BuildService, BuildServiceError
+
+    cfg, ws = workspace
+    (ws.decoded_dir / "sample.txt").write_text("not recorded")
+    with pytest.raises(BuildServiceError, match="unrecorded"):
+        BuildService(cfg).build(ws.project_id)
+
+
+def test_signing_requires_explicit_confirmation(workspace):
+    from noir.application.signing_service import SigningService, SigningServiceError
+
+    cfg, ws = workspace
+    with pytest.raises(SigningServiceError, match="confirmation"):
+        SigningService(cfg).sign(ws.project_id, "build", "profile")
+
+
+def test_api_queue_cancellation_sse_and_upload_limit(workspace):
+    from fastapi.testclient import TestClient
+
+    from noir.api.app import create_app
+    from noir.domain.models import ApiToken
+    from noir.infrastructure.database.repositories import TokenRepository
+
+    cfg, ws = workspace
+    cfg.max_upload_size = 10
+    token = secrets.token_urlsafe(24)
+    TokenRepository().create(ApiToken(token_hash=hashlib.sha256(token.encode()).hexdigest()))
+    client = TestClient(create_app(cfg), headers={"Authorization": f"Bearer {token}"})
+    job = client.app.state.queue.submit("build", ws.project_id, {"revision": 0})
+    assert client.post(f"/v1/jobs/{job.job_id}/cancel").json()["state"] == "cancelled"
+    events = client.get(f"/v1/jobs/{job.job_id}/events").text
+    assert "event: done\ndata: " in events
+    response = client.post("/v1/import?authorized=true", files={"file": ("large.apk", b"x" * 20)})
+    assert response.status_code == 413
+    assert not list((cfg.projects_dir.parent / "uploads").iterdir())
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    os.getenv("NOIR_RUN_E2E") != "1", reason="Set NOIR_RUN_E2E=1 for real Android tools"
+)
+def test_real_apk_toolchain(workspace):
+    from noir.application.demo import run_offline_demo
+
+    cfg, _ = workspace
+    result = run_offline_demo(cfg)
+    assert result["signed_apk"]
+    assert any(item["type"] == "signed_apk" for item in result["export"]["files"])
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    os.getenv("NOIR_RUN_E2E") != "1", reason="Set NOIR_RUN_E2E=1 for real Android tools"
+)
+def test_real_api_import_and_queued_build(workspace):
+    from fastapi.testclient import TestClient
+
+    from noir.api.app import create_app
+    from noir.application.demo import _build_fixture_apk
+    from noir.domain.models import ApiToken
+    from noir.infrastructure.database.repositories import TokenRepository
+
+    cfg, _ = workspace
+    fixture = _build_fixture_apk(cfg)
+    token = secrets.token_urlsafe(24)
+    TokenRepository().create(ApiToken(token_hash=hashlib.sha256(token.encode()).hexdigest()))
+
+    def wait_for_job(client, job_id):
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            job = client.get(f"/v1/jobs/{job_id}").json()
+            if job["state"] in {"succeeded", "failed", "cancelled", "interrupted"}:
+                assert job["state"] == "succeeded", job
+                return job
+            time.sleep(0.1)
+        pytest.fail("Real tool job did not finish")
+
+    with TestClient(create_app(cfg), headers={"Authorization": f"Bearer {token}"}) as client:
+        payload = fixture.read_bytes()
+        response = client.post(
+            "/v1/import?authorized=true",
+            files={"file": (fixture.name, payload)},
+            headers={"Idempotency-Key": "real-import"},
+        )
+        assert response.status_code == 202, response.text
+        imported = wait_for_job(client, response.json()["job_id"])
+        duplicate = client.post(
+            "/v1/import?authorized=true",
+            files={"file": (fixture.name, payload)},
+            headers={"Idempotency-Key": "real-import"},
+        )
+        assert duplicate.json()["job_id"] == imported["job_id"]
+        project = imported["project_id"]
+        response = client.post(f"/v1/projects/{project}/build")
+        assert response.status_code == 202, response.text
+        built = wait_for_job(client, response.json()["job_id"])
+        assert built["result_data"]["result"]["success"]
+        stream = client.get(f"/v1/jobs/{built['job_id']}/events").text
+        assert "Apktool" in stream and "event: done\n" in stream
+
+
+def test_rejected_plan_never_rebuilds(workspace, monkeypatch, tmp_path):
+    """Inject only the AI boundary to test a rejection without billable API calls."""
+    from typer.testing import CliRunner
+
+    import noir.application.ai_service as ai_service
+    from noir.application.build_service import BuildService
+    from noir.application.import_service import ImportService
+    from noir.application.patch_service import PlanService
+    from noir.cli.main import app
+    from noir.domain.models import ChangePlan
+
+    cfg, ws = workspace
+    monkeypatch.setenv("GEMINI_API_KEY", "boundary-test-only")
+    plan = PlanService(cfg).create_plan(
+        ChangePlan(
+            project_id=ws.project_id,
+            workspace_revision=0,
+            user_request="test rejection",
+        )
+    )
+    monkeypatch.setattr(ImportService, "import_apk", lambda *a, **k: {"project_id": ws.project_id})
+    monkeypatch.setattr(ai_service, "generate_plan", lambda *a, **k: plan)
+
+    def must_not_build(*args, **kwargs):
+        pytest.fail("Rejected plan reached rebuild")
+
+    monkeypatch.setattr(BuildService, "build", must_not_build)
+    request = tmp_path / "request.txt"
+    request.write_text("test rejection")
+    result = CliRunner().invoke(
+        app,
+        ["run", "owned.apk", "--authorized", "--request-file", str(request), "--allow-ai-upload"],
+        input="n\n",
+    )
+    assert result.exit_code == 3, result.output
+    assert "Workflow completed" not in result.output
+    assert (ws.reports_dir / "audit_report.md").exists()
+
+
+def test_existing_project_run_skips_import_and_keeps_approval_gate(
+    workspace, monkeypatch, tmp_path
+):
+    from typer.testing import CliRunner
+
+    import noir.application.ai_service as ai_service
+    from noir.application.import_service import ImportService
+    from noir.application.patch_service import PlanService
+    from noir.cli.main import app
+    from noir.domain.models import ChangePlan
+
+    cfg, ws = workspace
+    monkeypatch.setenv("GEMINI_API_KEY", "boundary-test-only")
+    project = ProjectRepository().get(ws.project_id)
+    project.authorization_acknowledged = True
+    ProjectRepository().update(project)
+    plan = PlanService(cfg).create_plan(
+        ChangePlan(
+            project_id=ws.project_id,
+            workspace_revision=0,
+            user_request="Rename app",
+        )
+    )
+    monkeypatch.setattr(ImportService, "import_apk", lambda *a, **k: pytest.fail("Must not import"))
+    monkeypatch.setattr(ai_service, "generate_plan", lambda *a, **k: plan)
+    request = tmp_path / "rename.txt"
+    request.write_text("Rename app")
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "--project",
+            ws.project_id,
+            "--authorized",
+            "--request-file",
+            str(request),
+            "--allow-ai-upload",
+        ],
+        input="n\n",
+    )
+    assert result.exit_code == 3, result.output
+    assert "Using existing project:" in result.output
+    assert "Approve this exact plan?" in result.output
+    assert len(ProjectRepository().list_all()) == 1
+
+
+def test_run_rejects_ambiguous_apk_and_project(workspace):
+    from typer.testing import CliRunner
+
+    from noir.cli.main import app
+
+    _, ws = workspace
+    result = CliRunner().invoke(
+        app, ["run", "owned.apk", "--project", ws.project_id, "--authorized"]
+    )
+    assert result.exit_code == 2
+    assert "not both" in result.output

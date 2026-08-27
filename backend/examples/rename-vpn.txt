@@ -1,0 +1,17 @@
+Change the application's user-visible display name and launcher label to exactly: a1b2c3
+
+This is a label-only change, not a package rename.
+
+Inspect AndroidManifest.xml and the referenced string resources. Account for any
+label override on the launcher activity or activity-alias so the launcher and
+application labels both display a1b2c3. Prefer the smallest targeted manifest or
+string-resource edit. Ensure a localized string does not override the new label.
+
+Preserve the package/application ID, component names, app icon, version metadata,
+permissions, VPN services and configuration, network destinations, certificates
+bundled as app resources, and all other behavior. Do not modify Smali, add code,
+add permissions, or change VPN functionality. Do not rename unrelated UI text.
+
+List the exact affected files in the plan, explain the label changes, and include
+validation steps for checking the final application and launcher labels. The APK
+will be signed separately using the user's local test signing profile.

@@ -1,0 +1,11 @@
+backend/.venv/
+backend/.env
+backend/.local-test/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.coverage
+**/*.jks
+**/*.pass
+backend/tests/fixtures/*.apk
