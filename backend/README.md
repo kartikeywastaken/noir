@@ -135,10 +135,20 @@ host shell. The backend invokes Apktool deterministically; it does not let Gemin
 commands. Context is bounded, so large/obfuscated apps and complex changes may need manual work.
 Label requests prioritize the manifest and referenced app/launcher strings. Large resource
 files are represented by marked, exact label excerpts; these permit block replacements only,
-never whole-file replacement. The complete serialized prompt plus system instructions is
+never whole-file replacement. The complete serialized prompt, system instructions, and output schema are
 measured in UTF-8 bytes against NOIR_AI_MAX_REQUEST_SIZE (100,000 by default). Optional inventory
 is trimmed first. Required patch evidence is never silently omitted or truncated: an oversized
 required plan fails before contacting Gemini and must be narrowed or split.
+Patch generation requests a JSON response schema and small, unique block replacements instead
+of copying whole manifests for label edits. NOIR checks Gemini's finish reason before accepting
+output. Truncated or malformed JSON is discarded and regenerated once from the original inputs
+by default; fragments are never repaired, concatenated, saved, or applied. Safety rejections and
+API errors do not trigger this response retry (the SDK has separate HTTP retries).
+`NOIR_AI_MAX_OUTPUT_TOKENS` defaults to 16,384; a token-limit retry doubles it, capped at 65,536.
+`NOIR_AI_RESPONSE_RETRY_LIMIT` defaults to 1 and accepts 0–2; retries may incur additional API
+charges. The separate `NOIR_AI_MAX_OUTPUT_SIZE` byte limit remains 50,000. Configure overrides in
+`backend/.env`; no key change is needed. After a failed generation, reuse the approved plan with
+`noir patch generate PROJECT_ID --plan PLAN_ID`, then review and approve the resulting patch.
 Gemini currently performs plan/patch generation and optional diagnosis, not an autonomous
 tool-calling repair loop. Rebuild errors are real failures, not auto-success responses.
 

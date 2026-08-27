@@ -478,3 +478,91 @@ def test_run_rejects_ambiguous_apk_and_project(workspace):
     )
     assert result.exit_code == 2
     assert "not both" in result.output
+
+
+def test_failed_ai_response_preserves_approval_and_can_retry(workspace, monkeypatch):
+    from types import SimpleNamespace
+
+    from google.genai import types
+    from pydantic import SecretStr
+
+    from noir.application.ai_service import generate_patch
+    from noir.application.patch_service import PlanService
+    from noir.domain.enums import ApprovalScope
+    from noir.domain.models import ChangePlan, PlanFileChange
+    from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
+    from noir.infrastructure.database.repositories import ApprovalRepository, PatchRepository
+
+    cfg, ws = workspace
+    cfg = cfg.model_copy(update={"gemini_api_key": SecretStr("boundary-test-only")})
+    plan_service = PlanService(cfg)
+    plan = plan_service.create_plan(
+        ChangePlan(
+            project_id=ws.project_id,
+            workspace_revision=0,
+            user_request="Change before to after",
+            file_changes=[
+                PlanFileChange(
+                    relative_path="sample.txt",
+                    operation=PatchOperationType.REPLACE_BLOCK,
+                )
+            ],
+        )
+    )
+    plan_hash = plan.compute_hash()
+    plan_service.approve_plan(ws.project_id, plan.plan_id, plan_hash)
+    calls = []
+
+    def invalid_response(**kwargs):
+        calls.append(kwargs)
+        return types.GenerateContentResponse(
+            candidates=[
+                types.Candidate(
+                    finish_reason=types.FinishReason.STOP,
+                    content=types.Content(
+                        parts=[types.Part(text='{"operations":[{"new_content":"after')]
+                    ),
+                )
+            ]
+        )
+
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=invalid_response))
+    monkeypatch.setattr(GeminiProvider, "_get_client", lambda self: client)
+    with pytest.raises(GeminiProviderError, match="No partial response was used"):
+        generate_patch(cfg, ws.project_id, plan.plan_id)
+    assert len(calls) == 2
+    assert PatchRepository().list_by_project(ws.project_id) == []
+    assert (ws.decoded_dir / "sample.txt").read_text() == "before\n"
+    assert ProjectRepository().get(ws.project_id).workspace_revision == 0
+    assert ApprovalRepository().find_valid(ws.project_id, ApprovalScope.PLAN, plan_hash, 0)
+    assert [item.scope for item in ApprovalRepository().list_by_project(ws.project_id)] == [
+        ApprovalScope.PLAN
+    ]
+
+    response_text = json.dumps(
+        {
+            "operations": [
+                {
+                    "relative_path": "sample.txt",
+                    "operation": "replace_block",
+                    "match_content": "before",
+                    "new_content": "after",
+                }
+            ]
+        }
+    )
+    client.models.generate_content = lambda **kwargs: types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(
+                finish_reason=types.FinishReason.STOP,
+                content=types.Content(parts=[types.Part(text=response_text)]),
+            ),
+        ]
+    )
+    patch = generate_patch(cfg, ws.project_id, plan.plan_id)
+    assert len(PatchRepository().list_by_project(ws.project_id)) == 1
+    assert not PatchRepository().is_applied(patch.patch_id)
+    assert (ws.decoded_dir / "sample.txt").read_text() == "before\n"
+    assert not ApprovalRepository().find_valid(
+        ws.project_id, ApprovalScope.PATCH, patch.compute_hash(), 0
+    )

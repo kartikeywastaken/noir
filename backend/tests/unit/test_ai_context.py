@@ -135,8 +135,9 @@ def test_patch_budget_preserves_required_files(ws, monkeypatch):
         ],
     )
 
-    def inspect(prompt, system):
-        assert len(prompt.encode()) + len(system.encode()) <= 8000
+    def inspect(prompt, system, *, response_schema):
+        schema_bytes = len(json.dumps(response_schema, separators=(",", ":")).encode())
+        assert len(prompt.encode()) + len(system.encode()) + schema_bytes <= 8000
         assert "@string/app_name" in prompt
         return json.dumps(
             {
@@ -176,7 +177,7 @@ def test_excerpt_cannot_be_used_to_replace_whole_resource(ws, monkeypatch):
     monkeypatch.setattr(
         provider,
         "_call_model",
-        lambda *args: json.dumps(
+        lambda *args, **kwargs: json.dumps(
             {
                 "operations": [
                     {

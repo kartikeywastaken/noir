@@ -7,6 +7,7 @@ build failure diagnosis, and audit summary generation.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +28,59 @@ from noir.domain.models import (
 from noir.infrastructure.ai.budget import bounded_prompt
 from noir.infrastructure.ai.provider import AiProvider
 
+logger = logging.getLogger(__name__)
+
+
+def _schema_size(schema: dict[str, Any] | None) -> int:
+    return (
+        len(json.dumps(schema, ensure_ascii=False, separators=(",", ":")).encode()) if schema else 0
+    )
+
+
+def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
+    """Keep wire output small; host validation and approval still enforce the change scope."""
+    properties: dict[str, Any] = {
+        "relative_path": {
+            "type": "string",
+            "enum": sorted({change.relative_path for change in plan.file_changes}),
+        },
+        "operation": {
+            "type": "string",
+            "enum": sorted({change.operation.value for change in plan.file_changes}),
+        },
+    }
+    for name in (
+        "match_content",
+        "new_content",
+        "class_descriptor",
+        "method_signature",
+        "anchor",
+        "xml_element",
+        "affected_scope",
+    ):
+        properties[name] = {"type": "string"}
+    properties["xml_attributes"] = {"type": "object", "additionalProperties": {"type": "string"}}
+    required = ["relative_path", "operation"]
+    if all(change.operation == PatchOperationType.REPLACE_BLOCK for change in plan.file_changes):
+        required += ["match_content", "new_content"]
+    return {
+        "type": "object",
+        "properties": {
+            "operations": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["operations"],
+        "additionalProperties": False,
+    }
+
 
 class GeminiProviderError(Exception):
     """Raised when Gemini API operations fail."""
@@ -42,7 +96,7 @@ class GeminiProvider(AiProvider):
         model: str | None = None,
         api_key: str | None = None,
         timeout: int = 120,
-        max_output_tokens: int = 8192,
+        max_output_tokens: int | None = None,
         config: NoirConfig | None = None,
     ):
         self.config = config or get_config()
@@ -51,7 +105,11 @@ class GeminiProvider(AiProvider):
         self.model_name = model or self.config.ai_model
         self.api_key = api_key or self.config.gemini_api_key.get_secret_value()
         self.timeout = self.config.ai_timeout if timeout == 120 else timeout
-        self.max_output_tokens = max_output_tokens
+        self.max_output_tokens = (
+            self.config.ai_max_output_tokens if max_output_tokens is None else max_output_tokens
+        )
+        if not 1 <= self.max_output_tokens <= 65_536:
+            raise GeminiProviderError("max_output_tokens must be between 1 and 65,536")
         self._client: Client | None = None
 
         if not self.api_key:
@@ -81,9 +139,20 @@ class GeminiProvider(AiProvider):
                 ) from None
         return self._client
 
-    def _call_model(self, prompt: str, system_instruction: str = "", *, json_output=True) -> str:
-        """Call the Gemini model with a prompt."""
-        actual = len(prompt.encode("utf-8")) + len(system_instruction.encode("utf-8"))
+    def _call_model(
+        self,
+        prompt: str,
+        system_instruction: str = "",
+        *,
+        json_output: bool = True,
+        response_schema: dict[str, Any] | None = None,
+    ) -> str:
+        """Accept complete responses only; regenerate invalid JSON within a fixed attempt limit."""
+        actual = (
+            len(prompt.encode("utf-8"))
+            + len(system_instruction.encode("utf-8"))
+            + _schema_size(response_schema)
+        )
         if actual > self.config.ai_max_request_size:
             raise GeminiProviderError(
                 f"AI request requires {actual:,} bytes; configured limit is "
@@ -92,28 +161,71 @@ class GeminiProvider(AiProvider):
         client = self._get_client()
         from google.genai import types
 
-        config = types.GenerateContentConfig(
-            temperature=0.2,
-            max_output_tokens=self.max_output_tokens,
-            system_instruction=system_instruction if system_instruction else None,
-            response_mime_type="application/json" if json_output else "text/plain",
-        )
-
-        try:
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=config,
+        attempts = 1 + self.config.ai_response_retry_limit if json_output else 1
+        token_budget = self.max_output_tokens
+        for attempt in range(1, attempts + 1):
+            config = types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=token_budget,
+                system_instruction=system_instruction or None,
+                response_mime_type="application/json" if json_output else "text/plain",
+                response_json_schema=response_schema,
             )
-            text = response.text
-            if not isinstance(text, str) or not text.strip():
-                raise GeminiProviderError("Empty or non-text AI response")
-            if len(text.encode()) > self.config.ai_max_output_size:
-                raise GeminiProviderError("Empty or oversized AI response")
-            return text
-        except Exception as e:
-            detail = str(e).replace(self.api_key, "[REDACTED]")
-            raise GeminiProviderError(f"Gemini API call failed: {detail}") from None
+            try:
+                response = client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=config,
+                )
+            except Exception as e:
+                detail = str(e).replace(self.api_key, "[REDACTED]")
+                raise GeminiProviderError(f"Gemini API call failed: {detail}") from None
+
+            # Never retry a safety rejection or accept a partial candidate, even if its
+            # text happens to be valid JSON. Do not expose raw provider feedback or content.
+            feedback = response.prompt_feedback
+            if feedback and feedback.block_reason:
+                raise GeminiProviderError("Gemini blocked this request; no patch was generated")
+            candidates = response.candidates or []
+            if not candidates:
+                raise GeminiProviderError("Gemini returned no completed response candidate")
+            reason = candidates[0].finish_reason
+            failure = ""
+            if reason == types.FinishReason.MAX_TOKENS:
+                failure = f"Gemini output was truncated at its {token_budget:,}-token limit"
+                token_budget = min(token_budget * 2, 65_536)
+            elif reason != types.FinishReason.STOP:
+                code = reason.value if isinstance(reason, types.FinishReason) else "UNKNOWN"
+                raise GeminiProviderError(
+                    f"Gemini did not finish normally ({code}); no partial output was accepted"
+                )
+            else:
+                text = response.text
+                if not isinstance(text, str) or not text.strip():
+                    raise GeminiProviderError("Empty or non-text AI response")
+                if len(text.encode()) > self.config.ai_max_output_size:
+                    raise GeminiProviderError("Empty or oversized AI response")
+                if json_output:
+                    try:
+                        self._parse_json_response(text)
+                    except GeminiProviderError as exc:
+                        failure = str(exc)
+                if not failure:
+                    return text
+
+            if attempt == attempts:
+                raise GeminiProviderError(
+                    f"{failure} after {attempts} generation attempt(s). "
+                    "No partial response was used or applied. Retry patch generation, "
+                    "or narrow/split the approved plan if this persists."
+                )
+            logger.warning(
+                "Incomplete or invalid Gemini JSON; discarded response. "
+                "Regenerating from original instructions (attempt %s/%s).",
+                attempt + 1,
+                attempts,
+            )
+        raise GeminiProviderError("No complete AI response")
 
     def _prepare_prompt(
         self,
@@ -121,13 +233,15 @@ class GeminiProvider(AiProvider):
         context: dict[str, Any],
         system: str,
         protected_paths: Iterable[str] = (),
+        *,
+        response_schema: dict[str, Any] | None = None,
     ) -> str:
         try:
             return bounded_prompt(
                 render,
                 context,
                 system=system,
-                max_bytes=self.config.ai_max_request_size,
+                max_bytes=self.config.ai_max_request_size - _schema_size(response_schema),
                 protected_paths=protected_paths,
             )
         except ValueError as exc:
@@ -300,6 +414,9 @@ Output a JSON object with this exact schema:
             "Output valid JSON matching the schema provided."
         )
 
+        if not plan.file_changes:
+            raise GeminiProviderError("The approved plan has no file changes")
+        response_schema = _patch_response_schema(plan)
         for change in plan.file_changes:
             if change.operation != PatchOperationType.CREATE_FILE and (
                 change.relative_path not in context.get("file_snippets", {})
@@ -324,32 +441,30 @@ For non-XML operations, omit xml_attributes or use an empty object, not null.
 affected_scope is an optional description: omit it or use an empty string when not applicable.
 manifest_update requires a nonempty xml_attributes object. replace_block requires exact
 match_content and new_content (an empty new_content string is valid when deleting a block).
+Use the shortest exact match_content that occurs exactly once in that file, with just enough
+surrounding text to identify the target. Use separate, non-overlapping replace_block operations
+for separate edits in the same file. Never copy an entire manifest or application subtree
+for a label-only edit: copy only the needed attribute span or opening tag. Preserve attribute
+order and whitespace exactly. A whole string element is enough for a string-resource edit.
+Do not change operation types or omit any requested changes to make the response shorter.
 
-Allowed operations: create_file, replace_file, replace_block, delete_file,
-manifest_add, manifest_update, manifest_remove, smali_replace_method, smali_insert_at_anchor.
-Output a JSON object with this schema:
-{{
-  "operations": [
-    {{
-      "relative_path": "path/to/file",
-      "operation": "one of the operation names below",
-      "expected_preimage_hash": "sha256 of original file content or null",
-      "match_content": "exact text to match for replace_block or null",
-      "new_content": "new content to write",
-      "class_descriptor": "Lcom/example/Class; for Smali ops or null",
-      "method_signature": "methodName(Params)ReturnType for Smali ops or null",
-      "anchor": "exact text to insert after for smali_insert_at_anchor or null",
-      "xml_element": "element tag for manifest ops or null",
-      "xml_attributes": {{}},
-      "affected_scope": "description of what this affects"
-    }}
-  ]
-}}"""
+Return compact JSON with a top-level operations array, following the supplied response schema.
+Each operation needs relative_path and operation. Include only fields needed by that operation:
+match_content/new_content for replace_block; new_content for create_file/replace_file;
+xml_element/new_content for manifest_add; xml_element/xml_attributes for manifest_update/remove;
+class_descriptor/method_signature for
+smali_replace_method, or anchor for smali_insert_at_anchor, along with new_content.
+Omit unused optional fields, hashes, commentary, markdown fences, and unchanged file contents.
+Escape quotes, backslashes and newlines inside JSON strings correctly."""
 
         prompt = self._prepare_prompt(
-            render, context, system, [change.relative_path for change in plan.file_changes]
+            render,
+            context,
+            system,
+            [change.relative_path for change in plan.file_changes],
+            response_schema=response_schema,
         )
-        response_text = self._call_model(prompt, system)
+        response_text = self._call_model(prompt, system, response_schema=response_schema)
         data = self._parse_json_response(response_text)
 
         raw_operations = data.get("operations")
