@@ -1,0 +1,279 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Review Plan - NOIR APK Modding</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "outline": "#8e9192",
+                        "on-tertiary-fixed": "#1b1b21",
+                        "on-error": "#690005",
+                        "on-secondary-fixed-variant": "#45464e",
+                        "primary-container": "#e2e2e2",
+                        "surface-container-low": "#1b1b1b",
+                        "surface-tint": "#c6c6c7",
+                        "tertiary-fixed": "#e3e1ea",
+                        "primary-fixed": "#e2e2e2",
+                        "error-container": "#93000a",
+                        "on-primary-fixed-variant": "#454747",
+                        "inverse-primary": "#5d5f5f",
+                        "surface": "#131313",
+                        "on-surface-variant": "#c4c7c8",
+                        "on-primary-container": "#636565",
+                        "outline-variant": "#444748",
+                        "primary": "#ffffff",
+                        "surface-container": "#1f1f1f",
+                        "on-tertiary": "#303037",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-surface": "#e2e2e2",
+                        "tertiary": "#ffffff",
+                        "surface-bright": "#393939",
+                        "background": "#131313",
+                        "error": "#ffb4ab",
+                        "on-secondary": "#2f3037",
+                        "on-background": "#e2e2e2",
+                        "tertiary-container": "#e3e1ea",
+                        "on-primary-fixed": "#1a1c1c",
+                        "surface-container-highest": "#353535",
+                        "secondary-fixed": "#e2e1eb",
+                        "on-tertiary-fixed-variant": "#46464d",
+                        "on-tertiary-container": "#64646b",
+                        "surface-dim": "#131313",
+                        "secondary": "#c6c6cf",
+                        "secondary-fixed-dim": "#c6c6cf",
+                        "inverse-surface": "#e2e2e2",
+                        "on-secondary-container": "#b4b4bd",
+                        "surface-container-high": "#2a2a2a",
+                        "surface-variant": "#353535",
+                        "on-error-container": "#ffdad6",
+                        "inverse-on-surface": "#303030",
+                        "secondary-container": "#45464e",
+                        "on-secondary-fixed": "#1a1b22",
+                        "tertiary-fixed-dim": "#c7c5ce",
+                        "on-primary": "#2f3131",
+                        "primary-fixed-dim": "#c6c6c7"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    spacing: {
+                        "container-max": "1440px",
+                        "gutter": "16px",
+                        "unit": "4px",
+                        "margin-desktop": "32px",
+                        "margin-mobile": "16px"
+                    },
+                    fontFamily: {
+                        "headline-md": ["Inter"],
+                        "code-sm": ["JetBrains Mono"],
+                        "headline-lg": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "code-lg": ["JetBrains Mono"],
+                        "body-sm": ["Inter"],
+                        "label-caps": ["JetBrains Mono"]
+                    },
+                    fontSize: {
+                        "headline-md": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "code-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "letterSpacing": "0em", "fontWeight": "400" }],
+                        "code-lg": ["16px", { "lineHeight": "24px", "letterSpacing": "0em", "fontWeight": "500" }],
+                        "body-sm": ["14px", { "lineHeight": "20px", "letterSpacing": "0em", "fontWeight": "400" }],
+                        "label-caps": ["10px", { "lineHeight": "12px", "letterSpacing": "0.1em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* High-fidelity glass panel styling */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        .glass-panel:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Checkbox/Toggle styling for Neo-Noir theme */
+        .toggle-switch-peer:checked ~ div {
+            background-color: rgba(255, 255, 255, 0.9);
+        }
+        .toggle-switch-peer:checked ~ div::after {
+            background-color: #000000;
+            border-color: #000000;
+        }
+    </style>
+</head>
+<body class="min-h-screen font-body-lg text-body-lg antialiased overflow-x-hidden relative selection:bg-white/20 selection:text-white">
+<!-- Background Image / Grid overlay -->
+<div class="fixed inset-0 z-[-1] pointer-events-none">
+<img alt="Background schematic" class="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-screen grayscale" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBDFsKQkt6q-byKJMK1_86ZeT4GGlhG5li4P-06dzwt0ofNTyjP_cr0ZjijtkQLpC2c2sN42gMdjTnVOWu7MPyZnuxslxtK3jBrRu2c8LNDXHIq13m2Teg9XEp4xNouLaPjObBHwBCKUHFpxIAxk_jM-96luiXPq9bLL0D9ZUTBoVOew5Gu-S7b-kKLLa2N4BimXN4Gmg_uL-TNq9C3_p8ldA6KDxlCnu_ghsNFG-1t6PTi6yUVu6Ptxjjl0dlXab_V4Q" style="opacity: 0.1;">
+<div class="absolute inset-0 bg-gradient-to-b from-background/40 via-background/80 to-background z-0"></div>
+</div>
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full h-[83px] border-b border-white/10 bg-background/50 backdrop-blur-2xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] z-50 flex items-center justify-between px-6 md:px-margin-desktop">
+<div class="flex items-center gap-4 hover:bg-white/5 transition-all duration-300 p-2 rounded-DEFAULT cursor-pointer">
+<span class="material-symbols-outlined text-white">terminal</span>
+<span class="font-label-caps text-label-caps tracking-widest text-white">MOD_CORE_V1.0</span>
+</div>
+<div class="text-headline-md font-headline-md text-white absolute left-1/2 transform -translate-x-1/2 uppercase tracking-wide">
+            Review Plan
+        </div>
+<div class="flex items-center gap-4 hover:bg-white/5 transition-all duration-300 p-2 rounded-DEFAULT cursor-pointer">
+<span class="material-symbols-outlined text-white/50 hover:text-white transition-colors">settings_input_component</span>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="pt-[110px] pb-24 px-4 md:px-margin-desktop max-w-3xl mx-auto fade-in">
+<!-- Target Info -->
+<div class="mb-10 p-6 glass-panel rounded-DEFAULT relative overflow-hidden group">
+<div class="absolute top-0 left-0 w-[3px] h-full bg-white/40 group-hover:bg-white transition-colors"></div>
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 md:gap-4 ml-2">
+<div>
+<h2 class="font-code-lg text-code-lg text-white mb-2 tracking-tight">TARGET_APK: <span class="font-bold">com.example.app_v2.4.apk</span></h2>
+<p class="font-body-sm text-body-sm text-white/60 flex items-center gap-2 break-all">
+<span class="material-symbols-outlined text-[16px] text-white/40">fingerprint</span> 
+                        SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+                    </p>
+</div>
+<div class="text-left md:text-right">
+<div class="font-label-caps text-label-caps text-white/50 tracking-widest mb-2">STATUS</div>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]"></span>
+<span class="font-code-sm text-code-sm text-white uppercase tracking-wider">Analysis_Complete</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Modification List -->
+<h3 class="font-headline-md text-headline-md mb-6 border-b border-white/10 pb-4 text-white uppercase tracking-wide">Proposed Modifications</h3>
+<div class="flex flex-col gap-4 mb-12">
+<!-- Mod Item 1 -->
+<div class="p-6 glass-panel rounded-DEFAULT transition-all flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-white">gpp_bad</span>
+<h4 class="font-code-lg text-code-lg text-white">Bypass License Check</h4>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer toggle-switch-peer" type="checkbox" value="">
+<div class="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[3px] after:bg-white/60 after:border-white/60 after:border after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+</label>
+</div>
+<p class="font-body-sm text-body-sm text-white/60 mb-5 leading-relaxed">Patches `LicenseValidator.smali` to always return true. Nullifies Google Play verification requests.</p>
+</div>
+<div class="flex gap-2 flex-wrap">
+<span class="font-code-sm text-code-sm px-3 py-1 bg-white/5 border border-white/10 rounded-DEFAULT text-white/70">.smali patch</span>
+<span class="font-code-sm text-code-sm px-3 py-1 bg-white/5 border border-white/10 rounded-DEFAULT text-white/70">Risk: Low</span>
+</div>
+</div>
+<!-- Mod Item 2 -->
+<div class="p-6 glass-panel rounded-DEFAULT transition-all flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-white">visibility_off</span>
+<h4 class="font-code-lg text-code-lg text-white">Remove Analytics</h4>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer toggle-switch-peer" type="checkbox" value="">
+<div class="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[3px] after:bg-white/60 after:border-white/60 after:border after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+</label>
+</div>
+<p class="font-body-sm text-body-sm text-white/60 mb-5 leading-relaxed">Strips Firebase and Crashlytics SDK initializations from `Application.onCreate`.</p>
+</div>
+<div class="flex gap-2 flex-wrap">
+<span class="font-code-sm text-code-sm px-3 py-1 bg-white/5 border border-white/10 rounded-DEFAULT text-white/70">Method Stubbing</span>
+<span class="font-code-sm text-code-sm px-3 py-1 bg-white/5 border border-white/10 rounded-DEFAULT text-white/70">Manifest Edit</span>
+</div>
+</div>
+<!-- Mod Item 3 -->
+<div class="p-6 glass-panel rounded-DEFAULT transition-all flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-white">library_add</span>
+<h4 class="font-code-lg text-code-lg text-white">Inject Custom Library</h4>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer toggle-switch-peer" type="checkbox" value="">
+<div class="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[3px] after:bg-white/60 after:border-white/60 after:border after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+</label>
+</div>
+<p class="font-body-sm text-body-sm text-white/60 mb-4 leading-relaxed">Injects `libnoir_hook.so` into the APK structure for advanced runtime manipulation.</p>
+<!-- Nested Input for Path -->
+<div class="mt-2 mb-6">
+<div class="font-label-caps text-label-caps text-white/50 mb-2 tracking-widest">LIBRARY PATH</div>
+<input class="w-full bg-white/5 border border-white/10 text-code-sm font-code-sm text-white p-3 focus:outline-none focus:border-white/30 focus:bg-white/10 transition-colors rounded-DEFAULT" readonly="" type="text" value="/modules/core/libnoir_hook.so">
+</div>
+</div>
+<div class="flex gap-2 flex-wrap mt-auto">
+<span class="font-code-sm text-code-sm px-3 py-1 bg-white/5 border border-white/10 rounded-DEFAULT text-white/70">.so Injection</span>
+<span class="font-code-sm text-code-sm px-3 py-1 bg-white/10 border border-white/30 rounded-DEFAULT text-white">Risk: High</span>
+</div>
+</div>
+<!-- Mod Item 4 -->
+<div class="p-6 glass-panel rounded-DEFAULT transition-all flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-white">key</span>
+<h4 class="font-code-lg text-code-lg text-white">Resign APK</h4>
+</div>
+<label class="relative inline-flex items-center cursor-pointer opacity-50">
+<input checked="" class="sr-only peer toggle-switch-peer" disabled="" type="checkbox" value="">
+<div class="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[3px] after:bg-white/60 after:border-white/60 after:border after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+</label>
+</div>
+<p class="font-body-sm text-body-sm text-white/60 mb-5 leading-relaxed">Mandatory step. Signs the modified APK with the test key to allow installation.</p>
+</div>
+<div class="flex gap-2 flex-wrap">
+<span class="font-code-sm text-code-sm px-3 py-1 bg-white/5 border border-white/10 rounded-DEFAULT text-white/70">V1/V2 Signature</span>
+<span class="font-code-sm text-code-sm px-3 py-1 border border-white/40 text-white rounded-DEFAULT bg-white/5">Required</span>
+</div>
+</div>
+</div>
+<!-- Action Area -->
+<div class="flex flex-col gap-4 mt-12 pt-8 border-t border-white/10 pb-8">
+<button class="w-full px-6 py-4 font-code-lg text-code-lg text-white bg-transparent border border-white/20 hover:border-white/50 hover:bg-white/5 transition-all rounded-DEFAULT flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[20px]">close</span> CANCEL
+            </button>
+<button class="w-full px-8 py-4 font-code-lg text-code-lg bg-white text-black border-none rounded-DEFAULT transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.15)] hover:shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:bg-white/90">
+<span class="material-symbols-outlined text-[20px]">play_arrow</span> CONFIRM &amp; APPLY
+            </button>
+</div>
+</main>
+
+
+</body></html>

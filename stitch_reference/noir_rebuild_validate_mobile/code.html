@@ -1,0 +1,292 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Rebuild &amp; Validate</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "outline": "#8e9192",
+                    "on-tertiary-fixed": "#1b1b21",
+                    "on-error": "#690005",
+                    "on-secondary-fixed-variant": "#45464e",
+                    "primary-container": "#e2e2e2",
+                    "surface-container-low": "#1b1b1b",
+                    "surface-tint": "#c6c6c7",
+                    "tertiary-fixed": "#e3e1ea",
+                    "primary-fixed": "#e2e2e2",
+                    "error-container": "#93000a",
+                    "on-primary-fixed-variant": "#454747",
+                    "inverse-primary": "#5d5f5f",
+                    "surface": "#131313",
+                    "on-surface-variant": "#c4c7c8",
+                    "on-primary-container": "#636565",
+                    "outline-variant": "#444748",
+                    "primary": "#ffffff",
+                    "surface-container": "#1f1f1f",
+                    "on-tertiary": "#303037",
+                    "surface-container-lowest": "#0e0e0e",
+                    "on-surface": "#e2e2e2",
+                    "tertiary": "#ffffff",
+                    "surface-bright": "#393939",
+                    "background": "#131313",
+                    "error": "#ffb4ab",
+                    "on-secondary": "#2f3037",
+                    "on-background": "#e2e2e2",
+                    "tertiary-container": "#e3e1ea",
+                    "on-primary-fixed": "#1a1c1c",
+                    "surface-container-highest": "#353535",
+                    "secondary-fixed": "#e2e1eb",
+                    "on-tertiary-fixed-variant": "#46464d",
+                    "on-tertiary-container": "#64646b",
+                    "surface-dim": "#131313",
+                    "secondary": "#c6c6cf",
+                    "secondary-fixed-dim": "#c6c6cf",
+                    "inverse-surface": "#e2e2e2",
+                    "on-secondary-container": "#b4b4bd",
+                    "surface-container-high": "#2a2a2a",
+                    "surface-variant": "#353535",
+                    "on-error-container": "#ffdad6",
+                    "inverse-on-surface": "#303030",
+                    "secondary-container": "#45464e",
+                    "on-secondary-fixed": "#1a1b22",
+                    "tertiary-fixed-dim": "#c7c5ce",
+                    "on-primary": "#2f3131",
+                    "primary-fixed-dim": "#c6c6c7"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "container-max": "1440px",
+                    "gutter": "16px",
+                    "unit": "4px",
+                    "margin-desktop": "32px",
+                    "margin-mobile": "16px"
+            },
+            "fontFamily": {
+                    "headline-md": [
+                            "Inter"
+                    ],
+                    "code-sm": [
+                            "JetBrains Mono"
+                    ],
+                    "headline-lg": [
+                            "Inter"
+                    ],
+                    "body-lg": [
+                            "Inter"
+                    ],
+                    "code-lg": [
+                            "JetBrains Mono"
+                    ],
+                    "body-sm": [
+                            "Inter"
+                    ],
+                    "label-caps": [
+                            "JetBrains Mono"
+                    ]
+            },
+            "fontSize": {
+                    "headline-md": [
+                            "24px",
+                            {
+                                    "lineHeight": "32px",
+                                    "letterSpacing": "-0.01em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "code-sm": [
+                            "12px",
+                            {
+                                    "lineHeight": "16px",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "headline-lg": [
+                            "32px",
+                            {
+                                    "lineHeight": "40px",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "700"
+                            }
+                    ],
+                    "body-lg": [
+                            "16px",
+                            {
+                                    "lineHeight": "24px",
+                                    "letterSpacing": "0em",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "code-lg": [
+                            "16px",
+                            {
+                                    "lineHeight": "24px",
+                                    "letterSpacing": "0em",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "body-sm": [
+                            "14px",
+                            {
+                                    "lineHeight": "20px",
+                                    "letterSpacing": "0em",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "label-caps": [
+                            "10px",
+                            {
+                                    "lineHeight": "12px",
+                                    "letterSpacing": "0.1em",
+                                    "fontWeight": "700"
+                            }
+                    ]
+            }
+    },
+        },
+      }
+    </script>
+<style>
+        .fade-in {
+            animation: fadeIn 0.8s ease-in-out forwards;
+            opacity: 0;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .spin-slow {
+            animation: spin 8s linear infinite;
+        }
+        .spin-reverse-slow {
+            animation: spin-reverse 12s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes spin-reverse {
+            from { transform: rotate(360deg); }
+            to { transform: rotate(0deg); }
+        }
+        .log-stream::-webkit-scrollbar {
+            width: 4px;
+        }
+        .log-stream::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .log-stream::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface antialiased min-h-screen flex flex-col relative overflow-hidden">
+<!-- Background Image -->
+<div class="absolute inset-0 z-0 pointer-events-none">
+<img alt="" class="w-full h-full object-cover grayscale mix-blend-screen opacity-10" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB2tYdhJTzioXV1ZA4jaVqSRLF6qf9suoMoYXBByJWuNDvFyGU6YZjLNEKepHKn5qAeOLzn4FPWiUOeyL9HCZkYGWZ9zmJeb1oSgRSSYJ3VqlzR-X1BJDU-JJhGNhSSMaAkf_wnt8riCXy72yFPaFy4f8e-pwV0YNB_QxOOBuBTA5PKQiipyryrKcO9xq5xyVa5DWmVGB28dGegKdEAa4Op5aGsAlq2AgyW1aOaa4aBtwd2KN8f62xgG8Vfawcw6ZFe6w" style="opacity: 0.1;">
+</div>
+<div class="absolute inset-0 z-0 bg-gradient-to-b from-transparent via-background/80 to-background pointer-events-none" data-stitch-orig-opacity="0.12"></div>
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full h-[83px] border-b border-white/10 bg-surface/10 dark:bg-surface/10 backdrop-blur-md shadow-[0_0_15px_rgba(255,255,255,0.05)] flex items-center justify-between px-margin-desktop z-50">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-primary dark:text-primary" style="font-variation-settings: 'FILL' 0;">terminal</span>
+<span class="font-label-caps text-label-caps tracking-widest text-primary dark:text-primary">MOD_CORE_V1.0</span>
+</div>
+<div class="flex items-center gap-6 hidden md:flex">
+<!-- Navigation is suppressed for task-focused view -->
+</div>
+<button class="hover:bg-white/5 hover:backdrop-blur-2xl transition-all duration-300 p-2 rounded flex items-center justify-center opacity-80 hover:opacity-100">
+<span class="material-symbols-outlined text-primary dark:text-primary" style="font-variation-settings: 'FILL' 0;">settings_input_component</span>
+</button>
+</header>
+<!-- Main Canvas -->
+<main class="flex-1 w-full max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-[100px] pb-24 z-10 relative flex flex-col items-center justify-center fade-in">
+<div class="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-gutter md:gap-8">
+<!-- HUD Progress Panel -->
+<div class="bg-white/5 backdrop-blur-md border border-white/10 rounded-lg p-8 flex flex-col items-center justify-center relative min-h-[400px]">
+<div class="absolute top-4 left-4 font-label-caps text-label-caps text-on-surface-variant/70 tracking-widest">
+                    [ SYS.BUILD_STATUS ]
+                </div>
+<div class="relative w-64 h-64 flex items-center justify-center mb-8">
+<!-- Outer Ring -->
+<svg class="absolute inset-0 w-full h-full spin-slow text-outline-variant" fill="none" stroke="currentColor" stroke-dasharray="4 8" stroke-width="1" viewBox="0 0 100 100">
+<circle cx="50" cy="50" r="48"></circle>
+</svg>
+<!-- Middle Ring -->
+<svg class="absolute inset-4 w-[calc(100%-2rem)] h-[calc(100%-2rem)] spin-reverse-slow text-primary/30" fill="none" stroke="currentColor" stroke-dasharray="20 10 5 10" stroke-width="2" viewBox="0 0 100 100">
+<circle cx="50" cy="50" r="46"></circle>
+</svg>
+<!-- Inner Solid Ring (Progress) -->
+<svg class="absolute inset-8 w-[calc(100%-4rem)] h-[calc(100%-4rem)] text-primary" fill="none" stroke="currentColor" stroke-width="4" viewBox="0 0 100 100">
+<circle cx="50" cy="50" r="44" stroke="rgba(255,255,255,0.1)"></circle>
+<circle class="transition-all duration-1000 ease-out" cx="50" cy="50" r="44" stroke-dasharray="276" stroke-dashoffset="69" stroke-linecap="round"></circle>
+</svg>
+<div class="text-center z-10 flex flex-col items-center">
+<span class="font-headline-lg text-headline-lg text-primary" id="progress-text">75%</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant mt-2">COMPILING</span>
+</div>
+</div>
+<div class="w-full">
+<p class="font-body-sm text-body-sm text-center text-on-surface-variant/80">Rebuilding APK...</p>
+</div>
+</div>
+<!-- Terminal Log Panel -->
+<div class="bg-white/5 backdrop-blur-md border border-white/10 rounded-lg p-6 flex flex-col relative h-[400px]">
+<div class="flex justify-between items-center mb-4 border-b border-white/5 pb-2">
+<span class="font-label-caps text-label-caps text-on-surface-variant/70 tracking-widest">
+                        [ SYSTEM_LOG ]
+                    </span>
+<div class="flex gap-1">
+<div class="w-2 h-2 rounded-full bg-outline-variant"></div>
+<div class="w-2 h-2 rounded-full bg-outline-variant"></div>
+<div class="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_white]"></div>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto log-stream pr-2" id="log-container">
+<div class="font-code-sm text-code-sm text-on-surface-variant/60 mb-1">&gt; Initializing build environment...</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant/60 mb-1">&gt; Reading manifest... [OK]</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant/60 mb-1">&gt; Decompiling resources...</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant/60 mb-1">&gt; Smali compilation started...</div>
+<div class="font-code-sm text-code-sm text-primary/80 mb-1">&gt; [I] smali/com/noir/core/Injector.smali compiled.</div>
+<div class="font-code-sm text-code-sm text-primary/80 mb-1">&gt; [I] smali/com/noir/utils/Hook.smali compiled.</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant/60 mb-1">&gt; Crunching PNG files...</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant/60 mb-1">&gt; Rebuilding resources.arsc...</div>
+<div class="font-code-sm text-code-sm text-primary mb-1 animate-pulse">&gt; Building APK file...</div>
+</div>
+</div>
+</div>
+<!-- Action Area -->
+<div class="w-full max-w-3xl mt-8 flex justify-end">
+<button class="bg-transparent border border-white/30 text-primary px-8 py-3 rounded hover:border-white hover:bg-white/5 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] transition-all duration-300 font-code-lg text-code-lg disabled:opacity-30 disabled:cursor-not-allowed uppercase tracking-wider flex items-center gap-2 group" disabled="">
+<span class="material-symbols-outlined text-lg group-hover:animate-bounce">vpn_key</span>
+                Sign &amp; Export
+            </button>
+</div>
+</main>
+<!-- BottomNavBar (Hidden on desktop, present for consistency in structure but suppressed for this flow) -->
+<!-- Nav is suppressed as this is a task-focused screen -->
+<script>
+        // Simple script to auto-scroll log for effect
+        document.addEventListener('DOMContentLoaded', () => {
+            const logContainer = document.getElementById('log-container');
+            if(logContainer) {
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+        });
+    </script>
+
+
+</body></html>

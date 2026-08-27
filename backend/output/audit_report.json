@@ -1,0 +1,3659 @@
+{
+  "report_version": "1.0",
+  "generated_at": "2026-08-27T20:02:41.356661+00:00",
+  "project": {
+    "id": "54ba1f8ea9de4896",
+    "status": "signed",
+    "original_filename": "vpn.apk",
+    "original_size": 61520316,
+    "original_sha256": "07582c997a07b76b8691ad1212db5e0e62ff7d4902ca6d277ce5fdeabe044bc5",
+    "authorization_acknowledged": true,
+    "workspace_revision": 1,
+    "created_at": "2026-08-27T19:15:50.351320"
+  },
+  "input": {
+    "package_name": "ch.protonvpn.android",
+    "version_name": "5.19.78.0",
+    "version_code": "605197800",
+    "min_sdk": 26,
+    "target_sdk": 36,
+    "permissions": [
+      "android.permission.INTERNET",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.FOREGROUND_SERVICE",
+      "android.permission.QUERY_ALL_PACKAGES",
+      "android.permission.WAKE_LOCK",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED",
+      "android.permission.USE_BIOMETRIC",
+      "android.permission.USE_FINGERPRINT",
+      "ch.protonvpn.android.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+      "android.permission.CAMERA"
+    ],
+    "components_count": 114,
+    "smali_classes_count": 34487
+  },
+  "plans": [
+    {
+      "plan_id": "1460510a77354288",
+      "user_request": "Change the application's user-visible display name and launcher label to exactly: a1b2c3\n\nThis is a label-only change, not a package rename.\n\nInspect AndroidManifest.xml and the referenced string resources. Account for any\nlabel override on the launcher activity or activity-alias so the launcher and\napplication labels both display a1b2c3. Prefer the smallest targeted manifest or\nstring-resource edit. Ensure a localized string does not override the new label.\n\nPreserve the package/application ID, component names, app icon, version metadata,\npermissions, VPN services and configuration, network destinations, certificates\nbundled as app resources, and all other behavior. Do not modify Smali, add code,\nadd permissions, or change VPN functionality. Do not rename unrelated UI text.\n\nList the exact affected files in the plan, explain the label changes, and include\nvalidation steps for checking the final application and launcher labels. The APK\nwill be signed separately using the user's local test signing profile.\n",
+      "provider": "gemini",
+      "model": "gemini-3.6-flash",
+      "intended_outcome": "Change the application's user-visible display name and launcher labels for all entry points to exactly 'a1b2c3' while preserving existing functionality, permissions, package name, icons, and VPN features.",
+      "file_changes": [
+        {
+          "relative_path": "AndroidManifest.xml",
+          "operation": "replace_block",
+          "description": "Update application label and launcher activity-alias labels to hardcoded 'a1b2c3' to prevent localized resource overrides."
+        },
+        {
+          "relative_path": "res/values/strings.xml",
+          "operation": "replace_block",
+          "description": "Update the default app_name string resource value to 'a1b2c3'."
+        }
+      ],
+      "permission_changes": [],
+      "component_changes": [
+        "No component added, removed, or renamed; updated display labels on application and launcher activity aliases."
+      ],
+      "network_destinations": [],
+      "risks": [
+        "Minimal risk; change is restricted to label attributes only."
+      ],
+      "plan_hash": "da8b7e07bb806fde001e238be7a894b31af6e8ec12131bcfd431bd7d22b266b9"
+    }
+  ],
+  "patches": [
+    {
+      "patch_id": "38347992efe144b6",
+      "plan_id": "1460510a77354288",
+      "provenance": "ai_generated",
+      "operations_count": 8,
+      "patch_hash": "64abd14b4d99456ea4acc7f2a662de0203d4250da141e8e73a14eed45ec5b25f"
+    }
+  ],
+  "approvals": [
+    {
+      "approval_id": "e7b6dee5f6674de6",
+      "scope": "signing",
+      "target_id": "5a0a53e7060147a3",
+      "target_hash": "b06f679d0a9785ae012aa086b34c4b9c2451a7f7837fe80ee19de6541c6345e9",
+      "status": "approved",
+      "actor": "local_cli",
+      "timestamp": "2026-08-27T20:02:37.972113"
+    },
+    {
+      "approval_id": "f4db67f7ff9943ab",
+      "scope": "patch",
+      "target_id": "38347992efe144b6",
+      "target_hash": "64abd14b4d99456ea4acc7f2a662de0203d4250da141e8e73a14eed45ec5b25f",
+      "status": "approved",
+      "actor": "local_cli",
+      "timestamp": "2026-08-27T19:57:31.614534"
+    },
+    {
+      "approval_id": "682eefe9150b4050",
+      "scope": "plan",
+      "target_id": "1460510a77354288",
+      "target_hash": "da8b7e07bb806fde001e238be7a894b31af6e8ec12131bcfd431bd7d22b266b9",
+      "status": "approved",
+      "actor": "local_cli",
+      "timestamp": "2026-08-27T19:29:32.370303"
+    }
+  ],
+  "validation": {
+    "passed": true,
+    "error_count": 0,
+    "warning_count": 0,
+    "findings": [
+      {
+        "check_name": "filesystem_safety",
+        "severity": "info",
+        "message": "Filesystem safety checks passed",
+        "file_path": null,
+        "line_number": null,
+        "evidence": null
+      },
+      {
+        "check_name": "xml_resources",
+        "severity": "info",
+        "message": "Checked 3399 XML resource files",
+        "file_path": null,
+        "line_number": null,
+        "evidence": null
+      },
+      {
+        "check_name": "manifest_checks",
+        "severity": "info",
+        "message": "Manifest validation completed",
+        "file_path": null,
+        "line_number": null,
+        "evidence": null
+      },
+      {
+        "check_name": "smali_structure",
+        "severity": "info",
+        "message": "Checked 36874 Smali classes",
+        "file_path": null,
+        "line_number": null,
+        "evidence": null
+      }
+    ]
+  },
+  "builds": [
+    {
+      "build_id": "5a0a53e7060147a3",
+      "success": true,
+      "error": null,
+      "apktool_version": "3.0.3",
+      "build_tools_version": "36.0.0",
+      "unsigned_hash": "9186929174f8fb09af746f1c1090fa6e64dafa2a42ea6db41754e62a43b01f54",
+      "aligned_hash": "f4dfae43ba63e4b9a3795bf68aa9a374c087717af51d3f10d2a50b8b17d9f1bf",
+      "signed_hash": "c0b0de47486c025acb56a8c533f828c16dac7cbf4763a54725296f16dd431a04"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "8239fec982f240f0",
+      "stage": "validating_input",
+      "severity": "info",
+      "message": "Validating APK input",
+      "timestamp": "2026-08-27T19:15:50.358326"
+    },
+    {
+      "event_id": "8d379dc0413f4adb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Jf.xml' vs 'res/jf.xml'",
+      "timestamp": "2026-08-27T19:15:50.379993"
+    },
+    {
+      "event_id": "8ac49496c2a349a4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hH.xml' vs 'res/HH.xml'",
+      "timestamp": "2026-08-27T19:15:50.380606"
+    },
+    {
+      "event_id": "745985a7f5344840",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hP.xml' vs 'res/Hp.xml'",
+      "timestamp": "2026-08-27T19:15:50.380932"
+    },
+    {
+      "event_id": "9bfd676fe14b4c2b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nx.xml' vs 'res/nX.xml'",
+      "timestamp": "2026-08-27T19:15:50.381215"
+    },
+    {
+      "event_id": "9b6454d914a94e02",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dq.xml' vs 'res/DQ.xml'",
+      "timestamp": "2026-08-27T19:15:50.381446"
+    },
+    {
+      "event_id": "10f8692b22a8436b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/RF.xml' vs 'res/rF.xml'",
+      "timestamp": "2026-08-27T19:15:50.381664"
+    },
+    {
+      "event_id": "f8f98847e1f44909",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/BZ.xml' vs 'res/Bz.xml'",
+      "timestamp": "2026-08-27T19:15:50.381897"
+    },
+    {
+      "event_id": "6847cde52c6e4052",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/pF.xml' vs 'res/pf.xml'",
+      "timestamp": "2026-08-27T19:15:50.382103"
+    },
+    {
+      "event_id": "a8c0bc2e1ca14dcf",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/DT.xml' vs 'res/Dt.xml'",
+      "timestamp": "2026-08-27T19:15:50.382316"
+    },
+    {
+      "event_id": "56ab34102fcb4e59",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/wD.xml' vs 'res/Wd.xml'",
+      "timestamp": "2026-08-27T19:15:50.382524"
+    },
+    {
+      "event_id": "5678461b52a84a8a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ny.xml' vs 'res/ny.xml'",
+      "timestamp": "2026-08-27T19:15:50.382735"
+    },
+    {
+      "event_id": "aa380bfd42e24df4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Do.xml' vs 'res/dO.xml'",
+      "timestamp": "2026-08-27T19:15:50.382926"
+    },
+    {
+      "event_id": "4217241edfb54708",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Xs.xml' vs 'res/xs.xml'",
+      "timestamp": "2026-08-27T19:15:50.383123"
+    },
+    {
+      "event_id": "797a630e2458455e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/c7.xml' vs 'res/C7.xml'",
+      "timestamp": "2026-08-27T19:15:50.383313"
+    },
+    {
+      "event_id": "def3c3a334304d30",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cp.xml' vs 'res/CP.xml'",
+      "timestamp": "2026-08-27T19:15:50.383516"
+    },
+    {
+      "event_id": "ba4dc0214fa546eb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cL.xml' vs 'res/CL.xml'",
+      "timestamp": "2026-08-27T19:15:50.383706"
+    },
+    {
+      "event_id": "cbe6fbb7f46a458a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/mF.xml' vs 'res/mf.xml'",
+      "timestamp": "2026-08-27T19:15:50.383891"
+    },
+    {
+      "event_id": "c9d0b93fb628480e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/zx.xml' vs 'res/Zx.xml'",
+      "timestamp": "2026-08-27T19:15:50.384079"
+    },
+    {
+      "event_id": "3e3718c8bc60476c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/rx.xml' vs 'res/Rx.xml'",
+      "timestamp": "2026-08-27T19:15:50.384273"
+    },
+    {
+      "event_id": "a8f919a7420746d7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/or.xml' vs 'res/Or.xml'",
+      "timestamp": "2026-08-27T19:15:50.384455"
+    },
+    {
+      "event_id": "fe650ed045394149",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/sO.xml' vs 'res/So.xml'",
+      "timestamp": "2026-08-27T19:15:50.384634"
+    },
+    {
+      "event_id": "2086c887a0df4970",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/OP.xml' vs 'res/op.xml'",
+      "timestamp": "2026-08-27T19:15:50.384822"
+    },
+    {
+      "event_id": "35e9b9d4ba6e4959",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/X3.xml' vs 'res/x3.xml'",
+      "timestamp": "2026-08-27T19:15:50.385022"
+    },
+    {
+      "event_id": "4bec57e6fc5442f4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/sJ.xml' vs 'res/Sj.xml'",
+      "timestamp": "2026-08-27T19:15:50.385204"
+    },
+    {
+      "event_id": "b5e491305cba4f2c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/MA.xml' vs 'res/Ma.xml'",
+      "timestamp": "2026-08-27T19:15:50.385417"
+    },
+    {
+      "event_id": "6c263ee2a3ee467b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/eK1.xml' vs 'res/EK1.xml'",
+      "timestamp": "2026-08-27T19:15:50.385616"
+    },
+    {
+      "event_id": "e9226430fb454513",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xd.xml' vs 'res/Xd.xml'",
+      "timestamp": "2026-08-27T19:15:50.385799"
+    },
+    {
+      "event_id": "e0ec284566c84329",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/N9.xml' vs 'res/n9.xml'",
+      "timestamp": "2026-08-27T19:15:50.385978"
+    },
+    {
+      "event_id": "3740063c88514e3f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/RM.xml' vs 'res/rm.xml'",
+      "timestamp": "2026-08-27T19:15:50.386170"
+    },
+    {
+      "event_id": "9011a246b0cf411b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/IO.xml' vs 'res/iO.xml'",
+      "timestamp": "2026-08-27T19:15:50.386374"
+    },
+    {
+      "event_id": "a7290f0f1eea4b5f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/jm.xml' vs 'res/JM.xml'",
+      "timestamp": "2026-08-27T19:15:50.386554"
+    },
+    {
+      "event_id": "380b74198d324e9a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/G3.xml' vs 'res/g3.xml'",
+      "timestamp": "2026-08-27T19:15:50.386731"
+    },
+    {
+      "event_id": "74aee30739f74d10",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Vf.webp' vs 'res/VF.webp'",
+      "timestamp": "2026-08-27T19:15:50.386908"
+    },
+    {
+      "event_id": "3a84610a8cb64735",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/by.xml' vs 'res/BY.xml'",
+      "timestamp": "2026-08-27T19:15:50.387099"
+    },
+    {
+      "event_id": "c885961c014e45ff",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/TO.xml' vs 'res/To.xml'",
+      "timestamp": "2026-08-27T19:15:50.387294"
+    },
+    {
+      "event_id": "83c4082a81704d74",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/UP.xml' vs 'res/Up.xml'",
+      "timestamp": "2026-08-27T19:15:50.387479"
+    },
+    {
+      "event_id": "351c1942ef36423b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Fb.xml' vs 'res/fB.xml'",
+      "timestamp": "2026-08-27T19:15:50.387664"
+    },
+    {
+      "event_id": "cde716870de04502",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/_B.xml' vs 'res/_b.xml'",
+      "timestamp": "2026-08-27T19:15:50.387865"
+    },
+    {
+      "event_id": "209d16349b984383",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/RX.xml' vs 'res/rx.xml'",
+      "timestamp": "2026-08-27T19:15:50.388051"
+    },
+    {
+      "event_id": "6a453676c84f48a0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/bx.xml' vs 'res/bX.xml'",
+      "timestamp": "2026-08-27T19:15:50.388229"
+    },
+    {
+      "event_id": "e0f6b958788c4398",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/KT.xml' vs 'res/Kt.xml'",
+      "timestamp": "2026-08-27T19:15:50.388405"
+    },
+    {
+      "event_id": "4963652f3a1a46e5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/mk.xml' vs 'res/MK.xml'",
+      "timestamp": "2026-08-27T19:15:50.388628"
+    },
+    {
+      "event_id": "648b77a4e08141bb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/9k.xml' vs 'res/9K.xml'",
+      "timestamp": "2026-08-27T19:15:50.388881"
+    },
+    {
+      "event_id": "f555da90935644c7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/GO.xml' vs 'res/go.xml'",
+      "timestamp": "2026-08-27T19:15:50.389067"
+    },
+    {
+      "event_id": "cf14da83e41a4aa0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ku.xml' vs 'res/kU.xml'",
+      "timestamp": "2026-08-27T19:15:50.389253"
+    },
+    {
+      "event_id": "092d55d914864ffe",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/3T.xml' vs 'res/3t.xml'",
+      "timestamp": "2026-08-27T19:15:50.389444"
+    },
+    {
+      "event_id": "7d1e41a9591b4195",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/US.xml' vs 'res/uS.xml'",
+      "timestamp": "2026-08-27T19:15:50.389638"
+    },
+    {
+      "event_id": "2a261b91491d4e13",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/2c1.xml' vs 'res/2C1.xml'",
+      "timestamp": "2026-08-27T19:15:50.389825"
+    },
+    {
+      "event_id": "4c15b503c49044bd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/4i.xml' vs 'res/4I.xml'",
+      "timestamp": "2026-08-27T19:15:50.390523"
+    },
+    {
+      "event_id": "2ff5396477164305",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/OW.xml' vs 'res/ow.xml'",
+      "timestamp": "2026-08-27T19:15:50.390769"
+    },
+    {
+      "event_id": "9ed6db06ecf342e6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/UG.xml' vs 'res/uG.xml'",
+      "timestamp": "2026-08-27T19:15:50.390968"
+    },
+    {
+      "event_id": "1bb3032d2b9140ba",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/pV.xml' vs 'res/PV.xml'",
+      "timestamp": "2026-08-27T19:15:50.391169"
+    },
+    {
+      "event_id": "02d3c1a0068e4a21",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vw.webp' vs 'res/VW.webp'",
+      "timestamp": "2026-08-27T19:15:50.391376"
+    },
+    {
+      "event_id": "d78fffd5b29247c7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/HD.xml' vs 'res/Hd.xml'",
+      "timestamp": "2026-08-27T19:15:50.391566"
+    },
+    {
+      "event_id": "9274f9e7e61b4fc8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/OH.xml' vs 'res/oh.xml'",
+      "timestamp": "2026-08-27T19:15:50.391755"
+    },
+    {
+      "event_id": "fbfe498d01de462a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tF.xml' vs 'res/TF.xml'",
+      "timestamp": "2026-08-27T19:15:50.391955"
+    },
+    {
+      "event_id": "245b5f77d54d4dcd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/IX1.xml' vs 'res/ix1.xml'",
+      "timestamp": "2026-08-27T19:15:50.392151"
+    },
+    {
+      "event_id": "f84bb2cab1ef4308",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/MB.xml' vs 'res/Mb.xml'",
+      "timestamp": "2026-08-27T19:15:50.392339"
+    },
+    {
+      "event_id": "3e5907fcf18e4325",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/wS1.xml' vs 'res/Ws1.xml'",
+      "timestamp": "2026-08-27T19:15:50.392531"
+    },
+    {
+      "event_id": "5affe1f311ac41bf",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/2a.xml' vs 'res/2A.xml'",
+      "timestamp": "2026-08-27T19:15:50.392721"
+    },
+    {
+      "event_id": "ba8eb16f39b048d4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/7S1.xml' vs 'res/7s1.xml'",
+      "timestamp": "2026-08-27T19:15:50.393080"
+    },
+    {
+      "event_id": "409ce28e0fcf4203",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/IW.xml' vs 'res/Iw.xml'",
+      "timestamp": "2026-08-27T19:15:50.393268"
+    },
+    {
+      "event_id": "0910da9eac0742ee",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Xk.xml' vs 'res/xk.xml'",
+      "timestamp": "2026-08-27T19:15:50.393458"
+    },
+    {
+      "event_id": "7adebfccc93546f9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/In.xml' vs 'res/in.xml'",
+      "timestamp": "2026-08-27T19:15:50.393647"
+    },
+    {
+      "event_id": "a4a84e4feb5b4030",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Xy.xml' vs 'res/xy.xml'",
+      "timestamp": "2026-08-27T19:15:50.393835"
+    },
+    {
+      "event_id": "9da9ed36fe0c4dde",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Bx.xml' vs 'res/bx.xml'",
+      "timestamp": "2026-08-27T19:15:50.394071"
+    },
+    {
+      "event_id": "462bf2b62f6d4f3b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dm.xml' vs 'res/Dm.xml'",
+      "timestamp": "2026-08-27T19:15:50.394418"
+    },
+    {
+      "event_id": "7ff0ab606e374e8d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/to.xml' vs 'res/TO.xml'",
+      "timestamp": "2026-08-27T19:15:50.394688"
+    },
+    {
+      "event_id": "3cf79e7dca88430d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Hu1.xml' vs 'res/HU1.xml'",
+      "timestamp": "2026-08-27T19:15:50.394980"
+    },
+    {
+      "event_id": "f6ffb2ebbffa471d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/M8.xml' vs 'res/m8.xml'",
+      "timestamp": "2026-08-27T19:15:50.395237"
+    },
+    {
+      "event_id": "3f9b6dd5e3824763",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Gu.xml' vs 'res/gu.xml'",
+      "timestamp": "2026-08-27T19:15:50.395442"
+    },
+    {
+      "event_id": "6d5164ba82b44bba",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/PX.xml' vs 'res/Px.xml'",
+      "timestamp": "2026-08-27T19:15:50.395644"
+    },
+    {
+      "event_id": "054c0f04bf094483",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ff.xml' vs 'res/fF.xml'",
+      "timestamp": "2026-08-27T19:15:50.395860"
+    },
+    {
+      "event_id": "7a7f9bde217d4036",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Go.xml' vs 'res/GO.xml'",
+      "timestamp": "2026-08-27T19:15:50.396061"
+    },
+    {
+      "event_id": "caddb6cf5e9c46db",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Yq.xml' vs 'res/YQ.xml'",
+      "timestamp": "2026-08-27T19:15:50.396261"
+    },
+    {
+      "event_id": "afc42388a9304ca9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Jm.xml' vs 'res/jm.xml'",
+      "timestamp": "2026-08-27T19:15:50.396465"
+    },
+    {
+      "event_id": "082cec50bf234d5c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/lf.webp' vs 'res/LF.webp'",
+      "timestamp": "2026-08-27T19:15:50.396668"
+    },
+    {
+      "event_id": "f7fffce16fd044c4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tG.webp' vs 'res/TG.webp'",
+      "timestamp": "2026-08-27T19:15:50.396869"
+    },
+    {
+      "event_id": "8cc69b42ab5b44d5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/wO.xml' vs 'res/Wo.xml'",
+      "timestamp": "2026-08-27T19:15:50.397068"
+    },
+    {
+      "event_id": "6574bc8120e047b6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ek.xml' vs 'res/EK.xml'",
+      "timestamp": "2026-08-27T19:15:50.397268"
+    },
+    {
+      "event_id": "d09936d1a93149b3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cv.xml' vs 'res/cV.xml'",
+      "timestamp": "2026-08-27T19:15:50.397469"
+    },
+    {
+      "event_id": "1bd6ec8182f74880",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ML.xml' vs 'res/ml.xml'",
+      "timestamp": "2026-08-27T19:15:50.397674"
+    },
+    {
+      "event_id": "57e6380d7b7e4793",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Mz.xml' vs 'res/mZ.xml'",
+      "timestamp": "2026-08-27T19:15:50.397875"
+    },
+    {
+      "event_id": "54eb98865b724dc7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/UQ.xml' vs 'res/uq.xml'",
+      "timestamp": "2026-08-27T19:15:50.398074"
+    },
+    {
+      "event_id": "2ff55b1013744d9f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Qr.xml' vs 'res/qr.xml'",
+      "timestamp": "2026-08-27T19:15:50.398274"
+    },
+    {
+      "event_id": "5fe01293479f4202",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/se.xml' vs 'res/sE.xml'",
+      "timestamp": "2026-08-27T19:15:50.398495"
+    },
+    {
+      "event_id": "cf8b70aa878b41b1",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/AO.xml' vs 'res/Ao.xml'",
+      "timestamp": "2026-08-27T19:15:50.398759"
+    },
+    {
+      "event_id": "afb632bdb6dc4cd0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/7g1.xml' vs 'res/7G1.xml'",
+      "timestamp": "2026-08-27T19:15:50.398989"
+    },
+    {
+      "event_id": "6bff2484931243c6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/BJ.xml' vs 'res/Bj.xml'",
+      "timestamp": "2026-08-27T19:15:50.399185"
+    },
+    {
+      "event_id": "0a5b20dbab8a48f4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/uU.xml' vs 'res/Uu.xml'",
+      "timestamp": "2026-08-27T19:15:50.399374"
+    },
+    {
+      "event_id": "86889fe208934afe",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/C9.xml' vs 'res/c9.xml'",
+      "timestamp": "2026-08-27T19:15:50.399562"
+    },
+    {
+      "event_id": "c11d6ea684444b72",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/OU.xml' vs 'res/ou.xml'",
+      "timestamp": "2026-08-27T19:15:50.399751"
+    },
+    {
+      "event_id": "5334d784cdb54e61",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/io.xml' vs 'res/IO.xml'",
+      "timestamp": "2026-08-27T19:15:50.399940"
+    },
+    {
+      "event_id": "d4a1e76f57f84747",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Gc.xml' vs 'res/gC.xml'",
+      "timestamp": "2026-08-27T19:15:50.400129"
+    },
+    {
+      "event_id": "19aaa0b8a69f4b70",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/p0.xml' vs 'res/P0.xml'",
+      "timestamp": "2026-08-27T19:15:50.400315"
+    },
+    {
+      "event_id": "6742bd6cfe9c4895",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ki.xml' vs 'res/ki.xml'",
+      "timestamp": "2026-08-27T19:15:50.400502"
+    },
+    {
+      "event_id": "d973aac3708e436e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/0U.xml' vs 'res/0u.xml'",
+      "timestamp": "2026-08-27T19:15:50.400698"
+    },
+    {
+      "event_id": "9acfc74326ab4c90",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/iq.xml' vs 'res/iQ.xml'",
+      "timestamp": "2026-08-27T19:15:50.400883"
+    },
+    {
+      "event_id": "3206245f75734372",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/pt.xml' vs 'res/pT.xml'",
+      "timestamp": "2026-08-27T19:15:50.401068"
+    },
+    {
+      "event_id": "5dfd3798d1f346bc",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/yz.xml' vs 'res/YZ.xml'",
+      "timestamp": "2026-08-27T19:15:50.401253"
+    },
+    {
+      "event_id": "ae64f2e6dbf64a5b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/N4.xml' vs 'res/n4.xml'",
+      "timestamp": "2026-08-27T19:15:50.401437"
+    },
+    {
+      "event_id": "8d586fa84e8d4ff3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/MQ.xml' vs 'res/mQ.xml'",
+      "timestamp": "2026-08-27T19:15:50.401622"
+    },
+    {
+      "event_id": "bb328ff85bf74b05",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cW.webp' vs 'res/CW.webp'",
+      "timestamp": "2026-08-27T19:15:50.401807"
+    },
+    {
+      "event_id": "84f9a2733f064004",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/YX.webp' vs 'res/yx.webp'",
+      "timestamp": "2026-08-27T19:15:50.401995"
+    },
+    {
+      "event_id": "4f8ee47b30134f3a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/9V.xml' vs 'res/9v.xml'",
+      "timestamp": "2026-08-27T19:15:50.402181"
+    },
+    {
+      "event_id": "6d9b983415e34d4f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/uw.xml' vs 'res/uW.xml'",
+      "timestamp": "2026-08-27T19:15:50.402370"
+    },
+    {
+      "event_id": "3892e29cead34a4b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/CP.webp' vs 'res/cP.webp'",
+      "timestamp": "2026-08-27T19:15:50.402560"
+    },
+    {
+      "event_id": "c6709cb40a2a4455",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/e5.xml' vs 'res/E5.xml'",
+      "timestamp": "2026-08-27T19:15:50.402746"
+    },
+    {
+      "event_id": "c918ab09d1cc4558",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Cp.xml' vs 'res/cp.xml'",
+      "timestamp": "2026-08-27T19:15:50.402931"
+    },
+    {
+      "event_id": "5b994ff8cfb24bbd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/s4.xml' vs 'res/S4.xml'",
+      "timestamp": "2026-08-27T19:15:50.403117"
+    },
+    {
+      "event_id": "f94c93eaffea4b61",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tY.xml' vs 'res/TY.xml'",
+      "timestamp": "2026-08-27T19:15:50.403302"
+    },
+    {
+      "event_id": "98bf881bbacf4f7e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/B6.xml' vs 'res/b6.xml'",
+      "timestamp": "2026-08-27T19:15:50.403486"
+    },
+    {
+      "event_id": "837f6be94e85485a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Oi.xml' vs 'res/oi.xml'",
+      "timestamp": "2026-08-27T19:15:50.403671"
+    },
+    {
+      "event_id": "e4589acebcdd4af2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/SJ.xml' vs 'res/sJ.xml'",
+      "timestamp": "2026-08-27T19:15:50.403856"
+    },
+    {
+      "event_id": "88803dcc43134020",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/EU.xml' vs 'res/Eu.xml'",
+      "timestamp": "2026-08-27T19:15:50.404052"
+    },
+    {
+      "event_id": "a15049d9dad74fb7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/iX.xml' vs 'res/Ix.xml'",
+      "timestamp": "2026-08-27T19:15:50.404250"
+    },
+    {
+      "event_id": "f39500f8dfc6404c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vO.xml' vs 'res/Vo.xml'",
+      "timestamp": "2026-08-27T19:15:50.404448"
+    },
+    {
+      "event_id": "b8b4592453244c6e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/wH.xml' vs 'res/Wh.xml'",
+      "timestamp": "2026-08-27T19:15:50.404647"
+    },
+    {
+      "event_id": "ef40895adc2041fc",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qT.xml' vs 'res/qt.xml'",
+      "timestamp": "2026-08-27T19:15:50.404855"
+    },
+    {
+      "event_id": "f68e518941cb47d0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Pq.xml' vs 'res/PQ.xml'",
+      "timestamp": "2026-08-27T19:15:50.405052"
+    },
+    {
+      "event_id": "e13932fdad204687",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/YV.xml' vs 'res/yV.xml'",
+      "timestamp": "2026-08-27T19:15:50.405267"
+    },
+    {
+      "event_id": "a07fcf497d7e4069",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/he.xml' vs 'res/HE.xml'",
+      "timestamp": "2026-08-27T19:15:50.405470"
+    },
+    {
+      "event_id": "4621e0232ae9453b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ff1.xml' vs 'res/FF1.xml'",
+      "timestamp": "2026-08-27T19:15:50.405672"
+    },
+    {
+      "event_id": "8f7596c5f64c404c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/MI.xml' vs 'res/mI.xml'",
+      "timestamp": "2026-08-27T19:15:50.406200"
+    },
+    {
+      "event_id": "05ceb7d853194bfe",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/6V.xml' vs 'res/6v.xml'",
+      "timestamp": "2026-08-27T19:15:50.406403"
+    },
+    {
+      "event_id": "eb9ee09d82ee4907",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qo.xml' vs 'res/Qo.xml'",
+      "timestamp": "2026-08-27T19:15:50.406601"
+    },
+    {
+      "event_id": "88a501d7d8b24a78",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/rY.xml' vs 'res/Ry.xml'",
+      "timestamp": "2026-08-27T19:15:50.406800"
+    },
+    {
+      "event_id": "763a5fb82a2b4b14",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/d_.xml' vs 'res/D_.xml'",
+      "timestamp": "2026-08-27T19:15:50.406999"
+    },
+    {
+      "event_id": "acfb3754e54a4be3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xL.xml' vs 'res/XL.xml'",
+      "timestamp": "2026-08-27T19:15:50.407198"
+    },
+    {
+      "event_id": "90fe407be9aa49b2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Gc.png' vs 'res/GC.png'",
+      "timestamp": "2026-08-27T19:15:50.407396"
+    },
+    {
+      "event_id": "32ee6ac4ebef48f9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/QU.xml' vs 'res/qu.xml'",
+      "timestamp": "2026-08-27T19:15:50.407593"
+    },
+    {
+      "event_id": "e7a8c7bba9724558",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/HI.xml' vs 'res/Hi.xml'",
+      "timestamp": "2026-08-27T19:15:50.407791"
+    },
+    {
+      "event_id": "4517172f152a40c0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Dz.xml' vs 'res/dZ.xml'",
+      "timestamp": "2026-08-27T19:15:50.407990"
+    },
+    {
+      "event_id": "27c7f1cbe9794592",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/mB.xml' vs 'res/MB.xml'",
+      "timestamp": "2026-08-27T19:15:50.408188"
+    },
+    {
+      "event_id": "c962c692ac4b4d33",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tR.xml' vs 'res/tr.xml'",
+      "timestamp": "2026-08-27T19:15:50.408386"
+    },
+    {
+      "event_id": "9eb1138efded475c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Mn.xml' vs 'res/MN.xml'",
+      "timestamp": "2026-08-27T19:15:50.408584"
+    },
+    {
+      "event_id": "2f65f527e3054f65",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/2g.xml' vs 'res/2G.xml'",
+      "timestamp": "2026-08-27T19:15:50.408780"
+    },
+    {
+      "event_id": "6776165588224d03",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/bT.xml' vs 'res/Bt.xml'",
+      "timestamp": "2026-08-27T19:15:50.408977"
+    },
+    {
+      "event_id": "6da3c843dad640cf",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/0o.xml' vs 'res/0O.xml'",
+      "timestamp": "2026-08-27T19:15:50.409175"
+    },
+    {
+      "event_id": "cf5544dd2202498d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/oZ.xml' vs 'res/Oz.xml'",
+      "timestamp": "2026-08-27T19:15:50.409371"
+    },
+    {
+      "event_id": "3bf9824083574ec6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hl.xml' vs 'res/HL.xml'",
+      "timestamp": "2026-08-27T19:15:50.409567"
+    },
+    {
+      "event_id": "a13ab7b8ded2456b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/gR.xml' vs 'res/GR.xml'",
+      "timestamp": "2026-08-27T19:15:50.409763"
+    },
+    {
+      "event_id": "e1eb7661f3d64f14",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/O5.xml' vs 'res/o5.xml'",
+      "timestamp": "2026-08-27T19:15:50.409960"
+    },
+    {
+      "event_id": "5437a8ac3efe4a1c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/jU.xml' vs 'res/JU.xml'",
+      "timestamp": "2026-08-27T19:15:50.410165"
+    },
+    {
+      "event_id": "a99b1940d16244ea",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/bS.xml' vs 'res/bs.xml'",
+      "timestamp": "2026-08-27T19:15:50.410377"
+    },
+    {
+      "event_id": "782a1d2cc7144940",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Aa.xml' vs 'res/aa.xml'",
+      "timestamp": "2026-08-27T19:15:50.410575"
+    },
+    {
+      "event_id": "5db4e203e2044c01",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/CJ.xml' vs 'res/Cj.xml'",
+      "timestamp": "2026-08-27T19:15:50.410773"
+    },
+    {
+      "event_id": "31236572d0e54410",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qn.xml' vs 'res/QN.xml'",
+      "timestamp": "2026-08-27T19:15:50.410971"
+    },
+    {
+      "event_id": "84b9e9442dc24371",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/D6.xml' vs 'res/d6.xml'",
+      "timestamp": "2026-08-27T19:15:50.411169"
+    },
+    {
+      "event_id": "d6cd903a0fbf48b4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/c8.xml' vs 'res/C8.xml'",
+      "timestamp": "2026-08-27T19:15:50.411366"
+    },
+    {
+      "event_id": "01415168254f458f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/gK.xml' vs 'res/GK.xml'",
+      "timestamp": "2026-08-27T19:15:50.411562"
+    },
+    {
+      "event_id": "f13f846490a844c5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/gJ.xml' vs 'res/Gj.xml'",
+      "timestamp": "2026-08-27T19:15:50.411760"
+    },
+    {
+      "event_id": "1bfc337876b44f4d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/aH.xml' vs 'res/ah.xml'",
+      "timestamp": "2026-08-27T19:15:50.411958"
+    },
+    {
+      "event_id": "3d91f8c8c42742fa",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/YG.9.png' vs 'res/yg.9.png'",
+      "timestamp": "2026-08-27T19:15:50.412156"
+    },
+    {
+      "event_id": "62590eae471f4d97",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dr.xml' vs 'res/DR.xml'",
+      "timestamp": "2026-08-27T19:15:50.412353"
+    },
+    {
+      "event_id": "adcff97fd7a847e8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nz.xml' vs 'res/nZ.xml'",
+      "timestamp": "2026-08-27T19:15:50.412558"
+    },
+    {
+      "event_id": "d21d2fd48a8d4b6d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vF.xml' vs 'res/vf.xml'",
+      "timestamp": "2026-08-27T19:15:50.412755"
+    },
+    {
+      "event_id": "94ca015eaf87469b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dU.xml' vs 'res/du.xml'",
+      "timestamp": "2026-08-27T19:15:50.412954"
+    },
+    {
+      "event_id": "971e26b34b914b4e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ue.xml' vs 'res/UE.xml'",
+      "timestamp": "2026-08-27T19:15:50.413151"
+    },
+    {
+      "event_id": "e00df003f3954311",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ul.xml' vs 'res/UL.xml'",
+      "timestamp": "2026-08-27T19:15:50.413348"
+    },
+    {
+      "event_id": "23466c6485d04046",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/IH.xml' vs 'res/ih.xml'",
+      "timestamp": "2026-08-27T19:15:50.413544"
+    },
+    {
+      "event_id": "c9510dabbfaa4f98",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/LZ.xml' vs 'res/lz.xml'",
+      "timestamp": "2026-08-27T19:15:50.413740"
+    },
+    {
+      "event_id": "250273f3fc6e4b0f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/NA1.xml' vs 'res/nA1.xml'",
+      "timestamp": "2026-08-27T19:15:50.413933"
+    },
+    {
+      "event_id": "809094c7827846f7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cg.xml' vs 'res/CG.xml'",
+      "timestamp": "2026-08-27T19:15:50.414122"
+    },
+    {
+      "event_id": "dbc8e7792fc44e3e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/7Y.xml' vs 'res/7y.xml'",
+      "timestamp": "2026-08-27T19:15:50.414304"
+    },
+    {
+      "event_id": "899bea5a2ee14252",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/KP.xml' vs 'res/Kp.xml'",
+      "timestamp": "2026-08-27T19:15:50.414494"
+    },
+    {
+      "event_id": "a8b768248f6d4b1b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Vm.xml' vs 'res/VM.xml'",
+      "timestamp": "2026-08-27T19:15:50.414678"
+    },
+    {
+      "event_id": "f70e7f40a63e4b75",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/EA.xml' vs 'res/ea.xml'",
+      "timestamp": "2026-08-27T19:15:50.414867"
+    },
+    {
+      "event_id": "c36675d8a6f444d0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dR.xml' vs 'res/dr.xml'",
+      "timestamp": "2026-08-27T19:15:50.415062"
+    },
+    {
+      "event_id": "cb8dd27be0dc4eef",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/CD.xml' vs 'res/cD.xml'",
+      "timestamp": "2026-08-27T19:15:50.415247"
+    },
+    {
+      "event_id": "0d066daf455747ec",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vz.xml' vs 'res/VZ.xml'",
+      "timestamp": "2026-08-27T19:15:50.415432"
+    },
+    {
+      "event_id": "dd71afde6f4a44e6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Cg.xml' vs 'res/cg.xml'",
+      "timestamp": "2026-08-27T19:15:50.415617"
+    },
+    {
+      "event_id": "690d672bc9ba46ce",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ej.xml' vs 'res/ej.xml'",
+      "timestamp": "2026-08-27T19:15:50.415802"
+    },
+    {
+      "event_id": "03fb61e3653149b2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Hw.xml' vs 'res/hW.xml'",
+      "timestamp": "2026-08-27T19:15:50.415986"
+    },
+    {
+      "event_id": "bb8ef2b300524825",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vM.xml' vs 'res/Vm.xml'",
+      "timestamp": "2026-08-27T19:15:50.416169"
+    },
+    {
+      "event_id": "a10b1bcdec384c9f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/2m.xml' vs 'res/2M.xml'",
+      "timestamp": "2026-08-27T19:15:50.416423"
+    },
+    {
+      "event_id": "375d4e5e807d4cc8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/j01.xml' vs 'res/J01.xml'",
+      "timestamp": "2026-08-27T19:15:50.416606"
+    },
+    {
+      "event_id": "3256974b591c4265",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hQ.xml' vs 'res/hq.xml'",
+      "timestamp": "2026-08-27T19:15:50.416790"
+    },
+    {
+      "event_id": "39af68cf0f254137",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/5L.xml' vs 'res/5l.xml'",
+      "timestamp": "2026-08-27T19:15:50.416972"
+    },
+    {
+      "event_id": "8bca1318506d4a4e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/NT.xml' vs 'res/nt.xml'",
+      "timestamp": "2026-08-27T19:15:50.417155"
+    },
+    {
+      "event_id": "dadb25db32984c32",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/VL.xml' vs 'res/vL.xml'",
+      "timestamp": "2026-08-27T19:15:50.417340"
+    },
+    {
+      "event_id": "6eb0dc66c36f49bd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/1r.xml' vs 'res/1R.xml'",
+      "timestamp": "2026-08-27T19:15:50.417523"
+    },
+    {
+      "event_id": "3dffc13aacce4c0c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xJ.xml' vs 'res/xj.xml'",
+      "timestamp": "2026-08-27T19:15:50.417708"
+    },
+    {
+      "event_id": "9fc687ed7ffe4c93",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ok1.xml' vs 'res/Ok1.xml'",
+      "timestamp": "2026-08-27T19:15:50.418096"
+    },
+    {
+      "event_id": "993deff2078d4a5a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hB2.xml' vs 'res/HB2.xml'",
+      "timestamp": "2026-08-27T19:15:50.418319"
+    },
+    {
+      "event_id": "3fd7e1d8e82840e4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/_G.xml' vs 'res/_g.xml'",
+      "timestamp": "2026-08-27T19:15:50.418532"
+    },
+    {
+      "event_id": "f233b08e46ef4f57",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/3N.xml' vs 'res/3n.xml'",
+      "timestamp": "2026-08-27T19:15:50.418724"
+    },
+    {
+      "event_id": "f96f40876f8b450a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/gp.xml' vs 'res/Gp.xml'",
+      "timestamp": "2026-08-27T19:15:50.418909"
+    },
+    {
+      "event_id": "7c23cc42c0eb4ed2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/x4.xml' vs 'res/X4.xml'",
+      "timestamp": "2026-08-27T19:15:50.419103"
+    },
+    {
+      "event_id": "18fc78931c1d4faa",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/zr.xml' vs 'res/Zr.xml'",
+      "timestamp": "2026-08-27T19:15:50.419306"
+    },
+    {
+      "event_id": "96653ce2621b4cf5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Qu.xml' vs 'res/QU.xml'",
+      "timestamp": "2026-08-27T19:15:50.419495"
+    },
+    {
+      "event_id": "96ac42633e884a2d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/VJ.xml' vs 'res/vJ.xml'",
+      "timestamp": "2026-08-27T19:15:50.419684"
+    },
+    {
+      "event_id": "a9bdbc464ed34abb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/yb.xml' vs 'res/Yb.xml'",
+      "timestamp": "2026-08-27T19:15:50.419887"
+    },
+    {
+      "event_id": "0dd55373a96c464c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Zj.xml' vs 'res/zj.xml'",
+      "timestamp": "2026-08-27T19:15:50.420076"
+    },
+    {
+      "event_id": "ad84a58863c2451a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/HV.xml' vs 'res/hv.xml'",
+      "timestamp": "2026-08-27T19:15:50.420273"
+    },
+    {
+      "event_id": "e611303fba0e41a4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/zM.xml' vs 'res/ZM.xml'",
+      "timestamp": "2026-08-27T19:15:50.420470"
+    },
+    {
+      "event_id": "d24c98c556024860",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/zR.xml' vs 'res/zr.xml'",
+      "timestamp": "2026-08-27T19:15:50.420663"
+    },
+    {
+      "event_id": "f56a062ceb954e65",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hu1.xml' vs 'res/Hu1.xml'",
+      "timestamp": "2026-08-27T19:15:50.420851"
+    },
+    {
+      "event_id": "b4057e79f575495d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/5v.xml' vs 'res/5V.xml'",
+      "timestamp": "2026-08-27T19:15:50.421038"
+    },
+    {
+      "event_id": "98d30a85f4f743b3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/WU.xml' vs 'res/Wu.xml'",
+      "timestamp": "2026-08-27T19:15:50.421225"
+    },
+    {
+      "event_id": "962d67526b0b4c38",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/eA.xml' vs 'res/EA.xml'",
+      "timestamp": "2026-08-27T19:15:50.421413"
+    },
+    {
+      "event_id": "e05de534b7284dff",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xY.xml' vs 'res/Xy.xml'",
+      "timestamp": "2026-08-27T19:15:50.421600"
+    },
+    {
+      "event_id": "d480d439826e48f7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Wa.xml' vs 'res/wa.xml'",
+      "timestamp": "2026-08-27T19:15:50.421787"
+    },
+    {
+      "event_id": "b64fb981ef60423e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vQ.xml' vs 'res/Vq.xml'",
+      "timestamp": "2026-08-27T19:15:50.421979"
+    },
+    {
+      "event_id": "dfe54d36750d4150",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/sK.xml' vs 'res/Sk.xml'",
+      "timestamp": "2026-08-27T19:15:50.422182"
+    },
+    {
+      "event_id": "c02918d7a28f4001",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fy.xml' vs 'res/fY.xml'",
+      "timestamp": "2026-08-27T19:15:50.422406"
+    },
+    {
+      "event_id": "e52a31cf44af44f2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/yT1.xml' vs 'res/Yt1.xml'",
+      "timestamp": "2026-08-27T19:15:50.422614"
+    },
+    {
+      "event_id": "e7b8fc77107d46e7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/UH.xml' vs 'res/uh.xml'",
+      "timestamp": "2026-08-27T19:15:50.422821"
+    },
+    {
+      "event_id": "eab82d6b8ca740d7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/N2.xml' vs 'res/n2.xml'",
+      "timestamp": "2026-08-27T19:15:50.423023"
+    },
+    {
+      "event_id": "7795d5b1013944c0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Nu.xml' vs 'res/nu.xml'",
+      "timestamp": "2026-08-27T19:15:50.423227"
+    },
+    {
+      "event_id": "c2ffa03cf3f748b2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xC.xml' vs 'res/Xc.xml'",
+      "timestamp": "2026-08-27T19:15:50.423425"
+    },
+    {
+      "event_id": "44b81520f1f54e30",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/LH.xml' vs 'res/Lh.xml'",
+      "timestamp": "2026-08-27T19:15:50.423622"
+    },
+    {
+      "event_id": "085cf871ec97460b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tP.xml' vs 'res/Tp.xml'",
+      "timestamp": "2026-08-27T19:15:50.423822"
+    },
+    {
+      "event_id": "692298bd15144960",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/b61.xml' vs 'res/B61.xml'",
+      "timestamp": "2026-08-27T19:15:50.424017"
+    },
+    {
+      "event_id": "61f01ca40aa94888",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/CA.xml' vs 'res/cA.xml'",
+      "timestamp": "2026-08-27T19:15:50.424199"
+    },
+    {
+      "event_id": "a48a103c11934163",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/J5.xml' vs 'res/j5.xml'",
+      "timestamp": "2026-08-27T19:15:50.424381"
+    },
+    {
+      "event_id": "b71b5f6366b34b79",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ci.xml' vs 'res/ci.xml'",
+      "timestamp": "2026-08-27T19:15:50.424573"
+    },
+    {
+      "event_id": "b2269afe6ab14bea",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Xf.xml' vs 'res/xf.xml'",
+      "timestamp": "2026-08-27T19:15:50.424768"
+    },
+    {
+      "event_id": "80026e42cf064b5c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/5u.xml' vs 'res/5U.xml'",
+      "timestamp": "2026-08-27T19:15:50.424948"
+    },
+    {
+      "event_id": "9366a282420f4dcd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ls1.xml' vs 'res/LS1.xml'",
+      "timestamp": "2026-08-27T19:15:50.425128"
+    },
+    {
+      "event_id": "3494f56d84254a69",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Rm.xml' vs 'res/RM.xml'",
+      "timestamp": "2026-08-27T19:15:50.425308"
+    },
+    {
+      "event_id": "b487059b13034f70",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/kn.xml' vs 'res/kN.xml'",
+      "timestamp": "2026-08-27T19:15:50.425487"
+    },
+    {
+      "event_id": "64bac6ab476049f9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Op1.xml' vs 'res/oP1.xml'",
+      "timestamp": "2026-08-27T19:15:50.425666"
+    },
+    {
+      "event_id": "d35840a5ada845e5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/EV.xml' vs 'res/ev.xml'",
+      "timestamp": "2026-08-27T19:15:50.425846"
+    },
+    {
+      "event_id": "e95cc4878dd74ca5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nf.xml' vs 'res/NF.xml'",
+      "timestamp": "2026-08-27T19:15:50.426026"
+    },
+    {
+      "event_id": "0d0b0c65bf0d484f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xX.webp' vs 'res/Xx.webp'",
+      "timestamp": "2026-08-27T19:15:50.426206"
+    },
+    {
+      "event_id": "931aadebcb8d4e6c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Jp.xml' vs 'res/JP.xml'",
+      "timestamp": "2026-08-27T19:15:50.426384"
+    },
+    {
+      "event_id": "e8a07df2b13e4ccd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Vj.xml' vs 'res/VJ.xml'",
+      "timestamp": "2026-08-27T19:15:50.426563"
+    },
+    {
+      "event_id": "dfd42326e9c74ab0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/mT.xml' vs 'res/mt.xml'",
+      "timestamp": "2026-08-27T19:15:50.426741"
+    },
+    {
+      "event_id": "c1e1a74ac0004eb4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/c81.xml' vs 'res/C81.xml'",
+      "timestamp": "2026-08-27T19:15:50.426921"
+    },
+    {
+      "event_id": "cba1342988114997",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/_P.xml' vs 'res/_p.xml'",
+      "timestamp": "2026-08-27T19:15:50.427102"
+    },
+    {
+      "event_id": "190d9d46d12147ee",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/LN.xml' vs 'res/lN.xml'",
+      "timestamp": "2026-08-27T19:15:50.427281"
+    },
+    {
+      "event_id": "86a64ddc7ea346f6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Tg1.xml' vs 'res/tG1.xml'",
+      "timestamp": "2026-08-27T19:15:50.427461"
+    },
+    {
+      "event_id": "51561f905e7b48f5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/kH.webp' vs 'res/KH.webp'",
+      "timestamp": "2026-08-27T19:15:50.427641"
+    },
+    {
+      "event_id": "e9857e16ad8b4f47",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tG.xml' vs 'res/Tg.xml'",
+      "timestamp": "2026-08-27T19:15:50.427822"
+    },
+    {
+      "event_id": "ee9034356cc64e26",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Dw.xml' vs 'res/dw.xml'",
+      "timestamp": "2026-08-27T19:15:50.428006"
+    },
+    {
+      "event_id": "e11d945e0a7c4129",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/GP.webp' vs 'res/gp.webp'",
+      "timestamp": "2026-08-27T19:15:50.428188"
+    },
+    {
+      "event_id": "abd6768d4c7e4dac",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/IN.xml' vs 'res/In.xml'",
+      "timestamp": "2026-08-27T19:15:50.428367"
+    },
+    {
+      "event_id": "9f3756934e594ed5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vs.xml' vs 'res/Vs.xml'",
+      "timestamp": "2026-08-27T19:15:50.428546"
+    },
+    {
+      "event_id": "37dddb65854f4d04",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xS.xml' vs 'res/Xs.xml'",
+      "timestamp": "2026-08-27T19:15:50.428726"
+    },
+    {
+      "event_id": "46972fa3e6314579",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/wh.xml' vs 'res/wH.xml'",
+      "timestamp": "2026-08-27T19:15:50.428926"
+    },
+    {
+      "event_id": "834a661d92494927",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nm.xml' vs 'res/NM.xml'",
+      "timestamp": "2026-08-27T19:15:50.429427"
+    },
+    {
+      "event_id": "ff8221cab60a4a12",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/oP.xml' vs 'res/OP.xml'",
+      "timestamp": "2026-08-27T19:15:50.429666"
+    },
+    {
+      "event_id": "03f380de31bf4634",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Op.xml' vs 'res/oP.xml'",
+      "timestamp": "2026-08-27T19:15:50.429893"
+    },
+    {
+      "event_id": "44f6259c89bf4919",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/YW.xml' vs 'res/yw.xml'",
+      "timestamp": "2026-08-27T19:15:50.430185"
+    },
+    {
+      "event_id": "0d73835921a545a9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/YM.xml' vs 'res/Ym.xml'",
+      "timestamp": "2026-08-27T19:15:50.430433"
+    },
+    {
+      "event_id": "8a8d966a441141da",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/sa.xml' vs 'res/sA.xml'",
+      "timestamp": "2026-08-27T19:15:50.430629"
+    },
+    {
+      "event_id": "3f5fa30f47cd4ce7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FW.xml' vs 'res/fW.xml'",
+      "timestamp": "2026-08-27T19:15:50.430819"
+    },
+    {
+      "event_id": "9b8f4eaacb654680",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FN.xml' vs 'res/Fn.xml'",
+      "timestamp": "2026-08-27T19:15:50.431027"
+    },
+    {
+      "event_id": "ec02bdda687f4ace",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nq.xml' vs 'res/nQ.xml'",
+      "timestamp": "2026-08-27T19:15:50.431258"
+    },
+    {
+      "event_id": "87274e27ece444e7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/AT.xml' vs 'res/aT.xml'",
+      "timestamp": "2026-08-27T19:15:50.431472"
+    },
+    {
+      "event_id": "aee65b37d1364bff",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/EZ.xml' vs 'res/Ez.xml'",
+      "timestamp": "2026-08-27T19:15:50.431672"
+    },
+    {
+      "event_id": "d78d52ca0c8c4943",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Eg1.xml' vs 'res/eg1.xml'",
+      "timestamp": "2026-08-27T19:15:50.431866"
+    },
+    {
+      "event_id": "2e8f174965ca4c80",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/BD.xml' vs 'res/bD.xml'",
+      "timestamp": "2026-08-27T19:15:50.432067"
+    },
+    {
+      "event_id": "5fb46a36c2944304",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vG.xml' vs 'res/VG.xml'",
+      "timestamp": "2026-08-27T19:15:50.432257"
+    },
+    {
+      "event_id": "9b9fc3d9461f4192",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/yU.xml' vs 'res/Yu.xml'",
+      "timestamp": "2026-08-27T19:15:50.432469"
+    },
+    {
+      "event_id": "752465d61be0488d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/7x.xml' vs 'res/7X.xml'",
+      "timestamp": "2026-08-27T19:15:50.432723"
+    },
+    {
+      "event_id": "c246289c37044b67",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Pr.xml' vs 'res/pr.xml'",
+      "timestamp": "2026-08-27T19:15:50.432952"
+    },
+    {
+      "event_id": "137d2c0fc63e4389",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/XJ.xml' vs 'res/xJ.xml'",
+      "timestamp": "2026-08-27T19:15:50.433159"
+    },
+    {
+      "event_id": "721e01161698459f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FS.xml' vs 'res/fS.xml'",
+      "timestamp": "2026-08-27T19:15:50.433351"
+    },
+    {
+      "event_id": "22355959c0454940",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Bc.png' vs 'res/bC.png'",
+      "timestamp": "2026-08-27T19:15:50.433537"
+    },
+    {
+      "event_id": "75baed215dac4c7e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/pk.xml' vs 'res/Pk.xml'",
+      "timestamp": "2026-08-27T19:15:50.433758"
+    },
+    {
+      "event_id": "62ddeb348e2f4a07",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ZG.xml' vs 'res/Zg.xml'",
+      "timestamp": "2026-08-27T19:15:50.433945"
+    },
+    {
+      "event_id": "b5a6465ce8ff443b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/kn1.xml' vs 'res/kN1.xml'",
+      "timestamp": "2026-08-27T19:15:50.434120"
+    },
+    {
+      "event_id": "45abc2c1afee4197",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qA.xml' vs 'res/qa.xml'",
+      "timestamp": "2026-08-27T19:15:50.434302"
+    },
+    {
+      "event_id": "ba0f34344d68425b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Wj.xml' vs 'res/wj.xml'",
+      "timestamp": "2026-08-27T19:15:50.434473"
+    },
+    {
+      "event_id": "867240ecd53546f8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/QH.xml' vs 'res/qH.xml'",
+      "timestamp": "2026-08-27T19:15:50.434642"
+    },
+    {
+      "event_id": "6dbe152537ab46d6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Sg.webp' vs 'res/sg.webp'",
+      "timestamp": "2026-08-27T19:15:50.434811"
+    },
+    {
+      "event_id": "0549ba4edee243cf",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fi.xml' vs 'res/FI.xml'",
+      "timestamp": "2026-08-27T19:15:50.434978"
+    },
+    {
+      "event_id": "1c2ab8cbf9be4b81",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Am.xml' vs 'res/aM.xml'",
+      "timestamp": "2026-08-27T19:15:50.435149"
+    },
+    {
+      "event_id": "1d04a050ef84408e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Sa.xml' vs 'res/sa.xml'",
+      "timestamp": "2026-08-27T19:15:50.435317"
+    },
+    {
+      "event_id": "d6c89a42f8524e75",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/q4.xml' vs 'res/Q4.xml'",
+      "timestamp": "2026-08-27T19:15:50.435486"
+    },
+    {
+      "event_id": "1fa838a2ee1e4763",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/uA.xml' vs 'res/ua.xml'",
+      "timestamp": "2026-08-27T19:15:50.435659"
+    },
+    {
+      "event_id": "7e5cd5d3d6e04253",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/yB.xml' vs 'res/yb.xml'",
+      "timestamp": "2026-08-27T19:15:50.435828"
+    },
+    {
+      "event_id": "cb3c96b1d2a948a7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/CT1.xml' vs 'res/cT1.xml'",
+      "timestamp": "2026-08-27T19:15:50.435997"
+    },
+    {
+      "event_id": "c2952a6c91f54ea0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/uL.xml' vs 'res/ul.xml'",
+      "timestamp": "2026-08-27T19:15:50.436174"
+    },
+    {
+      "event_id": "8535491b59354beb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qc.webp' vs 'res/QC.webp'",
+      "timestamp": "2026-08-27T19:15:50.436345"
+    },
+    {
+      "event_id": "4fdb675a08ec4775",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dV.xml' vs 'res/DV.xml'",
+      "timestamp": "2026-08-27T19:15:50.436515"
+    },
+    {
+      "event_id": "3dc910ac897048fe",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dc.webp' vs 'res/Dc.webp'",
+      "timestamp": "2026-08-27T19:15:50.436689"
+    },
+    {
+      "event_id": "51a99f0298a04aa8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/WL.xml' vs 'res/wl.xml'",
+      "timestamp": "2026-08-27T19:15:50.436858"
+    },
+    {
+      "event_id": "4705e34f67784204",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vT.xml' vs 'res/VT.xml'",
+      "timestamp": "2026-08-27T19:15:50.437031"
+    },
+    {
+      "event_id": "6bfd942b4ca8436c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ah.xml' vs 'res/aH.xml'",
+      "timestamp": "2026-08-27T19:15:50.437203"
+    },
+    {
+      "event_id": "658589145dbc4584",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Hm.xml' vs 'res/hm.xml'",
+      "timestamp": "2026-08-27T19:15:50.437372"
+    },
+    {
+      "event_id": "d3a5890505694a1f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/EH.xml' vs 'res/eH.xml'",
+      "timestamp": "2026-08-27T19:15:50.437540"
+    },
+    {
+      "event_id": "f6b19f54bef84543",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Kh.xml' vs 'res/kh.xml'",
+      "timestamp": "2026-08-27T19:15:50.437707"
+    },
+    {
+      "event_id": "33a105e4f0dc4fff",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/iy.xml' vs 'res/Iy.xml'",
+      "timestamp": "2026-08-27T19:15:50.437877"
+    },
+    {
+      "event_id": "6ef543345e0847ea",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ud.xml' vs 'res/uD.xml'",
+      "timestamp": "2026-08-27T19:15:50.438045"
+    },
+    {
+      "event_id": "c6bd6ed02f4f444f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/HW.xml' vs 'res/Hw.xml'",
+      "timestamp": "2026-08-27T19:15:50.438214"
+    },
+    {
+      "event_id": "ec3bafdc6bb94086",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/WZ.xml' vs 'res/Wz.xml'",
+      "timestamp": "2026-08-27T19:15:50.438395"
+    },
+    {
+      "event_id": "470bd433e83d4694",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/T8.xml' vs 'res/t8.xml'",
+      "timestamp": "2026-08-27T19:15:50.438562"
+    },
+    {
+      "event_id": "4aa42d7aa900420f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Te.xml' vs 'res/te.xml'",
+      "timestamp": "2026-08-27T19:15:50.438729"
+    },
+    {
+      "event_id": "95f12d808edd4cd2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Lv.xml' vs 'res/lv.xml'",
+      "timestamp": "2026-08-27T19:15:50.438907"
+    },
+    {
+      "event_id": "114801f7ebab4d81",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/PR.xml' vs 'res/Pr.xml'",
+      "timestamp": "2026-08-27T19:15:50.439101"
+    },
+    {
+      "event_id": "926201b875144321",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cU1.xml' vs 'res/CU1.xml'",
+      "timestamp": "2026-08-27T19:15:50.439286"
+    },
+    {
+      "event_id": "efa68af4054c491a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/-J.xml' vs 'res/-j.xml'",
+      "timestamp": "2026-08-27T19:15:50.439467"
+    },
+    {
+      "event_id": "52613d4571a24d23",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/sv.xml' vs 'res/sV.xml'",
+      "timestamp": "2026-08-27T19:15:50.439649"
+    },
+    {
+      "event_id": "ce49f5b2e4934369",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Bs.xml' vs 'res/bS.xml'",
+      "timestamp": "2026-08-27T19:15:50.439830"
+    },
+    {
+      "event_id": "3395b01b860947f1",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/D7.xml' vs 'res/d7.xml'",
+      "timestamp": "2026-08-27T19:15:50.440010"
+    },
+    {
+      "event_id": "4d0e7c00dd3d437d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Gp1.xml' vs 'res/GP1.xml'",
+      "timestamp": "2026-08-27T19:15:50.440190"
+    },
+    {
+      "event_id": "03f4a6093c6541c0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/id.xml' vs 'res/iD.xml'",
+      "timestamp": "2026-08-27T19:15:50.440382"
+    },
+    {
+      "event_id": "29fd304134ea431b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Sp.xml' vs 'res/SP.xml'",
+      "timestamp": "2026-08-27T19:15:50.440571"
+    },
+    {
+      "event_id": "edb65f6b08aa4b69",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Yw.xml' vs 'res/YW.xml'",
+      "timestamp": "2026-08-27T19:15:50.440759"
+    },
+    {
+      "event_id": "7b3b9b835eed4b56",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/zF.xml' vs 'res/ZF.xml'",
+      "timestamp": "2026-08-27T19:15:50.440946"
+    },
+    {
+      "event_id": "59877e927951491a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ij.xml' vs 'res/IJ.xml'",
+      "timestamp": "2026-08-27T19:15:50.441131"
+    },
+    {
+      "event_id": "27f11800b512465c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/LH1.xml' vs 'res/Lh1.xml'",
+      "timestamp": "2026-08-27T19:15:50.441312"
+    },
+    {
+      "event_id": "29bf272162ce4b62",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/oc.webp' vs 'res/OC.webp'",
+      "timestamp": "2026-08-27T19:15:50.441524"
+    },
+    {
+      "event_id": "f6bb125378c64ab6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/QE.webp' vs 'res/qE.webp'",
+      "timestamp": "2026-08-27T19:15:50.441712"
+    },
+    {
+      "event_id": "4f40d435091c4b17",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/x9.xml' vs 'res/X9.xml'",
+      "timestamp": "2026-08-27T19:15:50.441897"
+    },
+    {
+      "event_id": "1ca9795ca36b4484",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Qy.xml' vs 'res/qY.xml'",
+      "timestamp": "2026-08-27T19:15:50.442082"
+    },
+    {
+      "event_id": "28a0135eac8f4f34",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vq.xml' vs 'res/vQ.xml'",
+      "timestamp": "2026-08-27T19:15:50.442267"
+    },
+    {
+      "event_id": "ae49eb996ed94d7d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/HB1.xml' vs 'res/hB1.xml'",
+      "timestamp": "2026-08-27T19:15:50.442446"
+    },
+    {
+      "event_id": "62e23c84462248eb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Jk.webp' vs 'res/JK.webp'",
+      "timestamp": "2026-08-27T19:15:50.442629"
+    },
+    {
+      "event_id": "2e44816267304f81",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ZX.xml' vs 'res/zx.xml'",
+      "timestamp": "2026-08-27T19:15:50.442829"
+    },
+    {
+      "event_id": "c5b509f4db9c4ee9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/4X.xml' vs 'res/4x.xml'",
+      "timestamp": "2026-08-27T19:15:50.443010"
+    },
+    {
+      "event_id": "20aacb9248694716",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/W_.xml' vs 'res/w_.xml'",
+      "timestamp": "2026-08-27T19:15:50.443189"
+    },
+    {
+      "event_id": "2b8b87411add46a6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nl.xml' vs 'res/nL.xml'",
+      "timestamp": "2026-08-27T19:15:50.443367"
+    },
+    {
+      "event_id": "e4ad027949064f80",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/WC.xml' vs 'res/wc.xml'",
+      "timestamp": "2026-08-27T19:15:50.443553"
+    },
+    {
+      "event_id": "3970ca0151164693",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Fb.webp' vs 'res/FB.webp'",
+      "timestamp": "2026-08-27T19:15:50.443742"
+    },
+    {
+      "event_id": "a4fc2adcdef545e9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xy1.xml' vs 'res/XY1.xml'",
+      "timestamp": "2026-08-27T19:15:50.443924"
+    },
+    {
+      "event_id": "d975a1afe7e34fb0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/QL.xml' vs 'res/Ql.xml'",
+      "timestamp": "2026-08-27T19:15:50.444095"
+    },
+    {
+      "event_id": "4b96ca5e16b64004",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/eU.xml' vs 'res/EU.xml'",
+      "timestamp": "2026-08-27T19:15:50.444268"
+    },
+    {
+      "event_id": "b4041527010d45d1",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/A8.xml' vs 'res/a8.xml'",
+      "timestamp": "2026-08-27T19:15:50.444441"
+    },
+    {
+      "event_id": "36ea395e61804379",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/JT1.xml' vs 'res/jt1.xml'",
+      "timestamp": "2026-08-27T19:15:50.444608"
+    },
+    {
+      "event_id": "0396223e51214eab",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/MU1.xml' vs 'res/mU1.xml'",
+      "timestamp": "2026-08-27T19:15:50.444790"
+    },
+    {
+      "event_id": "aebd357fa22247bf",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/w3.xml' vs 'res/W3.xml'",
+      "timestamp": "2026-08-27T19:15:50.444970"
+    },
+    {
+      "event_id": "d2e6517d7a5643e1",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cw.webp' vs 'res/cW.webp'",
+      "timestamp": "2026-08-27T19:15:50.445137"
+    },
+    {
+      "event_id": "0518350e34094964",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/lh.xml' vs 'res/LH.xml'",
+      "timestamp": "2026-08-27T19:15:50.445306"
+    },
+    {
+      "event_id": "48a7dfbddc1c4e4c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/PG.xml' vs 'res/Pg.xml'",
+      "timestamp": "2026-08-27T19:15:50.445500"
+    },
+    {
+      "event_id": "e7b91d4fa1f74bc6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vS.xml' vs 'res/vs.xml'",
+      "timestamp": "2026-08-27T19:15:50.445667"
+    },
+    {
+      "event_id": "4702cf04093046a0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/yR.xml' vs 'res/YR.xml'",
+      "timestamp": "2026-08-27T19:15:50.445834"
+    },
+    {
+      "event_id": "0dac2376a4b94e28",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ty.xml' vs 'res/tY.xml'",
+      "timestamp": "2026-08-27T19:15:50.446001"
+    },
+    {
+      "event_id": "5544ac1ad3cd454f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/KI1.xml' vs 'res/Ki1.xml'",
+      "timestamp": "2026-08-27T19:15:50.446174"
+    },
+    {
+      "event_id": "abc704ed231a4c09",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/DZ.xml' vs 'res/Dz.xml'",
+      "timestamp": "2026-08-27T19:15:50.446341"
+    },
+    {
+      "event_id": "8fbe9278de834998",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Sh1.xml' vs 'res/sH1.xml'",
+      "timestamp": "2026-08-27T19:15:50.446508"
+    },
+    {
+      "event_id": "adecd8957ee241f7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/SC.xml' vs 'res/Sc.xml'",
+      "timestamp": "2026-08-27T19:15:50.446674"
+    },
+    {
+      "event_id": "ce52997c15754cd0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/lC.xml' vs 'res/Lc.xml'",
+      "timestamp": "2026-08-27T19:15:50.446842"
+    },
+    {
+      "event_id": "41ebd384d44d4499",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/db.xml' vs 'res/DB.xml'",
+      "timestamp": "2026-08-27T19:15:50.447016"
+    },
+    {
+      "event_id": "c1d8e426f0e24c2a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/y-.xml' vs 'res/Y-.xml'",
+      "timestamp": "2026-08-27T19:15:50.447186"
+    },
+    {
+      "event_id": "0b6d57c7eb0b4124",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ab.xml' vs 'res/AB.xml'",
+      "timestamp": "2026-08-27T19:15:50.447377"
+    },
+    {
+      "event_id": "6b99c77a264242bb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Lt.webp' vs 'res/LT.webp'",
+      "timestamp": "2026-08-27T19:15:50.447544"
+    },
+    {
+      "event_id": "f368df30aaed44fa",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/sN.xml' vs 'res/sn.xml'",
+      "timestamp": "2026-08-27T19:15:50.447714"
+    },
+    {
+      "event_id": "2feb5ae55bea4e34",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/oH.webp' vs 'res/Oh.webp'",
+      "timestamp": "2026-08-27T19:15:50.447882"
+    },
+    {
+      "event_id": "45b3d017b69a4a5a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/u01.xml' vs 'res/U01.xml'",
+      "timestamp": "2026-08-27T19:15:50.448048"
+    },
+    {
+      "event_id": "895e780d71054529",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tp.xml' vs 'res/tP.xml'",
+      "timestamp": "2026-08-27T19:15:50.448236"
+    },
+    {
+      "event_id": "07831739743a4474",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/uK.xml' vs 'res/Uk.xml'",
+      "timestamp": "2026-08-27T19:15:50.448410"
+    },
+    {
+      "event_id": "b5e708bfe0c748df",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/lT.xml' vs 'res/Lt.xml'",
+      "timestamp": "2026-08-27T19:15:50.448596"
+    },
+    {
+      "event_id": "224366a37a6543ec",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/rU1.xml' vs 'res/ru1.xml'",
+      "timestamp": "2026-08-27T19:15:50.448829"
+    },
+    {
+      "event_id": "d949250b4ce84e42",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vj.xml' vs 'res/Vj.xml'",
+      "timestamp": "2026-08-27T19:15:50.449001"
+    },
+    {
+      "event_id": "81a8d116c74b4279",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/DH.xml' vs 'res/dH.xml'",
+      "timestamp": "2026-08-27T19:15:50.449178"
+    },
+    {
+      "event_id": "cc4ba84643b14fd9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/JF.xml' vs 'res/Jf.xml'",
+      "timestamp": "2026-08-27T19:15:50.449369"
+    },
+    {
+      "event_id": "cc039246fed8413c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/NH.xml' vs 'res/nH.xml'",
+      "timestamp": "2026-08-27T19:15:50.449550"
+    },
+    {
+      "event_id": "de91a8c4adae496e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qU.xml' vs 'res/Qu.xml'",
+      "timestamp": "2026-08-27T19:15:50.449728"
+    },
+    {
+      "event_id": "3721b6c0b48b45a1",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/2J.xml' vs 'res/2j.xml'",
+      "timestamp": "2026-08-27T19:15:50.449902"
+    },
+    {
+      "event_id": "5d4a974fea1b4412",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/IO1.xml' vs 'res/io1.xml'",
+      "timestamp": "2026-08-27T19:15:50.450073"
+    },
+    {
+      "event_id": "b9c8a73e43894b52",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ky.xml' vs 'res/KY.xml'",
+      "timestamp": "2026-08-27T19:15:50.450251"
+    },
+    {
+      "event_id": "3707295866de47b8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/YM1.xml' vs 'res/Ym1.xml'",
+      "timestamp": "2026-08-27T19:15:50.450433"
+    },
+    {
+      "event_id": "bbf853b672c3409a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Kz.xml' vs 'res/KZ.xml'",
+      "timestamp": "2026-08-27T19:15:50.450602"
+    },
+    {
+      "event_id": "505163d4368649ce",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/7c.xml' vs 'res/7C.xml'",
+      "timestamp": "2026-08-27T19:15:50.450771"
+    },
+    {
+      "event_id": "fbfc3285b21f4134",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ji.xml' vs 'res/ji.xml'",
+      "timestamp": "2026-08-27T19:15:50.450942"
+    },
+    {
+      "event_id": "f9e81483a0c740e8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/jl.xml' vs 'res/jL.xml'",
+      "timestamp": "2026-08-27T19:15:50.451109"
+    },
+    {
+      "event_id": "f64b7611d6184fb0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/MZ.xml' vs 'res/Mz.xml'",
+      "timestamp": "2026-08-27T19:15:50.451298"
+    },
+    {
+      "event_id": "6bcc3ca769a64375",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Pu.xml' vs 'res/pU.xml'",
+      "timestamp": "2026-08-27T19:15:50.451466"
+    },
+    {
+      "event_id": "2ff98c8d5b2d4486",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/em.xml' vs 'res/eM.xml'",
+      "timestamp": "2026-08-27T19:15:50.451639"
+    },
+    {
+      "event_id": "ad6ae38b847044b2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/RH.xml' vs 'res/rh.xml'",
+      "timestamp": "2026-08-27T19:15:50.451811"
+    },
+    {
+      "event_id": "2497e86348004cfc",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ce.xml' vs 'res/ce.xml'",
+      "timestamp": "2026-08-27T19:15:50.451990"
+    },
+    {
+      "event_id": "e7a45e4ce4b04e01",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/oJ.xml' vs 'res/oj.xml'",
+      "timestamp": "2026-08-27T19:15:50.452167"
+    },
+    {
+      "event_id": "b39997c8a62d4e6a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/SM.xml' vs 'res/Sm.xml'",
+      "timestamp": "2026-08-27T19:15:50.452342"
+    },
+    {
+      "event_id": "06372541337d45bc",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fr.xml' vs 'res/fR.xml'",
+      "timestamp": "2026-08-27T19:15:50.452520"
+    },
+    {
+      "event_id": "356926f98af947c8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/LF.xml' vs 'res/lf.xml'",
+      "timestamp": "2026-08-27T19:15:50.452697"
+    },
+    {
+      "event_id": "132132b6bcaf4eb2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/UA.xml' vs 'res/uA.xml'",
+      "timestamp": "2026-08-27T19:15:50.452877"
+    },
+    {
+      "event_id": "ddc586b25b1347bb",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Es.xml' vs 'res/eS.xml'",
+      "timestamp": "2026-08-27T19:15:50.453054"
+    },
+    {
+      "event_id": "f800983af58f4e05",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/zc.xml' vs 'res/zC.xml'",
+      "timestamp": "2026-08-27T19:15:50.453242"
+    },
+    {
+      "event_id": "ab6745d354c94443",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/g_.xml' vs 'res/G_.xml'",
+      "timestamp": "2026-08-27T19:15:50.453419"
+    },
+    {
+      "event_id": "46aff84a7e764a01",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/J1.xml' vs 'res/j1.xml'",
+      "timestamp": "2026-08-27T19:15:50.453590"
+    },
+    {
+      "event_id": "cf5e42781c2241a8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/i6.webp' vs 'res/I6.webp'",
+      "timestamp": "2026-08-27T19:15:50.453762"
+    },
+    {
+      "event_id": "de7ad661c5bf489c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Qt.xml' vs 'res/qT.xml'",
+      "timestamp": "2026-08-27T19:15:50.453932"
+    },
+    {
+      "event_id": "463c7102dc8d4eee",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/2X.xml' vs 'res/2x.xml'",
+      "timestamp": "2026-08-27T19:15:50.454104"
+    },
+    {
+      "event_id": "9f115ecc970f4d6f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/aW.xml' vs 'res/aw.xml'",
+      "timestamp": "2026-08-27T19:15:50.454274"
+    },
+    {
+      "event_id": "d8504ee265054369",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FX.xml' vs 'res/Fx.xml'",
+      "timestamp": "2026-08-27T19:15:50.454445"
+    },
+    {
+      "event_id": "738d50dd3fd547bc",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fc.xml' vs 'res/Fc.xml'",
+      "timestamp": "2026-08-27T19:15:50.454616"
+    },
+    {
+      "event_id": "90cd2c98a58f4e1d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/RB.xml' vs 'res/rB.xml'",
+      "timestamp": "2026-08-27T19:15:50.454788"
+    },
+    {
+      "event_id": "6f12f7ed852c490c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/_E.xml' vs 'res/_e.xml'",
+      "timestamp": "2026-08-27T19:15:50.454957"
+    },
+    {
+      "event_id": "2dc5b07482a0462e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/f81.xml' vs 'res/F81.xml'",
+      "timestamp": "2026-08-27T19:15:50.455137"
+    },
+    {
+      "event_id": "5e77d1c105d84dc0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ts.xml' vs 'res/tS.xml'",
+      "timestamp": "2026-08-27T19:15:50.455313"
+    },
+    {
+      "event_id": "946744cf1af44bf3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Zm.xml' vs 'res/zM.xml'",
+      "timestamp": "2026-08-27T19:15:50.455495"
+    },
+    {
+      "event_id": "7057dbe0ff5740b2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/tE.xml' vs 'res/Te.xml'",
+      "timestamp": "2026-08-27T19:15:50.455663"
+    },
+    {
+      "event_id": "c6e1461869dc469f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/4f.xml' vs 'res/4F.xml'",
+      "timestamp": "2026-08-27T19:15:50.455841"
+    },
+    {
+      "event_id": "55980a830ee048d5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/vQ1.xml' vs 'res/VQ1.xml'",
+      "timestamp": "2026-08-27T19:15:50.456013"
+    },
+    {
+      "event_id": "3bf32d8b31d64375",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ls.xml' vs 'res/Ls.xml'",
+      "timestamp": "2026-08-27T19:15:50.456182"
+    },
+    {
+      "event_id": "47f7e353fc4c458f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/mY.xml' vs 'res/My.xml'",
+      "timestamp": "2026-08-27T19:15:50.456350"
+    },
+    {
+      "event_id": "10ce86b450ef409c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/X2.xml' vs 'res/x2.xml'",
+      "timestamp": "2026-08-27T19:15:50.456520"
+    },
+    {
+      "event_id": "209d6c7e308f47e3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/rU.xml' vs 'res/ru.xml'",
+      "timestamp": "2026-08-27T19:15:50.456689"
+    },
+    {
+      "event_id": "d6f5da18f995456a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nj.xml' vs 'res/Nj.xml'",
+      "timestamp": "2026-08-27T19:15:50.456860"
+    },
+    {
+      "event_id": "35de20fbc922458c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/GD.xml' vs 'res/gD.xml'",
+      "timestamp": "2026-08-27T19:15:50.457036"
+    },
+    {
+      "event_id": "bcd531d0f4f847af",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/OS.xml' vs 'res/oS.xml'",
+      "timestamp": "2026-08-27T19:15:50.457213"
+    },
+    {
+      "event_id": "84f0fc200540404c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/mR.xml' vs 'res/Mr.xml'",
+      "timestamp": "2026-08-27T19:15:50.457388"
+    },
+    {
+      "event_id": "a00f96393abe48d4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/iH.xml' vs 'res/IH.xml'",
+      "timestamp": "2026-08-27T19:15:50.457563"
+    },
+    {
+      "event_id": "015df0d3490f41ed",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FB.xml' vs 'res/Fb.xml'",
+      "timestamp": "2026-08-27T19:15:50.457737"
+    },
+    {
+      "event_id": "090fac9ee6f6426f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fI.xml' vs 'res/fi.xml'",
+      "timestamp": "2026-08-27T19:15:50.457905"
+    },
+    {
+      "event_id": "b283f8a925c2437f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/JS.xml' vs 'res/jS.xml'",
+      "timestamp": "2026-08-27T19:15:50.458076"
+    },
+    {
+      "event_id": "d0a4d3448d55423f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/yT2.xml' vs 'res/Yt2.xml'",
+      "timestamp": "2026-08-27T19:15:50.458246"
+    },
+    {
+      "event_id": "c6beae38f4334461",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/m2.xml' vs 'res/M2.xml'",
+      "timestamp": "2026-08-27T19:15:50.458420"
+    },
+    {
+      "event_id": "75bd07b98e5f4d99",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Gb.xml' vs 'res/GB.xml'",
+      "timestamp": "2026-08-27T19:15:50.458588"
+    },
+    {
+      "event_id": "f64eb4f3f2404920",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Yw1.xml' vs 'res/YW1.xml'",
+      "timestamp": "2026-08-27T19:15:50.458757"
+    },
+    {
+      "event_id": "6a79d669c9824743",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/4q.xml' vs 'res/4Q.xml'",
+      "timestamp": "2026-08-27T19:15:50.458926"
+    },
+    {
+      "event_id": "0c1a823562604790",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/NJ.xml' vs 'res/nj.xml'",
+      "timestamp": "2026-08-27T19:15:50.459101"
+    },
+    {
+      "event_id": "9d22182730f142fd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/JK.xml' vs 'res/jK.xml'",
+      "timestamp": "2026-08-27T19:15:50.459270"
+    },
+    {
+      "event_id": "30231422f150403c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/EW.xml' vs 'res/Ew.xml'",
+      "timestamp": "2026-08-27T19:15:50.459440"
+    },
+    {
+      "event_id": "499fb448712449dd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/rp.xml' vs 'res/RP.xml'",
+      "timestamp": "2026-08-27T19:15:50.459619"
+    },
+    {
+      "event_id": "7909dc3a9574480d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qJ.webp' vs 'res/QJ.webp'",
+      "timestamp": "2026-08-27T19:15:50.459788"
+    },
+    {
+      "event_id": "8982c99393ac4aa9",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ZL.xml' vs 'res/zL.xml'",
+      "timestamp": "2026-08-27T19:15:50.459957"
+    },
+    {
+      "event_id": "32032677d50e449e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/SI.xml' vs 'res/Si.xml'",
+      "timestamp": "2026-08-27T19:15:50.460124"
+    },
+    {
+      "event_id": "2d0f024b0e914c3b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/F8.xml' vs 'res/f8.xml'",
+      "timestamp": "2026-08-27T19:15:50.460294"
+    },
+    {
+      "event_id": "aede494dbca84709",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/co.xml' vs 'res/CO.xml'",
+      "timestamp": "2026-08-27T19:15:50.460463"
+    },
+    {
+      "event_id": "9b6513663ad74c94",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Jc.xml' vs 'res/jc.xml'",
+      "timestamp": "2026-08-27T19:15:50.460631"
+    },
+    {
+      "event_id": "f3f278ee0f734f57",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ly.png' vs 'res/ly.png'",
+      "timestamp": "2026-08-27T19:15:50.460802"
+    },
+    {
+      "event_id": "897bbe9367354ea4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qx.xml' vs 'res/QX.xml'",
+      "timestamp": "2026-08-27T19:15:50.460970"
+    },
+    {
+      "event_id": "a06def2581f34b22",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/iu1.xml' vs 'res/IU1.xml'",
+      "timestamp": "2026-08-27T19:15:50.461140"
+    },
+    {
+      "event_id": "c05eafb2bd5c4545",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Wr.xml' vs 'res/WR.xml'",
+      "timestamp": "2026-08-27T19:15:50.461307"
+    },
+    {
+      "event_id": "764137b54ee74678",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FF.xml' vs 'res/ff.xml'",
+      "timestamp": "2026-08-27T19:15:50.461482"
+    },
+    {
+      "event_id": "b5503d42aaa3438d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/3B.xml' vs 'res/3b.xml'",
+      "timestamp": "2026-08-27T19:15:50.461661"
+    },
+    {
+      "event_id": "94ac7664567044f7",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/bn.xml' vs 'res/bN.xml'",
+      "timestamp": "2026-08-27T19:15:50.461826"
+    },
+    {
+      "event_id": "23836b5da7544ec0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/iw.xml' vs 'res/IW.xml'",
+      "timestamp": "2026-08-27T19:15:50.461993"
+    },
+    {
+      "event_id": "62d5819f742144af",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nk.xml' vs 'res/Nk.xml'",
+      "timestamp": "2026-08-27T19:15:50.462161"
+    },
+    {
+      "event_id": "bf05f2a5b8014246",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qI.xml' vs 'res/Qi.xml'",
+      "timestamp": "2026-08-27T19:15:50.462337"
+    },
+    {
+      "event_id": "756f4e0f1f054d98",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/rC.xml' vs 'res/Rc.xml'",
+      "timestamp": "2026-08-27T19:15:50.462510"
+    },
+    {
+      "event_id": "063f83887cc24822",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nF.xml' vs 'res/nf.xml'",
+      "timestamp": "2026-08-27T19:15:50.462682"
+    },
+    {
+      "event_id": "5a28b99a57434f27",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/By.xml' vs 'res/by.xml'",
+      "timestamp": "2026-08-27T19:15:50.462852"
+    },
+    {
+      "event_id": "f6c22d45daad451a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Mc.xml' vs 'res/mC.xml'",
+      "timestamp": "2026-08-27T19:15:50.463022"
+    },
+    {
+      "event_id": "6dc7369a1b274b4d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/on1.xml' vs 'res/On1.xml'",
+      "timestamp": "2026-08-27T19:15:50.463190"
+    },
+    {
+      "event_id": "58653fb787b3476d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/gG.xml' vs 'res/gg.xml'",
+      "timestamp": "2026-08-27T19:15:50.463366"
+    },
+    {
+      "event_id": "ea2cd4c6e8f44bfe",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/NA.xml' vs 'res/Na.xml'",
+      "timestamp": "2026-08-27T19:15:50.463549"
+    },
+    {
+      "event_id": "f11008e560fc4640",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xD.xml' vs 'res/xd.xml'",
+      "timestamp": "2026-08-27T19:15:50.463773"
+    },
+    {
+      "event_id": "181788159b944b9d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/gd.xml' vs 'res/GD.xml'",
+      "timestamp": "2026-08-27T19:15:50.463941"
+    },
+    {
+      "event_id": "7aeb05255ea248fa",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/a0.xml' vs 'res/A0.xml'",
+      "timestamp": "2026-08-27T19:15:50.464118"
+    },
+    {
+      "event_id": "9f11867343d84e71",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ep.xml' vs 'res/EP.xml'",
+      "timestamp": "2026-08-27T19:15:50.464295"
+    },
+    {
+      "event_id": "61fe105a79c84abe",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/qM.webp' vs 'res/QM.webp'",
+      "timestamp": "2026-08-27T19:15:50.464488"
+    },
+    {
+      "event_id": "f4b5757c41d64c21",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/xE.xml' vs 'res/Xe.xml'",
+      "timestamp": "2026-08-27T19:15:50.464661"
+    },
+    {
+      "event_id": "622ec6510f93405f",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/A3.webp' vs 'res/a3.webp'",
+      "timestamp": "2026-08-27T19:15:50.464836"
+    },
+    {
+      "event_id": "363dd52901ba4ed3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/BG.xml' vs 'res/Bg.xml'",
+      "timestamp": "2026-08-27T19:15:50.465013"
+    },
+    {
+      "event_id": "ea7f72546f7d4461",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/IX.xml' vs 'res/iX.xml'",
+      "timestamp": "2026-08-27T19:15:50.465180"
+    },
+    {
+      "event_id": "3b09671ff5b64f03",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Tf.xml' vs 'res/tF.xml'",
+      "timestamp": "2026-08-27T19:15:50.465356"
+    },
+    {
+      "event_id": "c5aecc6c7ebe456c",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Us.xml' vs 'res/US.xml'",
+      "timestamp": "2026-08-27T19:15:50.465525"
+    },
+    {
+      "event_id": "283c2d75059f4c22",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/oH.xml' vs 'res/OH.xml'",
+      "timestamp": "2026-08-27T19:15:50.465693"
+    },
+    {
+      "event_id": "1b3ca7013e314cdc",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hR.xml' vs 'res/Hr.xml'",
+      "timestamp": "2026-08-27T19:15:50.465859"
+    },
+    {
+      "event_id": "cb5923016e944ef1",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nw.xml' vs 'res/Nw.xml'",
+      "timestamp": "2026-08-27T19:15:50.466035"
+    },
+    {
+      "event_id": "979333e0d36e4b57",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/XK.xml' vs 'res/Xk.xml'",
+      "timestamp": "2026-08-27T19:15:50.466212"
+    },
+    {
+      "event_id": "b899003396154cd2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Fw.xml' vs 'res/FW.xml'",
+      "timestamp": "2026-08-27T19:15:50.466382"
+    },
+    {
+      "event_id": "7c44cf47044848c2",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Li.xml' vs 'res/li.xml'",
+      "timestamp": "2026-08-27T19:15:50.466549"
+    },
+    {
+      "event_id": "ca728d93b2f54e5b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fl.xml' vs 'res/Fl.xml'",
+      "timestamp": "2026-08-27T19:15:50.466716"
+    },
+    {
+      "event_id": "f79ae1e8c3ce4c6a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/0h.xml' vs 'res/0H.xml'",
+      "timestamp": "2026-08-27T19:15:50.466883"
+    },
+    {
+      "event_id": "db022db3d7734aaa",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/GP.xml' vs 'res/gp.xml'",
+      "timestamp": "2026-08-27T19:15:50.467052"
+    },
+    {
+      "event_id": "7fe46244116f41ac",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/9e.xml' vs 'res/9E.xml'",
+      "timestamp": "2026-08-27T19:15:50.467218"
+    },
+    {
+      "event_id": "4a82e00fa40840e3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hA.xml' vs 'res/ha.xml'",
+      "timestamp": "2026-08-27T19:15:50.467403"
+    },
+    {
+      "event_id": "782e51b8c0124c50",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/uk.xml' vs 'res/uK.xml'",
+      "timestamp": "2026-08-27T19:15:50.467584"
+    },
+    {
+      "event_id": "b7322fbf75b54a57",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/v2.xml' vs 'res/V2.xml'",
+      "timestamp": "2026-08-27T19:15:50.467755"
+    },
+    {
+      "event_id": "faf85cd26cc54c0a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/VN.xml' vs 'res/Vn.xml'",
+      "timestamp": "2026-08-27T19:15:50.467935"
+    },
+    {
+      "event_id": "90573822faf04983",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/bC.xml' vs 'res/bc.xml'",
+      "timestamp": "2026-08-27T19:15:50.468102"
+    },
+    {
+      "event_id": "e41ad9ef02cc414b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/YF.xml' vs 'res/yF.xml'",
+      "timestamp": "2026-08-27T19:15:50.468271"
+    },
+    {
+      "event_id": "fa4a067e01bc484b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fp.xml' vs 'res/fP.xml'",
+      "timestamp": "2026-08-27T19:15:50.468438"
+    },
+    {
+      "event_id": "2d2c5c312b004f1d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/WH.xml' vs 'res/wh.xml'",
+      "timestamp": "2026-08-27T19:15:50.468606"
+    },
+    {
+      "event_id": "e237ed4fbf964295",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Nb.xml' vs 'res/nB.xml'",
+      "timestamp": "2026-08-27T19:15:50.468773"
+    },
+    {
+      "event_id": "c4dd1af48fb84b4a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Da1.xml' vs 'res/DA1.xml'",
+      "timestamp": "2026-08-27T19:15:50.468940"
+    },
+    {
+      "event_id": "50201aa7df924e09",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/pk1.xml' vs 'res/Pk1.xml'",
+      "timestamp": "2026-08-27T19:15:50.469108"
+    },
+    {
+      "event_id": "624678e91ab144c5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/kX.xml' vs 'res/KX.xml'",
+      "timestamp": "2026-08-27T19:15:50.469276"
+    },
+    {
+      "event_id": "afe247fcef7849b8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/nf.png' vs 'res/Nf.png'",
+      "timestamp": "2026-08-27T19:15:50.469466"
+    },
+    {
+      "event_id": "b36852afabc84abc",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/eK.xml' vs 'res/ek.xml'",
+      "timestamp": "2026-08-27T19:15:50.469633"
+    },
+    {
+      "event_id": "ed0b6dd9b83a45fa",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/k_.xml' vs 'res/K_.xml'",
+      "timestamp": "2026-08-27T19:15:50.469804"
+    },
+    {
+      "event_id": "1ab8678d5680453d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FU.xml' vs 'res/Fu.xml'",
+      "timestamp": "2026-08-27T19:15:50.469970"
+    },
+    {
+      "event_id": "07b2467b8f97441e",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/PS.xml' vs 'res/ps.xml'",
+      "timestamp": "2026-08-27T19:15:50.470140"
+    },
+    {
+      "event_id": "4d07f9f69e924bae",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Q_.xml' vs 'res/q_.xml'",
+      "timestamp": "2026-08-27T19:15:50.470306"
+    },
+    {
+      "event_id": "d373644c68b346f4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/_V.xml' vs 'res/_v.xml'",
+      "timestamp": "2026-08-27T19:15:50.470473"
+    },
+    {
+      "event_id": "648c4a754c834c33",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/lb.xml' vs 'res/Lb.xml'",
+      "timestamp": "2026-08-27T19:15:50.470640"
+    },
+    {
+      "event_id": "be570575fb48442a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/_i.xml' vs 'res/_I.xml'",
+      "timestamp": "2026-08-27T19:15:50.470806"
+    },
+    {
+      "event_id": "f6f17278d47e458d",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/cj.xml' vs 'res/CJ.xml'",
+      "timestamp": "2026-08-27T19:15:50.470973"
+    },
+    {
+      "event_id": "bc95774bcbaa4d23",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/5c.xml' vs 'res/5C.xml'",
+      "timestamp": "2026-08-27T19:15:50.471365"
+    },
+    {
+      "event_id": "464593cf09f64248",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/oJ2.xml' vs 'res/oj2.xml'",
+      "timestamp": "2026-08-27T19:15:50.471565"
+    },
+    {
+      "event_id": "974449cf596f4e62",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Ll.xml' vs 'res/lL.xml'",
+      "timestamp": "2026-08-27T19:15:50.471739"
+    },
+    {
+      "event_id": "b871e9b98bf34c37",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/ry.xml' vs 'res/rY.xml'",
+      "timestamp": "2026-08-27T19:15:50.471909"
+    },
+    {
+      "event_id": "d4b4405401ab45e3",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/no.xml' vs 'res/NO.xml'",
+      "timestamp": "2026-08-27T19:15:50.472079"
+    },
+    {
+      "event_id": "e25a29a536ce43c0",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Lo1.xml' vs 'res/lO1.xml'",
+      "timestamp": "2026-08-27T19:15:50.472261"
+    },
+    {
+      "event_id": "d6364edf27cc4cd4",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Dv1.xml' vs 'res/dV1.xml'",
+      "timestamp": "2026-08-27T19:15:50.472431"
+    },
+    {
+      "event_id": "e8b179f89c2545e1",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/D21.xml' vs 'res/d21.xml'",
+      "timestamp": "2026-08-27T19:15:50.472598"
+    },
+    {
+      "event_id": "790c0a579eb445bd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/-M.xml' vs 'res/-m.xml'",
+      "timestamp": "2026-08-27T19:15:50.472764"
+    },
+    {
+      "event_id": "bc2bea2e15234118",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hp.xml' vs 'res/hP.xml'",
+      "timestamp": "2026-08-27T19:15:50.472932"
+    },
+    {
+      "event_id": "46a8434ebc0945c8",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/XY.xml' vs 'res/xY.xml'",
+      "timestamp": "2026-08-27T19:15:50.473099"
+    },
+    {
+      "event_id": "68aed133c8584769",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/lZ.xml' vs 'res/LZ.xml'",
+      "timestamp": "2026-08-27T19:15:50.473266"
+    },
+    {
+      "event_id": "ea82180ebdc146a6",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/0u1.xml' vs 'res/0U1.xml'",
+      "timestamp": "2026-08-27T19:15:50.473433"
+    },
+    {
+      "event_id": "9aec1d6a03ab45e5",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/FH.xml' vs 'res/fh.xml'",
+      "timestamp": "2026-08-27T19:15:50.473600"
+    },
+    {
+      "event_id": "602fed821ba64e7b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/fs.xml' vs 'res/FS.xml'",
+      "timestamp": "2026-08-27T19:15:50.473767"
+    },
+    {
+      "event_id": "9befef9e12844afd",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/uJ.xml' vs 'res/Uj.xml'",
+      "timestamp": "2026-08-27T19:15:50.473934"
+    },
+    {
+      "event_id": "b619520ad0db4eca",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hq1.xml' vs 'res/HQ1.xml'",
+      "timestamp": "2026-08-27T19:15:50.474102"
+    },
+    {
+      "event_id": "f531a7bbc1024190",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/jv1.xml' vs 'res/Jv1.xml'",
+      "timestamp": "2026-08-27T19:15:50.474269"
+    },
+    {
+      "event_id": "c31dfdb735144f64",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Vf.xml' vs 'res/vF.xml'",
+      "timestamp": "2026-08-27T19:15:50.474443"
+    },
+    {
+      "event_id": "66583a134e34469a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/Uh.xml' vs 'res/UH.xml'",
+      "timestamp": "2026-08-27T19:15:50.474616"
+    },
+    {
+      "event_id": "a99eaad9f7dc4623",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/hL.xml' vs 'res/hl.xml'",
+      "timestamp": "2026-08-27T19:15:50.474787"
+    },
+    {
+      "event_id": "130d8b1782ed407a",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/sX.xml' vs 'res/SX.xml'",
+      "timestamp": "2026-08-27T19:15:50.474955"
+    },
+    {
+      "event_id": "89be0a08e6224876",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/dG.xml' vs 'res/DG.xml'",
+      "timestamp": "2026-08-27T19:15:50.475155"
+    },
+    {
+      "event_id": "73bc9b6fa5dc4f3b",
+      "stage": "validating_input",
+      "severity": "warning",
+      "message": "Case-folding collision: 'res/bD1.xml' vs 'res/Bd1.xml'",
+      "timestamp": "2026-08-27T19:15:50.475326"
+    }
+  ],
+  "warnings": []
+}

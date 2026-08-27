@@ -1,0 +1,411 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Workspace - NOIR APK</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "outline": "#8e9192",
+                      "on-tertiary-fixed": "#1b1b21",
+                      "on-error": "#690005",
+                      "on-secondary-fixed-variant": "#45464e",
+                      "primary-container": "#e2e2e2",
+                      "surface-container-low": "#1b1b1b",
+                      "surface-tint": "#c6c6c7",
+                      "tertiary-fixed": "#e3e1ea",
+                      "primary-fixed": "#e2e2e2",
+                      "error-container": "#93000a",
+                      "on-primary-fixed-variant": "#454747",
+                      "inverse-primary": "#5d5f5f",
+                      "surface": "#131313",
+                      "on-surface-variant": "#c4c7c8",
+                      "on-primary-container": "#636565",
+                      "outline-variant": "#444748",
+                      "primary": "#ffffff",
+                      "surface-container": "#1f1f1f",
+                      "on-tertiary": "#303037",
+                      "surface-container-lowest": "#0e0e0e",
+                      "on-surface": "#e2e2e2",
+                      "tertiary": "#ffffff",
+                      "surface-bright": "#393939",
+                      "background": "#131313",
+                      "error": "#ffb4ab",
+                      "on-secondary": "#2f3037",
+                      "on-background": "#e2e2e2",
+                      "tertiary-container": "#e3e1ea",
+                      "on-primary-fixed": "#1a1c1c",
+                      "surface-container-highest": "#353535",
+                      "secondary-fixed": "#e2e1eb",
+                      "on-tertiary-fixed-variant": "#46464d",
+                      "on-tertiary-container": "#64646b",
+                      "surface-dim": "#131313",
+                      "secondary": "#c6c6cf",
+                      "secondary-fixed-dim": "#c6c6cf",
+                      "inverse-surface": "#e2e2e2",
+                      "on-secondary-container": "#b4b4bd",
+                      "surface-container-high": "#2a2a2a",
+                      "surface-variant": "#353535",
+                      "on-error-container": "#ffdad6",
+                      "inverse-on-surface": "#303030",
+                      "secondary-container": "#45464e",
+                      "on-secondary-fixed": "#1a1b22",
+                      "tertiary-fixed-dim": "#c7c5ce",
+                      "on-primary": "#2f3131",
+                      "primary-fixed-dim": "#c6c6c7"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "container-max": "1440px",
+                      "gutter": "16px",
+                      "unit": "4px",
+                      "margin-desktop": "32px",
+                      "margin-mobile": "16px"
+              },
+              "fontFamily": {
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "code-sm": [
+                              "JetBrains Mono"
+                      ],
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ],
+                      "code-lg": [
+                              "JetBrains Mono"
+                      ],
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "JetBrains Mono"
+                      ]
+              },
+              "fontSize": {
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "code-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "letterSpacing": "0em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "code-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "letterSpacing": "0em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "letterSpacing": "0em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-caps": [
+                              "10px",
+                              {
+                                      "lineHeight": "12px",
+                                      "letterSpacing": "0.1em",
+                                      "fontWeight": "700"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.8s ease-out forwards;
+            opacity: 0;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .terminal-text {
+            color: #fff;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Custom scrollbar for technical look */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3); 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2); 
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.4); 
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface min-h-screen relative overflow-x-hidden selection:bg-white/20 selection:text-white">
+<!-- Background Image -->
+<div class="fixed inset-0 z-[-1] pointer-events-none">
+<img alt="Background" class="w-full h-full object-cover mix-blend-luminosity grayscale filter blur-sm opacity-10" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAxwz_fAkYpaokNCQImF1Mk-aCsAuJ69Z05iZ18RYPSAXvoTqZi6-YCR6057tXU3PQ4wKW5b4knwx6Vi4pKZB8yyPvIrTuCS5hXIepdW_o788lX1zOEKvH9pJ_T9qottcbnFXzS3AeQPvnNisIXXdfsJEUh2GjthSHjXZ3M_hPlrhIYYs_3sRNBXx9SccfGFw1TmwxEzI0nkzQ5Xh88pvIxoJ9SXCV1-a9SmX7mrLq1Z-fC4rA84StNehQmYO-PtC6ijA">
+<div class="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background/90 mix-blend-multiply"></div>
+</div>
+<!-- TopAppBar from JSON -->
+<header class="fixed top-0 w-full h-[83px] border-b border-white/10 bg-surface/10 dark:bg-surface/10 backdrop-blur-md backdrop-blur-xl shadow-[0_0_15px_rgba(255,255,255,0.05)] z-50 flex items-center justify-between px-margin-desktop transition-all duration-300">
+<div class="flex items-center gap-4 cursor-pointer hover:bg-white/5 hover:backdrop-blur-2xl transition-all duration-300 p-2 rounded">
+<span class="material-symbols-outlined text-primary dark:text-primary brightness-125" data-icon="terminal">terminal</span>
+<span class="font-label-caps text-label-caps tracking-widest text-primary dark:text-primary">MOD_CORE_V1.0</span>
+</div>
+<div class="flex items-center gap-4 text-on-surface-variant/50 dark:text-on-surface-variant/50">
+<span class="material-symbols-outlined cursor-pointer hover:text-primary transition-colors" data-icon="settings_input_component">settings_input_component</span>
+</div>
+</header>
+<!-- Main Workspace Content -->
+<main class="pt-[100px] pb-24 px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto min-h-screen flex flex-col gap-gutter fade-in" style="animation-delay: 0.1s;">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 gap-4">
+<div>
+<h1 class="font-headline-lg text-headline-lg text-primary tracking-tight">target_app_v2.4.apk</h1>
+<p class="font-code-sm text-code-sm text-on-surface-variant mt-1">Status: <span class="text-white terminal-text">DECODED</span> | Size: 42.8 MB</p>
+</div>
+<div class="flex gap-3 w-full md:w-auto">
+<button class="flex-1 md:flex-none px-6 py-2 border border-white/30 text-white font-code-sm text-code-sm uppercase tracking-wider hover:border-white hover:bg-white/5 transition-all duration-300 rounded-DEFAULT relative overflow-hidden group">
+<span class="relative z-10">Review Changes</span>
+<div class="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+</button>
+<button class="flex-1 md:flex-none px-6 py-2 bg-primary text-background font-code-sm text-code-sm font-bold uppercase tracking-wider hover:bg-white/90 transition-all duration-300 rounded-DEFAULT shadow-[0_0_15px_rgba(255,255,255,0.2)] hover:shadow-[0_0_25px_rgba(255,255,255,0.4)]">
+                    Build
+                </button>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-gutter flex-1">
+<!-- File Explorer (Left Panel) -->
+<div class="col-span-1 md:col-span-4 lg:col-span-3 glass-panel rounded-lg flex flex-col h-[600px] overflow-hidden fade-in" style="animation-delay: 0.2s;">
+<div class="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
+<h2 class="font-label-caps text-label-caps text-on-surface-variant">WORKSPACE</h2>
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]" data-icon="folder_open">folder_open</span>
+</div>
+<div class="p-2 overflow-y-auto flex-1 font-code-sm text-code-sm">
+<ul class="space-y-1">
+<!-- Root -->
+<li class="">
+<div class="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer text-primary">
+<span class="material-symbols-outlined text-[16px]" data-icon="folder">folder</span>
+<span class="">/root</span>
+</div>
+<ul class="pl-6 space-y-1 mt-1 border-l border-white/10 ml-3">
+<li class="">
+<div class="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[16px]" data-icon="folder">folder</span>
+<span class="">assets</span>
+</div>
+</li>
+<li class="">
+<div class="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[16px]" data-icon="folder">folder</span>
+<span class="">lib</span>
+</div>
+</li>
+<li class="">
+<div class="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[16px]" data-icon="folder">folder</span>
+<span class="">res</span>
+</div>
+</li>
+<li class="">
+<div class="flex items-center gap-2 p-2 bg-white/10 rounded cursor-pointer text-primary border-l-2 border-primary -ml-[1px]">
+<span class="material-symbols-outlined text-[16px]" data-icon="folder_open">folder_open</span>
+<span class="">smali</span>
+</div>
+<ul class="pl-6 space-y-1 mt-1 border-l border-white/10 ml-3">
+<li class="">
+<div class="flex items-center gap-2 p-1.5 hover:bg-white/5 rounded cursor-pointer text-on-surface-variant">
+<span class="material-symbols-outlined text-[14px]" data-icon="description">description</span>
+<span class="truncate">MainActivity.smali</span>
+</div>
+</li>
+<li class="">
+<div class="flex items-center gap-2 p-1.5 hover:bg-white/5 rounded cursor-pointer text-on-surface-variant">
+<span class="material-symbols-outlined text-[14px]" data-icon="description">description</span>
+<span class="truncate">AppConfig.smali</span>
+</div>
+</li>
+</ul>
+</li>
+<li class="">
+<div class="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[16px]" data-icon="code">code</span>
+<span class="">AndroidManifest.xml</span>
+</div>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<!-- Editor / Main View (Right Panel) -->
+<div class="col-span-1 md:col-span-8 lg:col-span-9 flex flex-col gap-gutter fade-in" style="animation-delay: 0.3s;">
+<!-- Code Editor Area -->
+<div class="glass-panel rounded-lg flex-1 flex flex-col overflow-hidden relative">
+<!-- Mesh gradient background effect -->
+<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white/[0.03] via-transparent to-transparent pointer-events-none"></div>
+<div class="p-3 border-b border-white/10 flex items-center gap-4 bg-white/5 overflow-x-auto">
+<div class="flex items-center gap-2 px-3 py-1 bg-white/10 rounded-DEFAULT border border-white/20 text-primary font-code-sm text-code-sm">
+<span class="material-symbols-outlined text-[14px]" data-icon="description">description</span>
+                            MainActivity.smali
+                            <span class="material-symbols-outlined text-[14px] cursor-pointer hover:text-white ml-2" data-icon="close">close</span>
+</div>
+<div class="flex items-center gap-2 px-3 py-1 hover:bg-white/5 rounded-DEFAULT text-on-surface-variant font-code-sm text-code-sm cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[14px]" data-icon="code">code</span>
+                            AndroidManifest.xml
+                        </div>
+</div>
+<!-- Editor Content -->
+<div class="flex-1 p-4 overflow-auto font-code-lg text-code-lg text-on-surface-variant leading-relaxed relative">
+<!-- Line Numbers -->
+<div class="absolute left-0 top-0 bottom-0 w-12 bg-black/20 border-r border-white/5 flex flex-col items-end py-4 pr-2 text-on-surface-variant/30 select-none">
+<span class="">1</span><span class="">2</span><span class="">3</span><span class="">4</span><span class="">5</span><span class="">6</span><span class="">7</span><span class="">8</span><span class="">9</span><span class="">10</span><span class="">11</span><span class="">12</span><span class="">13</span>
+</div>
+<div class="pl-10">
+<pre><code><span class="text-outline">.class public Lcom/example/target/MainActivity;</span>
+<span class="text-outline">.super Landroidx/appcompat/app/AppCompatActivity;</span>
+<span class="text-outline">.source "MainActivity.java"</span>
+
+<span class="text-primary-container"># instance fields</span>
+<span class="text-outline">.field private isPremium:Z</span>
+
+<span class="text-primary-container"># direct methods</span>
+<span class="text-outline">.method public constructor &lt;init&gt;()V</span>
+    <span class="text-surface-tint">.locals 1</span>
+
+    <span class="text-surface-tint">invoke-direct {p0}, Landroidx/appcompat/app/AppCompatActivity;-&gt;&lt;init&gt;()V</span>
+
+    <span class="text-error-container bg-error-container/20 px-1 rounded">const/4 v0, 0x0</span> <span class="text-on-surface-variant/50 ml-4"># Changed from 0x1 to test</span>
+    
+    <span class="text-surface-tint">iput-boolean v0, p0, Lcom/example/target/MainActivity;-&gt;isPremium:Z</span>
+
+    <span class="text-surface-tint">return-void</span>
+<span class="text-outline">.end method</span></code></pre>
+</div>
+</div>
+</div>
+<!-- Terminal Output -->
+<div class="glass-panel rounded-lg h-40 flex flex-col overflow-hidden relative fade-in" style="animation-delay: 0.4s;">
+<div class="p-2 border-b border-white/10 flex justify-between items-center bg-black/40">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-on-surface-variant text-[14px]" data-icon="terminal">terminal</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">CONSOLE</span>
+</div>
+<div class="flex gap-2">
+<div class="w-2 h-2 rounded-full bg-white/20"></div>
+<div class="w-2 h-2 rounded-full bg-white/20"></div>
+<div class="w-2 h-2 rounded-full bg-white/20"></div>
+</div>
+</div>
+<div class="flex-1 p-3 font-code-sm text-code-sm overflow-y-auto bg-black/20">
+<div class="text-on-surface-variant/70 mb-1">&gt; Initiating apktool d target_app_v2.4.apk -o decoded_workspace</div>
+<div class="text-on-surface-variant/70 mb-1">I: Using Apktool 2.9.3 on target_app_v2.4.apk</div>
+<div class="text-on-surface-variant/70 mb-1">I: Loading resource table...</div>
+<div class="text-on-surface-variant/70 mb-1">I: Decoding AndroidManifest.xml with resources...</div>
+<div class="text-on-surface-variant/70 mb-1">I: Loading resource table from file: /usr/local/framework/1.apk</div>
+<div class="text-on-surface-variant/70 mb-1">I: Regular manifest package...</div>
+<div class="text-on-surface-variant/70 mb-1">I: Decoding file-resources...</div>
+<div class="text-on-surface-variant/70 mb-1">I: Decoding values */* XMLs...</div>
+<div class="text-on-surface-variant/70 mb-1">I: Baksmaling classes.dex...</div>
+<div class="text-primary terminal-text mt-2 flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse blur-[1px]"></span>
+                            Decoded successfully. Workspace ready.
+                        </div>
+<div class="text-primary mt-1 animate-pulse">_</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar from JSON (Hidden on md, visible on mobile) -->
+<nav class="md:hidden fixed bottom-0 w-full border-t border-white/10 bg-surface/10 dark:bg-surface/10 backdrop-blur-md backdrop-blur-xl shadow-[0_-5px_20px_rgba(0,0,0,0.5)] h-16 z-50 flex justify-around items-center px-margin-mobile transition-all duration-300">
+<div class="flex flex-col items-center gap-1 cursor-pointer hover:text-primary/80 transition-colors duration-200 text-on-surface-variant/40 dark:text-on-surface-variant/40">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+</div>
+<div class="flex flex-col items-center gap-1 cursor-pointer hover:text-primary/80 transition-colors duration-200 text-on-surface-variant/40 dark:text-on-surface-variant/40">
+<span class="material-symbols-outlined" data-icon="layers">layers</span>
+</div>
+<div class="flex flex-col items-center gap-1 cursor-pointer hover:text-primary/80 transition-colors duration-200 text-primary dark:text-primary relative after:content-[''] after:absolute after:-bottom-2 after:w-1 after:h-1 after:bg-primary after:rounded-full after:shadow-[0_0_8px_white] scale-110">
+<span class="material-symbols-outlined" data-icon="developer_mode">developer_mode</span>
+</div>
+<div class="flex flex-col items-center gap-1 cursor-pointer hover:text-primary/80 transition-colors duration-200 text-on-surface-variant/40 dark:text-on-surface-variant/40">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</div>
+</nav>
+<script>
+        // Simple script to handle terminal typing effect for realism
+        document.addEventListener('DOMContentLoaded', () => {
+            const cursor = document.querySelector('.animate-pulse._');
+            if(cursor) {
+                setInterval(() => {
+                    cursor.style.opacity = cursor.style.opacity === '0' ? '1' : '0';
+                }, 500);
+            }
+        });
+    </script>
+
+
+</body></html>
