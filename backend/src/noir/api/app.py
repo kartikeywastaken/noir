@@ -287,6 +287,19 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             ]
         }
 
+    @app.get(
+        "/v1/projects/{project_id}/plans/{plan_id}", dependencies=[Depends(_verify_token)]
+    )
+    def get_plan(project_id: str, plan_id: str):
+        from noir.application.patch_service import PlanService
+
+        plan = PlanService(cfg).get_plan(plan_id)
+        if not plan or plan.project_id != project_id:
+            raise HTTPException(404, "Plan not found")
+        data = plan.model_dump(mode="json")
+        data["plan_hash"] = plan.compute_hash()
+        return data
+
     @app.post(
         "/v1/projects/{project_id}/plans/{plan_id}/approve", dependencies=[Depends(_verify_token)]
     )
@@ -296,6 +309,18 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         try:
             approval = PlanService(cfg).approve_plan(project_id, plan_id, req.hash)
             return approval.model_dump(mode="json")
+        except PlanServiceError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post(
+        "/v1/projects/{project_id}/plans/{plan_id}/reject", dependencies=[Depends(_verify_token)]
+    )
+    def reject_plan(project_id: str, plan_id: str):
+        from noir.application.patch_service import PlanService, PlanServiceError
+
+        try:
+            PlanService(cfg).reject_plan(project_id, plan_id)
+            return {"rejected": plan_id}
         except PlanServiceError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -324,6 +349,46 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         except PlanServiceError as e:
             raise HTTPException(400, str(e)) from None
 
+    @app.get("/v1/projects/{project_id}/patches", dependencies=[Depends(_verify_token)])
+    def list_patches(project_id: str):
+        from noir.application.patch_service import PatchService
+
+        patches = PatchService(cfg).list_patches(project_id)
+        return {
+            "patches": [
+                {
+                    "patch_id": p.patch_id,
+                    "plan_id": p.plan_id,
+                    "hash": p.compute_hash(),
+                    "workspace_revision": p.workspace_revision,
+                    "operation_count": len(p.operations),
+                }
+                for p in patches
+            ]
+        }
+
+    @app.get(
+        "/v1/projects/{project_id}/patches/{patch_id}", dependencies=[Depends(_verify_token)]
+    )
+    def get_patch(project_id: str, patch_id: str):
+        from noir.application.patch_service import PatchService
+
+        patch = PatchService(cfg).get_patch(patch_id)
+        if not patch or patch.project_id != project_id:
+            raise HTTPException(404, "Patch not found")
+        data = patch.model_dump(mode="json")
+        data["patch_hash"] = patch.compute_hash()
+        return data
+
+    @app.get(
+        "/v1/projects/{project_id}/patches/{patch_id}/diff", dependencies=[Depends(_verify_token)]
+    )
+    def get_patch_diff(project_id: str, patch_id: str):
+        from noir.application.patch_service import PatchService
+
+        diff = PatchService(cfg).show_diff(project_id, patch_id)
+        return {"diff": diff}
+
     @app.post(
         "/v1/projects/{project_id}/patches/{patch_id}/apply", dependencies=[Depends(_verify_token)]
     )
@@ -332,6 +397,18 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
 
         try:
             result = PatchService(cfg).apply_patch(project_id, patch_id)
+            return result
+        except PlanServiceError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.post(
+        "/v1/projects/{project_id}/patches/{patch_id}/undo", dependencies=[Depends(_verify_token)]
+    )
+    def undo_patch(project_id: str, patch_id: str):
+        from noir.application.patch_service import PatchService, PlanServiceError
+
+        try:
+            result = PatchService(cfg).undo_patch(project_id, patch_id)
             return result
         except PlanServiceError as e:
             raise HTTPException(400, str(e)) from None
@@ -347,6 +424,15 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             return session.model_dump(mode="json")
         except ManualEditError as e:
             raise HTTPException(400, str(e)) from None
+
+    @app.get("/v1/projects/{project_id}/manual/session", dependencies=[Depends(_verify_token)])
+    def get_manual_session(project_id: str):
+        from noir.application.manual_service import ManualService
+
+        session = ManualService(cfg).get_active_session(project_id)
+        if not session:
+            return {"active": False}
+        return {"active": True, "session": session.model_dump(mode="json")}
 
     @app.post("/v1/projects/{project_id}/manual/record", dependencies=[Depends(_verify_token)])
     def manual_record(project_id: str, req: ManualRecordRequest):
