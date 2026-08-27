@@ -10,6 +10,8 @@ import json
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
 if TYPE_CHECKING:
     from google.genai import Client
 
@@ -318,6 +320,10 @@ WORKSPACE CONTEXT:
 
 file_coverage identifies full files versus exact XML excerpts. For excerpt-only files, use
 replace_block with match_content copied exactly from the excerpt. Never replace the whole file.
+For non-XML operations, omit xml_attributes or use an empty object, not null.
+affected_scope is an optional description: omit it or use an empty string when not applicable.
+manifest_update requires a nonempty xml_attributes object. replace_block requires exact
+match_content and new_content (an empty new_content string is valid when deleting a block).
 
 Allowed operations: create_file, replace_file, replace_block, delete_file,
 manifest_add, manifest_update, manifest_remove, smali_replace_method, smali_insert_at_anchor.
@@ -346,40 +352,26 @@ Output a JSON object with this schema:
         response_text = self._call_model(prompt, system)
         data = self._parse_json_response(response_text)
 
-        if not data.get("operations"):
-            raise GeminiProviderError("AI returned no patch operations")
+        raw_operations = data.get("operations")
+        if not isinstance(raw_operations, list) or not raw_operations:
+            raise GeminiProviderError("AI must return a nonempty operations array")
 
         operations = []
-        for op_data in data.get("operations", []):
-            path = op_data.get("relative_path", "")
+        for index, op_data in enumerate(raw_operations):
+            operation = self._parse_patch_operation(op_data, index)
+            path = operation.relative_path
             if context.get("file_coverage", {}).get(path) == "exact_label_elements_only":
-                match = op_data.get("match_content")
+                match = operation.match_content
                 if (
-                    op_data.get("operation") != PatchOperationType.REPLACE_BLOCK.value
-                    or not isinstance(match, str)
+                    operation.operation != PatchOperationType.REPLACE_BLOCK
                     or not match
                     or match not in context["file_snippets"][path]
                 ):
                     raise GeminiProviderError(
                         "Excerpt-only context permits only exact, visible block replacements"
                     )
-            operations.append(
-                PatchOperation(
-                    relative_path=op_data.get("relative_path", ""),
-                    operation=PatchOperationType(op_data.get("operation", "replace_block")),
-                    expected_preimage_hash=context.get("file_hashes", {}).get(
-                        op_data.get("relative_path")
-                    ),
-                    match_content=op_data.get("match_content"),
-                    new_content=op_data.get("new_content"),
-                    class_descriptor=op_data.get("class_descriptor"),
-                    method_signature=op_data.get("method_signature"),
-                    anchor=op_data.get("anchor"),
-                    xml_element=op_data.get("xml_element"),
-                    xml_attributes=op_data.get("xml_attributes", {}),
-                    affected_scope=op_data.get("affected_scope", ""),
-                )
-            )
+            operation.expected_preimage_hash = context.get("file_hashes", {}).get(path)
+            operations.append(operation)
 
         return PatchSet(
             plan_id=plan.plan_id,
@@ -388,6 +380,51 @@ Output a JSON object with this schema:
             provenance=Provenance.AI_GENERATED,
             operations=operations,
         )
+
+    @staticmethod
+    def _parse_patch_operation(data: Any, index: int) -> PatchOperation:
+        """Normalize only nullable optional AI metadata; reject malformed change instructions."""
+        prefix = f"AI patch operation {index + 1}"
+        if not isinstance(data, dict):
+            raise GeminiProviderError(f"{prefix} must be an object")
+        # JSON null is not the same as a missing key to dict.get(default). The domain
+        # model remains strict; handle the provider's optional nulls only at this boundary.
+        attrs = data.get("xml_attributes")
+        scope = data.get("affected_scope")
+        try:
+            operation = PatchOperation.model_validate(
+                {
+                    "relative_path": data.get("relative_path"),
+                    "operation": data.get("operation"),
+                    "match_content": data.get("match_content"),
+                    "new_content": data.get("new_content"),
+                    "class_descriptor": data.get("class_descriptor"),
+                    "method_signature": data.get("method_signature"),
+                    "anchor": data.get("anchor"),
+                    "xml_element": data.get("xml_element"),
+                    "xml_attributes": {} if attrs is None else attrs,
+                    "affected_scope": "" if scope is None else scope,
+                }
+            )
+        except ValidationError as exc:
+            # Report field locations, not raw AI response contents or a Pydantic traceback.
+            fields = ", ".join(".".join(map(str, error["loc"])) for error in exc.errors())
+            raise GeminiProviderError(f"{prefix} has invalid fields: {fields}") from None
+        if not operation.relative_path.strip():
+            raise GeminiProviderError(f"{prefix} requires relative_path")
+        if operation.operation == PatchOperationType.MANIFEST_UPDATE and (
+            not operation.xml_element or not operation.xml_attributes
+        ):
+            raise GeminiProviderError(
+                f"{prefix}: manifest_update requires xml_element and nonempty xml_attributes"
+            )
+        if operation.operation == PatchOperationType.REPLACE_BLOCK and (
+            not operation.match_content or operation.new_content is None
+        ):
+            raise GeminiProviderError(
+                f"{prefix}: replace_block requires match_content and new_content"
+            )
+        return operation
 
     def diagnose_build_failure(
         self,

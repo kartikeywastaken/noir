@@ -359,8 +359,16 @@ def patch_generate(
     """Generate a patch from an approved plan."""
     config = _init()
     from noir.application.ai_service import generate_patch
+    from noir.application.patch_service import PlanServiceError
+    from noir.infrastructure.ai.gemini import GeminiProviderError
+    from noir.infrastructure.filesystem.workspace import WorkspaceError
+    from noir.patches.engine import PatchError
 
-    patch = generate_patch(config, project_id, plan)
+    try:
+        patch = generate_patch(config, project_id, plan)
+    except (GeminiProviderError, PlanServiceError, WorkspaceError, PatchError, ValueError) as exc:
+        error(str(exc))
+        raise typer.Exit(code=2) from None
 
     patch_data = patch.model_dump(mode="json")
     patch_data["patch_hash"] = patch.compute_hash()
