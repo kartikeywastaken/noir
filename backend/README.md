@@ -139,6 +139,15 @@ never whole-file replacement. The complete serialized prompt, system instruction
 measured in UTF-8 bytes against NOIR_AI_MAX_REQUEST_SIZE (100,000 by default). Optional inventory
 is trimmed first. Required patch evidence is never silently omitted or truncated: an oversized
 required plan fails before contacting Gemini and must be narrowed or split.
+The 50,000-byte discovery-file cap applies to planning, not required patch files. Approved
+files are read completely up to the request budget (and the engine's 1 MB text-file ceiling),
+so an 81 KB Smali class can be used when the complete serialized request fits the budget.
+Existing label-only resource excerpts remain targeted and cannot replace a whole file.
+Smali insertion requires an exact class descriptor, method signature, and unique anchor.
+It can insert instructions inside that method, or add one complete, previously absent method
+after a class-level comment such as `# virtual methods`. Duplicate/nested methods, mismatched
+signatures and ambiguous anchors are rejected. Generating or previewing never applies a patch;
+the separate exact-hash patch approval is still required.
 Patch generation requests a JSON response schema and small, unique block replacements instead
 of copying whole manifests for label edits. NOIR checks Gemini's finish reason before accepting
 output. Truncated or malformed JSON is discarded and regenerated once from the original inputs
@@ -149,6 +158,9 @@ API errors do not trigger this response retry (the SDK has separate HTTP retries
 charges. The separate `NOIR_AI_MAX_OUTPUT_SIZE` byte limit remains 50,000. Configure overrides in
 `backend/.env`; no key change is needed. After a failed generation, reuse the approved plan with
 `noir patch generate PROJECT_ID --plan PLAN_ID`, then review and approve the resulting patch.
+For an opt-in, billable Gemini smoke test that uploads only synthetic Smali (no user APK data),
+run `NOIR_RUN_AI=1 pytest -q tests/integration/test_ai_live.py`. It verifies an 80+ KB input,
+new-method generation and a real deterministic diff without applying the patch.
 Gemini currently performs plan/patch generation and optional diagnosis, not an autonomous
 tool-calling repair loop. Rebuild errors are real failures, not auto-success responses.
 

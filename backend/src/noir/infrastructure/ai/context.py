@@ -24,7 +24,8 @@ from noir.security.xml import parse
 class AiContextTools:
     """Provides constrained workspace context for AI providers."""
 
-    MAX_FILE_SIZE = 50_000  # chars
+    MAX_FILE_SIZE = 50_000  # bytes; optional planning/discovery reads only
+    MAX_PATCH_FILE_BYTES = 1_000_000  # Same bounded-text ceiling as the patch engine.
     MAX_FILES = 20
     MAX_CONTEXT_BYTES = 45_000
     MAX_SEARCH_RESULTS = 50
@@ -108,7 +109,7 @@ class AiContextTools:
             ):
                 labels.append(element.get(namespace + "label", ""))
         names = {label.removeprefix("@string/") for label in labels if label.startswith("@string/")}
-        excerpts = {}
+        excerpts: dict[str, str] = {}
         if not names:
             return [], excerpts
         candidates = sorted(
@@ -158,7 +159,8 @@ class AiContextTools:
                 re.IGNORECASE,
             )
         )
-        label_paths, excerpts = [], {}
+        label_paths: list[str] = []
+        excerpts: dict[str, str] = {}
         if label_task:
             # Resource discovery is optional; the full manifest remains primary evidence.
             with suppress(OSError, ValueError, ET.ParseError, WorkspaceError):
@@ -183,7 +185,17 @@ class AiContextTools:
             try:
                 coverage = "full"
                 try:
-                    content = self.read_file_range(path)
+                    if file_paths is None or path in excerpts:
+                        content = self.read_file_range(path)
+                    else:
+                        # An approved file is required evidence, not a discovery snippet.
+                        # The 50KB planning cap can reject a complete patch request that
+                        # fits the configured budget. Read it intact; bounded_prompt then
+                        # counts JSON escaping, instructions, schema and ALL required files.
+                        limit = min(
+                            self.workspace.config.ai_max_request_size, self.MAX_PATCH_FILE_BYTES
+                        )
+                        content = self.workspace.read_file(path, max_bytes=limit)
                 except WorkspaceError:
                     if path not in excerpts:
                         raise

@@ -206,6 +206,104 @@ def test_smali_exact_method_replace_and_insert(workspace):
     assert ".locals 1\n    const/4 v0, 0x0" in path.read_text()
 
 
+def smali_new_method_patch(ws, **overrides):
+    fields = {
+        "relative_path": "A.smali",
+        "operation": PatchOperationType.SMALI_INSERT_AT_ANCHOR,
+        "class_descriptor": "Lcom/noir/A;",
+        "method_signature": "added()V",
+        "anchor": "# virtual methods",
+        "new_content": ".method public added()V\n    .locals 0\n    return-void\n.end method",
+    }
+    return patch_for(ws, PatchOperation(**{**fields, **overrides}))
+
+
+def test_smali_new_method_preview_apply_and_undo(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "A.smali"
+    original = (
+        ".class public Lcom/noir/A;\n.super Ljava/lang/Object;\n# virtual methods\n"
+        ".method public existing()V\n    .locals 0\n    return-void\n.end method\n"
+    )
+    path.write_text(original)
+    patch = smali_new_method_patch(ws, expected_preimage_hash=compute_file_hash(path))
+    engine = PatchEngine(ws)
+    assert "+.method public added()V" in engine.generate_diff(patch)[0]["preview"]
+    assert path.read_text() == original
+    engine.apply_patch(patch)
+    assert path.read_text().count(".method public added()V") == 1
+    assert (
+        ".method public existing()V\n    .locals 0\n    return-void\n.end method"
+        in path.read_text()
+    )
+    engine.undo_patch(patch)
+    assert path.read_text() == original
+
+
+@pytest.mark.parametrize(
+    "source, overrides",
+    [
+        ("# virtual methods\n", {"class_descriptor": "LWrong;"}),
+        ("# virtual methods\n# virtual methods\n", {}),
+        ("# virtual methods\n", {"anchor": "missing"}),
+        ("# virtual methods\n", {"method_signature": "different()V"}),
+        ("# virtual methods\n", {"new_content": ".method public added()V\n    .locals 0"}),
+        ("# virtual methods\n", {"new_content": "    const/4 v0, 0x0"}),
+        (
+            "# virtual methods\n",
+            {"new_content": ".end method\n.method public added()V\n.end method"},
+        ),
+        (
+            "# virtual methods\n",
+            {
+                "new_content": (
+                    ".method public added()V\n.method public nested()V\n.end method\n.end method"
+                )
+            },
+        ),
+        (
+            "# virtual methods\n",
+            {
+                "new_content": (
+                    ".method public added()V\n.end method\n.method public extra()V\n.end method"
+                )
+            },
+        ),
+        (
+            "# virtual methods\n",
+            {"new_content": ".field static surprise:I\n.method public added()V\n.end method"},
+        ),
+        ("# virtual methods\n.method public added()V\n.locals 0\nreturn-void\n.end method\n", {}),
+        (
+            ".method public existing()V\n.locals 0\n# virtual methods\nreturn-void\n.end method\n",
+            {},
+        ),
+        (".annotation runtime LExample;\n# virtual methods\n.end annotation\n", {}),
+    ],
+)
+def test_smali_new_method_rejects_unsafe_or_malformed_insertions(workspace, source, overrides):
+    _, ws = workspace
+    path = ws.decoded_dir / "A.smali"
+    original = ".class public Lcom/noir/A;\n.super Ljava/lang/Object;\n" + source
+    path.write_text(original)
+    with pytest.raises(PatchError):
+        PatchEngine(ws).generate_diff(smali_new_method_patch(ws, **overrides))
+    assert path.read_text() == original
+
+
+def test_existing_smali_insertion_cannot_escape_method(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "A.smali"
+    original = ".class public Lcom/noir/A;\n.method public existing()V\nreturn-void\n.end method\n"
+    path.write_text(original)
+    patch = smali_new_method_patch(
+        ws, method_signature="existing()V", anchor=".end method", new_content="return-void"
+    )
+    with pytest.raises(PatchError, match="not inside"):
+        PatchEngine(ws).generate_diff(patch)
+    assert path.read_text() == original
+
+
 def test_xml_entities_rejected():
     from xml.etree.ElementTree import ParseError
 

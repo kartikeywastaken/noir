@@ -1,7 +1,9 @@
 """UI-facing API contracts, exercised with isolated workspaces and no AI calls."""
 
 import hashlib
+import json
 import secrets
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +20,7 @@ from noir.domain.models import (
     PlanFileChange,
     ProjectInfo,
 )
+from noir.infrastructure.ai.gemini import GeminiProvider
 from noir.infrastructure.database.repositories import (
     FileManifestRepository,
     ProjectRepository,
@@ -178,3 +181,105 @@ def test_ai_and_signing_still_require_consent(ui_workspace):
         client.post(f"{base}/sign", json={"build_id": "unknown", "profile": "unknown"}).status_code
         == 400
     )
+
+
+def test_generate_patch_with_large_smali_and_new_method(ui_workspace, monkeypatch):
+    """Exercise the complete HTTP workflow; only the remote SDK boundary is a test double."""
+    client, cfg, _ = ui_workspace
+    project = ProjectRepository().create(ProjectInfo(package_name="app.noir.largecontext"))
+    ws = ProjectWorkspace(project.id, cfg)
+    ws.create()
+    cfg.ai_provider = "gemini"
+    from pydantic import SecretStr
+
+    cfg.gemini_api_key = SecretStr("test-only")
+    path = ws.decoded_dir / "smali/Example.smali"
+    path.parent.mkdir()
+    source = (
+        ".class public LExample;\n.super Landroid/app/Activity;\n"
+        + "# metadata\n" * 7400
+        + "# virtual methods\n"
+    )
+    assert 80_000 < len(source.encode()) < 90_000
+    path.write_text(source)
+    FileManifestRepository().save(ws.project_id, 0, ws.build_file_manifest())
+    plan = PlanService(cfg).create_plan(
+        ChangePlan(
+            project_id=ws.project_id,
+            workspace_revision=0,
+            user_request="Add a method to the class",
+            file_changes=[
+                PlanFileChange(
+                    relative_path="smali/Example.smali",
+                    operation=PatchOperationType.SMALI_INSERT_AT_ANCHOR,
+                )
+            ],
+        )
+    )
+    calls = []
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["contents"]
+        sdk_config = kwargs["config"]
+        schema = sdk_config.response_json_schema
+        assert json.dumps(source, ensure_ascii=False) in prompt
+        assert "class-level" in prompt
+        assert set(schema["properties"]["operations"]["items"]["required"]) >= {
+            "class_descriptor",
+            "method_signature",
+            "anchor",
+            "new_content",
+        }
+        assert (
+            len(prompt.encode())
+            + len(sdk_config.system_instruction.encode())
+            + len(json.dumps(schema, separators=(",", ":")).encode())
+        ) <= cfg.ai_max_request_size
+        return SimpleNamespace(
+            prompt_feedback=None,
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+            text=json.dumps(
+                {
+                    "operations": [
+                        {
+                            "relative_path": "smali/Example.smali",
+                            "operation": "smali_insert_at_anchor",
+                            "class_descriptor": "LExample;",
+                            "method_signature": "added()V",
+                            "anchor": "# virtual methods",
+                            "new_content": (
+                                ".method public added()V\n    .locals 0\n"
+                                "    return-void\n.end method"
+                            ),
+                        }
+                    ]
+                }
+            ),
+        )
+
+    monkeypatch.setattr(
+        GeminiProvider,
+        "_get_client",
+        lambda self: SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+    )
+    base = f"/v1/projects/{ws.project_id}"
+    url = f"{base}/patches?plan_id={plan.plan_id}"
+    assert client.post(url).status_code == 400
+    assert not calls  # The larger context must not bypass plan approval.
+    assert (
+        client.post(
+            f"{base}/plans/{plan.plan_id}/approve", json={"hash": plan.compute_hash()}
+        ).status_code
+        == 200
+    )
+    response = client.post(url)
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    patch_id = response.json()["patch_id"]
+    diff = client.get(f"{base}/patches/{patch_id}/diff").json()["diff"]
+    assert "+.method public added()V" in diff[0]["preview"]
+    assert client.get(f"{base}/patches/{patch_id}").json()["review"]["approved"] is False
+    assert client.post(f"{base}/patches/{patch_id}/apply").status_code == 400
+    assert path.read_text() == source
+    assert client.get(base).json()["workspace_revision"] == 0

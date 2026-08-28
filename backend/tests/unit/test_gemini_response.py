@@ -146,6 +146,23 @@ def test_malformed_patch_entry_returns_provider_error(provider):
         provider._parse_patch_operation(None, 0)
 
 
+@pytest.mark.parametrize(
+    "missing", ["class_descriptor", "method_signature", "new_content", "anchor"]
+)
+def test_smali_insert_requires_complete_operation_metadata(provider, missing):
+    operation = {
+        "relative_path": "A.smali",
+        "operation": "smali_insert_at_anchor",
+        "class_descriptor": "LA;",
+        "method_signature": "newMethod()V",
+        "new_content": ".method public newMethod()V\n.locals 0\nreturn-void\n.end method",
+        "anchor": "# virtual methods",
+    }
+    operation.pop(missing)
+    with pytest.raises(GeminiProviderError, match="requires|require"):
+        provider._parse_patch_operation(operation, 0)
+
+
 def inject_sequence(monkeypatch, provider, responses):
     """Inject real SDK response objects, not a simulated production provider."""
     from google.genai import types

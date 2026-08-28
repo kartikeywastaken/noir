@@ -45,7 +45,7 @@ class PatchValidationError(PatchError):
 class PatchEngine:
     """Safe deterministic patch engine with transactional application."""
 
-    def __init__(self, workspace: ProjectWorkspace):
+    def __init__(self, workspace: ProjectWorkspace | SimpleNamespace):
         self.workspace = workspace
         self.decoded_dir = workspace.decoded_dir
         self.journal_dir = workspace.changes_dir / "journal"
@@ -477,8 +477,32 @@ class PatchEngine:
         new_lines = lines[:method_start] + [replacement] + lines[method_end + 1 :]
         target.write_text("".join(new_lines))
 
+    @staticmethod
+    def _smali_method_spans(content: str) -> list[tuple[str, int, int, int]]:
+        """Return signature/start/end-directive/end spans; reject unbalanced methods."""
+        spans = []
+        active = None
+        directives = re.finditer(r"(?m)^[ \t]*\.(?:method\b|end[ \t]+method\b)[^\r\n]*", content)
+        for directive in directives:
+            line = directive.group().split("#", 1)[0].strip()
+            if line.startswith(".method"):
+                if active is not None:
+                    raise PatchError("Nested Smali methods are not allowed")
+                signature = line.split()[-1]
+                if not re.fullmatch(r"[^\s()]+\([^\s()]*\)[^\s()]+", signature):
+                    raise PatchError("Invalid Smali method signature")
+                active = (signature, directive.start())
+            else:
+                if active is None:
+                    raise PatchError("Unmatched Smali .end method")
+                spans.append((*active, directive.start(), directive.end()))
+                active = None
+        if active is not None:
+            raise PatchError("Smali method is missing .end method")
+        return spans
+
     def _apply_smali_insert(self, op: PatchOperation, target: Path) -> None:
-        """Insert code at a specific anchor in a Smali file."""
+        """Insert instructions in one method, or one new method at a class comment."""
         content = target.read_text(errors="replace")
 
         if not op.anchor or not op.new_content:
@@ -496,17 +520,49 @@ class PatchEngine:
             r"(?m)^\.class[^\n]*\s" + re.escape(op.class_descriptor) + r"\s*$", content
         ):
             raise PatchError("Requested class does not match Smali file")
-        pattern = (
-            r"(?ms)^\.method[^\n]*\s" + re.escape(op.method_signature) + r"\s*\n.*?^\.end method"
-        )
-        matches = list(re.finditer(pattern, content))
-        if len(matches) != 1 or op.anchor not in matches[0].group():
-            raise PatchError("Anchor is not inside the requested method")
-        # Insert only inside the exact method.
-        match = matches[0]
-        body = match.group().replace(op.anchor, op.anchor + "\n" + op.new_content, 1)
-        new_content = content[: match.start()] + body + content[match.end() :]
-        target.write_text(new_content)
+        spans = self._smali_method_spans(content)
+        matches = [span for span in spans if span[0] == op.method_signature]
+        anchor_start = content.index(op.anchor)
+        insert_at = anchor_start + len(op.anchor)
+        addition = op.new_content.strip()
+        added_methods = self._smali_method_spans(addition)
+        if matches:
+            if added_methods:
+                raise PatchError("Cannot insert a method with an existing signature")
+            if len(matches) != 1 or not (
+                matches[0][1] <= anchor_start < insert_at <= matches[0][2]
+            ):
+                raise PatchError("Anchor is not inside the requested method")
+        else:
+            # The absent-method case is NOT unrestricted class-level text insertion.
+            # Require exactly one complete, correctly named method and a comment
+            # anchor outside every existing method/annotation, on its own line.
+            if len(added_methods) != 1:
+                raise PatchError("New Smali insertion requires exactly one complete named method")
+            signature, start, _, end = added_methods[0]
+            if (signature, start, end) != (op.method_signature, 0, len(addition)):
+                raise PatchError("New Smali insertion requires exactly one complete named method")
+            line_start = content.rfind("\n", 0, anchor_start) + 1
+            line_end = content.find("\n", insert_at)
+            if line_end < 0:
+                line_end = len(content)
+            if (
+                not re.fullmatch(r"[ \t]*#[^\r\n]+", op.anchor)
+                or content[line_start:anchor_start].strip()
+                or content[insert_at:line_end].strip()
+                or any(start < insert_at and anchor_start < end for _, start, _, end in spans)
+            ):
+                raise PatchError("New methods require a unique class-level comment anchor")
+            annotation_depth = 0
+            for directive in re.finditer(
+                r"(?m)^[ \t]*\.(annotation\b|end[ \t]+annotation\b)", content[:insert_at]
+            ):
+                annotation_depth += 1 if directive.group(1) == "annotation" else -1
+                if annotation_depth < 0:
+                    raise PatchError("Unbalanced Smali annotations")
+            if annotation_depth:
+                raise PatchError("New method anchor cannot be inside an annotation")
+        target.write_text(content[:insert_at] + "\n" + op.new_content + content[insert_at:])
 
     def _apply_xml_resource_operation(self, op: PatchOperation, target: Path) -> None:
         """Apply XML resource file operations."""

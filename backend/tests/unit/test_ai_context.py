@@ -48,9 +48,42 @@ def test_label_context_prefers_actual_resources_not_alphabetical_noise(ws):
 
 def test_required_patch_files_are_not_silently_skipped(ws):
     target = ws.decoded_dir / "big.smali"
-    target.write_text("x" * 60_000)
+    target.write_text("x" * (ws.config.ai_max_request_size + 1))
     with pytest.raises(ValueError, match="Required patch file"):
         AiContextTools(ws).build_context(["big.smali"])
+
+
+def test_required_file_uses_request_budget_not_planning_cap(ws):
+    source = ".class public LExample;\n.super Ljava/lang/Object;\n" + "# detail\n" * 9000
+    (ws.decoded_dir / "big.smali").write_text(source)
+    tools = AiContextTools(ws)
+    assert len(source.encode()) > tools.MAX_FILE_SIZE
+    context = tools.build_context(["big.smali"])
+    assert context["file_snippets"]["big.smali"] == source
+    assert context["file_coverage"]["big.smali"] == "full"
+    assert "big.smali" in tools.build_context()["omitted_files"]
+
+
+def test_required_reads_remain_bounded_by_patch_engine_limit(ws):
+    ws.config.ai_max_request_size = 2_000_000
+    (ws.decoded_dir / "huge.smali").write_text("x" * 1_000_001)
+    with pytest.raises(ValueError, match="Required patch file"):
+        AiContextTools(ws).build_context(["huge.smali"])
+
+
+def test_large_required_file_still_counts_json_escaping_before_network(ws, monkeypatch):
+    (ws.decoded_dir / "escapes.smali").write_text("\\\n" * 40_000)
+    context = AiContextTools(ws).build_context(["escapes.smali"])
+    plan = ChangePlan(
+        project_id=ws.project_id,
+        workspace_revision=0,
+        user_request="Edit the file",
+        file_changes=[PlanFileChange(relative_path="escapes.smali", operation="replace_block")],
+    )
+    provider = GeminiProvider(config=ws.config)
+    monkeypatch.setattr(provider, "_get_client", lambda: pytest.fail("Must not contact Gemini"))
+    with pytest.raises(GeminiProviderError, match="Required content was not truncated"):
+        provider.generate_patch(plan, context)
 
 
 def test_exact_utf8_budget_keeps_required_json_and_full_file():

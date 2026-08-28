@@ -63,6 +63,14 @@ def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
     required = ["relative_path", "operation"]
     if all(change.operation == PatchOperationType.REPLACE_BLOCK for change in plan.file_changes):
         required += ["match_content", "new_content"]
+    smali_operations = {
+        PatchOperationType.SMALI_REPLACE_METHOD,
+        PatchOperationType.SMALI_INSERT_AT_ANCHOR,
+    }
+    if plan.file_changes and all(c.operation in smali_operations for c in plan.file_changes):
+        required += ["class_descriptor", "method_signature", "new_content"]
+        if all(c.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR for c in plan.file_changes):
+            required.append("anchor")
     return {
         "type": "object",
         "properties": {
@@ -335,6 +343,9 @@ instead of editing every localized resource. Keep the plan minimal and within 20
 
 Allowed operations: create_file, replace_file, replace_block, delete_file,
 manifest_add, manifest_update, manifest_remove, smali_replace_method, smali_insert_at_anchor.
+smali_insert_at_anchor supports inserting instructions inside an existing method, or adding
+one complete new method after a unique class-level comment anchor such as # virtual methods.
+Both require the exact class descriptor and method signature. Do not add an already defined method.
 Output a JSON object with this exact schema:
 {{
   "intended_outcome": "description of what the modification will achieve",
@@ -452,8 +463,13 @@ Return compact JSON with a top-level operations array, following the supplied re
 Each operation needs relative_path and operation. Include only fields needed by that operation:
 match_content/new_content for replace_block; new_content for create_file/replace_file;
 xml_element/new_content for manifest_add; xml_element/xml_attributes for manifest_update/remove;
-class_descriptor/method_signature for
-smali_replace_method, or anchor for smali_insert_at_anchor, along with new_content.
+Both smali_replace_method and smali_insert_at_anchor require class_descriptor, method_signature
+and new_content. smali_insert_at_anchor also requires a unique exact anchor; insertion is AFTER it.
+For an existing method, use an anchor inside that exact method and insert instructions only.
+To add a method that is absent from the class, use its exact signature, a unique class-level
+comment anchor (for example # virtual methods), and exactly one complete .method ... .end method
+block as new_content. Never nest methods, duplicate an existing signature, or include the anchor
+itself in new_content. Preserve the superclass dispatch and return value when adding an override.
 Omit unused optional fields, hashes, commentary, markdown fences, and unchanged file contents.
 Escape quotes, backslashes and newlines inside JSON strings correctly."""
 
@@ -539,6 +555,26 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
             raise GeminiProviderError(
                 f"{prefix}: replace_block requires match_content and new_content"
             )
+        if operation.operation in (
+            PatchOperationType.SMALI_REPLACE_METHOD,
+            PatchOperationType.SMALI_INSERT_AT_ANCHOR,
+        ):
+            if not all(
+                value and value.strip()
+                for value in (
+                    operation.class_descriptor,
+                    operation.method_signature,
+                    operation.new_content,
+                )
+            ):
+                raise GeminiProviderError(
+                    f"{prefix}: Smali operations require class_descriptor, "
+                    "method_signature and nonempty new_content"
+                )
+            if operation.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR and (
+                not operation.anchor or not operation.anchor.strip()
+            ):
+                raise GeminiProviderError(f"{prefix}: smali_insert_at_anchor requires anchor")
         return operation
 
     def diagnose_build_failure(
