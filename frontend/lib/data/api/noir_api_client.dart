@@ -10,11 +10,33 @@ import '../models/models.dart';
 import 'api_exceptions.dart';
 
 class NoirApiClient {
-  NoirApiClient({String? baseUrl, this.token, http.Client? client})
-    : baseUrl = normalizeBaseUrl(baseUrl ?? 'http://127.0.0.1:8787'),
+  static const cloudBaseUrl = String.fromEnvironment(
+    'NOIR_BACKEND_URL',
+    defaultValue: 'https://noir-16-171-197-228.sslip.io',
+  );
+
+  NoirApiClient({String? baseUrl, String? token, http.Client? client})
+    : _baseUrl = normalizeBaseUrl(baseUrl ?? cloudBaseUrl),
+      _token = token,
       _client = client ?? http.Client();
-  String baseUrl;
-  String? token;
+  String _baseUrl;
+  String? _token;
+  int _credentialRevision = 0;
+  int get credentialRevision => _credentialRevision;
+  void Function()? onUnauthorized;
+  String get baseUrl => _baseUrl;
+  set baseUrl(String value) {
+    final normalized = normalizeBaseUrl(value);
+    if (normalized != _baseUrl) _credentialRevision++;
+    _baseUrl = normalized;
+  }
+
+  String? get token => _token;
+  set token(String? value) {
+    if (value != _token) _credentialRevision++;
+    _token = value;
+  }
+
   final http.Client _client;
   final Set<String> _inFlight = {};
 
@@ -55,10 +77,17 @@ class NoirApiClient {
     bool mutation = false,
   }) async {
     request.followRedirects = false;
+    final revision = credentialRevision;
     try {
-      return await (() async => http.Response.fromStream(
+      final response = await (() async => http.Response.fromStream(
         await _client.send(request),
       ))().timeout(timeout);
+      if (revision != credentialRevision) {
+        throw ApiException(
+          'Workspace changed. The previous response was discarded.',
+        );
+      }
+      return response;
     } on TimeoutException {
       throw ConnectionException(
         mutation
@@ -92,7 +121,12 @@ class NoirApiClient {
     final message = _redact(
       detail is String ? detail : 'Request failed (${response.statusCode}).',
     );
-    if (response.statusCode == 401) throw UnauthorizedException();
+    if (response.statusCode == 401) {
+      onUnauthorized?.call();
+      throw UnauthorizedException(
+        'Session expired or revoked. Activate a new invitation.',
+      );
+    }
     if (response.statusCode == 404) throw NotFoundException(message);
     if (response.statusCode == 409) throw ConflictException(message);
     if (response.statusCode == 422) throw ValidationException(message);
@@ -114,7 +148,7 @@ class NoirApiClient {
     String? idempotencyKey,
   }) async {
     final mutation = method != 'GET';
-    final key = '$method:$path:${query ?? {}}';
+    final key = '$credentialRevision:$method:$path:${query ?? {}}';
     if (mutation && !_inFlight.add(key)) {
       throw ApiException('Request already in flight.');
     }
@@ -150,6 +184,29 @@ class NoirApiClient {
     await _request('GET', '/v1/projects', query: {'limit': '1'});
     return true;
   }
+
+  Future<Map<String, dynamic>> redeemInvite(String code) => _request(
+    'POST',
+    '/v1/auth/redeem',
+    authenticated: false,
+    body: {'code': code.trim()},
+  );
+  Future<Map<String, dynamic>> getCurrentUser() =>
+      _request('GET', '/v1/auth/me');
+  Future<void> logout() async {
+    await _request('POST', '/v1/auth/logout');
+  }
+
+  Future<Map<String, dynamic>> listBuildHistory({
+    int offset = 0,
+    int limit = 30,
+  }) => _request(
+    'GET',
+    '/v1/history',
+    query: {'offset': '$offset', 'limit': '$limit'},
+  );
+  Future<SigningProfile> createPersonalSigningProfile() async =>
+      SigningProfile.fromJson(await _request('POST', '/v1/keys/personal'));
 
   Future<List<ProjectInfo>> listProjects() async {
     final projects = <ProjectInfo>[];
@@ -449,6 +506,7 @@ class NoirApiClient {
 
   /// SSE frames may span arbitrary network chunks; only complete frames count.
   Stream<AuditEvent> streamJobEvents(String id, {String? after}) async* {
+    final revision = credentialRevision;
     final request = http.Request(
       'GET',
       _uri('/v1/jobs/$id/events', {'after': ?after}),
@@ -460,6 +518,9 @@ class NoirApiClient {
     });
     request.followRedirects = false;
     final response = await _client.send(request);
+    if (revision != credentialRevision) {
+      throw ApiException('Workspace changed. Event stream closed.');
+    }
     if (response.statusCode != 200) {
       _response(await http.Response.fromStream(response));
       return;
@@ -471,6 +532,9 @@ class NoirApiClient {
         in response.stream
             .transform(utf8.decoder)
             .transform(const LineSplitter())) {
+      if (revision != credentialRevision) {
+        throw ApiException('Workspace changed. Event stream closed.');
+      }
       if (line.isEmpty) {
         if (type == 'done') return;
         if (type == 'error') {

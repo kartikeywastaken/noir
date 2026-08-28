@@ -367,6 +367,7 @@ class ApiToken(BaseModel):
     token_id: str = Field(default_factory=_new_id)
     token_hash: str
     name: str = "default"
+    user_id: str = "local"
     created_at: datetime = Field(default_factory=_now)
 
 

@@ -78,6 +78,10 @@ void main() {
       );
       await tester.tap(find.text('CONFIG'));
       await tester.pumpAndSettle();
+      expect(find.text('YOUR WORKSPACE'), findsOneWidget);
+      await tester.ensureVisible(find.text('Custom backend / owner access'));
+      await tester.tap(find.text('Custom backend / owner access'));
+      await tester.pumpAndSettle();
       expect(find.text('NOIR BEARER TOKEN'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
@@ -332,7 +336,10 @@ void main() {
       final button = tester.widget<NoirPrimaryButton>(
         find.widgetWithText(NoirPrimaryButton, 'SIGN BUILD'),
       );
-      expect(button.onPressed, isNull); // No profile selected.
+      expect(
+        button.onPressed,
+        isNotNull,
+      ); // The sole private profile is selected; signing still needs confirmation.
       expect(mutations, 0);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

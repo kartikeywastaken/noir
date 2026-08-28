@@ -12,14 +12,17 @@ class ReviewLayout extends StatelessWidget {
     this.busy = false,
     this.error,
     this.onRefresh,
+    this.bottomNavigationBar,
   });
   final String title;
   final List<Widget> children;
   final bool busy;
   final String? error;
   final VoidCallback? onRefresh;
+  final Widget? bottomNavigationBar;
   @override
   Widget build(BuildContext context) => Scaffold(
+    bottomNavigationBar: bottomNavigationBar,
     appBar: NoirAppBar(
       title: title,
       showBackButton: true,
@@ -64,13 +67,16 @@ class Section extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 16),
     child: GlassPanel(
       padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(title, style: NoirTypography.labelCaps),
-          const SizedBox(height: 12),
-          child,
-        ],
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(title, style: NoirTypography.labelCaps),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
       ),
     ),
   );

@@ -994,6 +994,44 @@ def jobs_cancel(job_id: str = typer.Argument(..., help="Job ID")):
 
 # ── api ──────────────────────────────────────────────────────────────
 
+users_app = typer.Typer(help="Private workspace invitations (trusted server/local administration)")
+app.add_typer(users_app, name="users")
+
+
+@users_app.command("invite")
+def users_invite(
+    name: str = typer.Argument(..., help="Recipient's display name"),
+    user_id: str | None = typer.Option(
+        None, "--user", help="Invite another device to an existing workspace"
+    ),
+    hours: int = typer.Option(168, min=1, max=720, help="One-time invitation expiry"),
+):
+    """Create one private workspace invite; share the code only with its recipient."""
+    _init()
+    from noir.application.access_service import AccessService
+
+    output(AccessService().invite(name, user_id=user_id, hours=hours))
+
+
+@users_app.command("list")
+def users_list():
+    """List identities without displaying tokens or invite codes."""
+    _init()
+    from noir.application.access_service import AccessService
+
+    output({"users": AccessService().list_users()})
+
+
+@users_app.command("revoke")
+def users_revoke(user_id: str):
+    """Disable a user's sessions and unused invites without deleting their builds."""
+    _init()
+    from noir.application.access_service import AccessService
+
+    AccessService().revoke_user(user_id)
+    output({"revoked": user_id})
+
+
 api_app = typer.Typer(help="API management")
 app.add_typer(api_app, name="api")
 

@@ -11,20 +11,28 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from noir.application.access_service import AccessError, AccessService
 from noir.domain.config import NoirConfig, get_config
+from noir.domain.models import ApiToken
 from noir.infrastructure.database.engine import init_db
 from noir.infrastructure.database.repositories import TokenRepository
 
 # ── Auth ─────────────────────────────────────────────────────────────
 
 
-def _verify_token(authorization: str | None = Header(None, alias="Authorization")) -> str:
-    """Verify Bearer token against stored hashes."""
+def _verify_token(
+    request: Request, authorization: str | None = Header(None, alias="Authorization")
+) -> ApiToken:
+    """Authenticate and guard every resource route, including job streams/cancel.
+
+    All private routes depend on this guard. Ownership is derived exclusively
+    from the server-side token record, never a client-supplied user identifier.
+    """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     token = authorization[7:]
@@ -33,7 +41,21 @@ def _verify_token(authorization: str | None = Header(None, alias="Authorization"
     found = repo.find_by_hash(token_hash)
     if not found:
         raise HTTPException(status_code=401, detail="Invalid API token")
-    return token
+    access = AccessService()
+    project_id = request.path_params.get("project_id")
+    if project_id and not access.owns_project(found.user_id, project_id):
+        raise HTTPException(404, "Project not found")
+    job_id = request.path_params.get("job_id")
+    if job_id:
+        from noir.infrastructure.database.repositories import JobRepository
+
+        job = JobRepository().get(job_id)
+        if not job or not access.owns_project(found.user_id, job.project_id):
+            raise HTTPException(404, "Job not found")
+    return found
+
+
+Principal = Annotated[ApiToken, Depends(_verify_token)]
 
 
 # ── Request/Response Models ──────────────────────────────────────────
@@ -41,6 +63,10 @@ def _verify_token(authorization: str | None = Header(None, alias="Authorization"
 
 class ImportRequest(BaseModel):
     authorized: bool = False
+
+
+class InviteRedeemRequest(BaseModel):
+    code: str = Field(min_length=16, max_length=256)
 
 
 class PlanCreateRequest(BaseModel):
@@ -102,7 +128,7 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         lifespan=lifespan,
         title="NOIR API",
         version="0.1.0",
-        description="Local-first APK analysis and modification API",
+        description="Invite-only APK analysis and modification API with private workspaces",
         docs_url="/docs",
         openapi_url="/v1/openapi.json",
     )
@@ -163,11 +189,40 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
 
     # ── Projects ──────────────────────────────────────────────────
 
+    @app.post("/v1/auth/redeem")
+    def redeem_invite(req: InviteRedeemRequest):
+        try:
+            result = AccessService().redeem(req.code)
+        except AccessError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/auth/me")
+    def current_user(principal: Principal):
+        return AccessService().user(principal.user_id)
+
+    @app.post("/v1/auth/logout")
+    def logout(principal: Principal):
+        AccessService().logout(principal.token_id)
+        return {"signed_out": True}
+
+    @app.get("/v1/history")
+    def build_history(
+        principal: Principal,
+        offset: int = Query(0, ge=0),
+        limit: int = Query(30, ge=1, le=100),
+    ):
+        return AccessService().history(principal.user_id, offset=offset, limit=limit)
+
     @app.get("/v1/projects", dependencies=[Depends(_verify_token)])
-    def list_projects(offset: int = 0, limit: int = 50):
+    def list_projects(
+        principal: Principal,
+        offset: int = Query(0, ge=0),
+        limit: int = Query(50, ge=1, le=100),
+    ):
         from noir.infrastructure.database.repositories import ProjectRepository
 
-        projects = ProjectRepository().list_all()
+        projects = ProjectRepository().list_all(user_id=principal.user_id)
         data = [p.model_dump(mode="json") for p in projects[offset : offset + limit]]
         return {"projects": data, "total": len(projects)}
 
@@ -185,11 +240,14 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     @app.post("/v1/import", status_code=202, dependencies=[Depends(_verify_token)])
     async def import_apk(
         file: Annotated[UploadFile, File()],
+        principal: Annotated[ApiToken, Depends(_verify_token)],
         authorized: bool = Query(False),
         idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     ):
         if not authorized:
             raise HTTPException(400, "Authorization required")
+        if idempotency_key:
+            idempotency_key = f"{principal.user_id}:{idempotency_key}"
         from uuid import uuid4
 
         from noir.infrastructure.database.repositories import JobRepository
@@ -209,15 +267,17 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
                     handle.write(chunk)
             digest = compute_file_hash(tmp)
             if idempotency_key:
-                for existing in JobRepository().list_all():
+                for existing in JobRepository().list_all(user_id=principal.user_id):
                     if existing.result_data.get("idempotency_key") == idempotency_key:
                         if existing.result_data.get("payload", {}).get("sha256") != digest:
                             raise HTTPException(409, "Idempotency key has different content")
                         tmp.unlink()
                         return existing.model_dump(mode="json")
+            project_id = uuid4().hex[:16]
+            AccessService().claim_project(principal.user_id, project_id)
             job = queue.submit(
                 "import",
-                uuid4().hex[:16],
+                project_id,
                 {
                     "path": str(tmp),
                     "sha256": digest,
@@ -498,13 +558,17 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         "/v1/projects/{project_id}/build", status_code=202, dependencies=[Depends(_verify_token)]
     )
     def build_project(
-        project_id: str, idempotency_key: str | None = Header(None, alias="Idempotency-Key")
+        project_id: str,
+        principal: Principal,
+        idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     ):
         from noir.infrastructure.database.repositories import ProjectRepository
 
         project = ProjectRepository().get(project_id)
         if not project:
             raise HTTPException(404, "Project not found")
+        if idempotency_key:
+            idempotency_key = f"{principal.user_id}:{idempotency_key}"
         job = queue.submit(
             "build", project_id, {"revision": project.workspace_revision}, idempotency_key
         )
@@ -520,9 +584,11 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     # ── Sign ──────────────────────────────────────────────────────
 
     @app.post("/v1/projects/{project_id}/sign", dependencies=[Depends(_verify_token)])
-    def sign_project(project_id: str, req: SignRequest):
+    def sign_project(project_id: str, req: SignRequest, principal: Principal):
         if not req.confirm:
             raise HTTPException(400, "Signing requires confirm=true")
+        if not AccessService().owns_signer(principal.user_id, req.profile):
+            raise HTTPException(404, "Signing profile not found")
         from noir.application.signing_service import SigningService, SigningServiceError
 
         try:
@@ -586,11 +652,17 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     # ── Jobs ──────────────────────────────────────────────────────
 
     @app.get("/v1/jobs", dependencies=[Depends(_verify_token)])
-    def list_jobs(project_id: str = Query(None)):
+    def list_jobs(principal: Principal, project_id: str | None = Query(None)):
         from noir.infrastructure.database.repositories import JobRepository
 
         repo = JobRepository()
-        jobs = repo.list_by_project(project_id) if project_id else repo.list_all()
+        if project_id and not AccessService().owns_project(principal.user_id, project_id):
+            raise HTTPException(404, "Project not found")
+        jobs = (
+            repo.list_by_project(project_id)
+            if project_id
+            else repo.list_all(user_id=principal.user_id)
+        )
         return {"jobs": [j.model_dump(mode="json") for j in jobs]}
 
     @app.get("/v1/jobs/{job_id}", dependencies=[Depends(_verify_token)])
@@ -612,11 +684,16 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     # ── Keys ──────────────────────────────────────────────────────
 
     @app.get("/v1/keys", dependencies=[Depends(_verify_token)])
-    def list_signing_profiles():
-        from noir.application.signing_service import SigningService
+    def list_signing_profiles(principal: Principal):
+        from noir.infrastructure.database.repositories import SigningProfileRepository
 
-        profiles = SigningService(cfg).list_profiles()
+        profiles = SigningProfileRepository().list_all(user_id=principal.user_id)
         return {"profiles": [{"name": p.name, "type": p.profile_type.value} for p in profiles]}
+
+    @app.post("/v1/keys/personal")
+    def provision_personal_signer(principal: Principal):
+        profile = AccessService().ensure_personal_signer(cfg, principal.user_id)
+        return {"name": profile.name, "type": profile.profile_type.value}
 
     @app.post("/v1/jobs/{job_id}/cancel", dependencies=[Depends(_verify_token)])
     def cancel_job(job_id: str):

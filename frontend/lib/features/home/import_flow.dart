@@ -95,7 +95,7 @@ class _ImportDialogState extends State<_ImportDialog> {
             : null;
         if (id == null) {
           throw StateError(
-            'Import completed but no project ID was returned. Open Jobs.',
+            'Import completed but no project ID was returned. Open History.',
           );
         }
         Navigator.pop(context, id);
@@ -171,7 +171,7 @@ class _ImportDialogState extends State<_ImportDialog> {
               if (_error != null) SelectableText(_error!),
               if (_job != null)
                 const Text(
-                  'Closing this window does not cancel the backend job. Reopen it in Jobs.',
+                  'Closing this window does not cancel the import. Check its progress in History.',
                 ),
             ],
           ),

@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -173,6 +174,44 @@ class TokenRow(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class UserRow(Base):
+    __tablename__ = "workspace_users"
+    user_id = Column(String(32), primary_key=True)
+    name = Column(String(80), nullable=False)
+    disabled = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class TokenAccessRow(Base):
+    __tablename__ = "token_access"
+    token_id = Column(String(32), primary_key=True)
+    user_id = Column(String(32), nullable=False, index=True)
+    revoked = Column(Boolean, nullable=False, default=False)
+
+
+class InviteRow(Base):
+    __tablename__ = "workspace_invites"
+    invite_id = Column(String(32), primary_key=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    user_id = Column(String(32), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    redeemed_at = Column(DateTime, nullable=True)
+    revoked = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class ProjectAccessRow(Base):
+    __tablename__ = "project_access"
+    project_id = Column(String(32), primary_key=True)
+    user_id = Column(String(32), nullable=False, index=True)
+
+
+class SigningAccessRow(Base):
+    __tablename__ = "signing_access"
+    profile_name = Column(String(64), primary_key=True)
+    user_id = Column(String(32), nullable=False, index=True)
+
+
 class FileManifestRow(Base):
     __tablename__ = "file_manifests"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -224,6 +263,32 @@ def init_db(database_url: str) -> None:
         )
         event.listen(_engine, "connect", _enable_wal)
         Base.metadata.create_all(_engine)
+        # Additive, transactional migration. Existing CLI projects/tokens belong
+        # only to the local owner; never expose them to newly invited users.
+        with _engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT OR IGNORE INTO workspace_users (user_id, name, disabled, created_at) "
+                    "VALUES ('local', 'Owner', 0, CURRENT_TIMESTAMP)"
+                )
+            )
+            for target, column, source, source_column in (
+                ("project_access", "project_id", "projects", "id"),
+                ("project_access", "project_id", "jobs", "project_id"),
+                ("signing_access", "profile_name", "signing_profiles", "name"),
+            ):
+                connection.execute(
+                    text(
+                        f"INSERT OR IGNORE INTO {target} ({column}, user_id) "  # noqa: S608 -- fixed table names above
+                        f"SELECT {source_column}, 'local' FROM {source}"
+                    )
+                )
+            connection.execute(
+                text(
+                    "INSERT OR IGNORE INTO token_access (token_id, user_id, revoked) "
+                    "SELECT token_id, 'local', 0 FROM api_tokens"
+                )
+            )
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
         _database_url = database_url
 

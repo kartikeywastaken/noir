@@ -18,8 +18,15 @@ class SigningController extends SafeNotifier {
   Map<String, dynamic>? verifyResult;
 
   Future<void> loadProfiles() async {
+    error = null;
     try {
       profiles = await api.listSigningProfiles();
+      if (profiles.isEmpty) {
+        profiles = [await api.createPersonalSigningProfile()];
+      }
+      if (!profiles.any((profile) => profile.name == selectedProfile)) {
+        selectedProfile = profiles.firstOrNull?.name;
+      }
     } catch (e) {
       error = e.toString();
     }
@@ -51,6 +58,7 @@ class SigningController extends SafeNotifier {
   }
 
   Future<Uint8List> verifiedDownload(String id, BuildResult build) async {
+    final revision = api.credentialRevision;
     final expected = build.signedApkHash;
     if (expected == null || !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(expected)) {
       throw ApiException(
@@ -68,6 +76,9 @@ class SigningController extends SafeNotifier {
       throw ApiException(
         'Downloaded SHA-256 differs from the recorded build. File was NOT saved.',
       );
+    }
+    if (revision != api.credentialRevision) {
+      throw ApiException('Workspace changed. Download discarded.');
     }
     return bytes;
   }

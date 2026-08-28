@@ -9,8 +9,13 @@ import '../../core/widgets/review_layout.dart';
 import '../../data/models/models.dart';
 
 class SigningScreen extends StatefulWidget {
-  const SigningScreen({super.key, required this.projectId});
+  const SigningScreen({
+    super.key,
+    required this.projectId,
+    this.initialBuildId,
+  });
   final String projectId;
+  final String? initialBuildId;
   @override
   State<SigningScreen> createState() => _SigningScreenState();
 }
@@ -29,6 +34,7 @@ class _SigningScreenState extends State<SigningScreen> {
   @override
   void initState() {
     super.initState();
+    _buildId = widget.initialBuildId;
     _controller = SigningController(context.read<ConnectionController>().api);
     _refresh();
   }
@@ -68,7 +74,7 @@ class _SigningScreenState extends State<SigningScreen> {
     if (!await confirmAction(
           context,
           'Sign this build?',
-          'Build: ${build.buildId}\nRevision: ${build.workspaceRevision}\nProfile: ${_controller.selectedProfile}\n\nThis creates a locally signed APK. Its certificate differs from the original app, so it cannot update an installation signed by that app’s publisher. Nothing is installed automatically.',
+          'Build: ${build.buildId}\nRevision: ${build.workspaceRevision}\nProfile: ${_controller.selectedProfile}\n\nThis signs the APK on your backend using your workspace’s key. Its certificate differs from the original app, so it cannot update an installation signed by that app’s publisher. Nothing is installed automatically.',
           'Sign',
         ) ||
         !mounted) {
@@ -167,7 +173,7 @@ class _SigningScreenState extends State<SigningScreen> {
               children: [
                 if (_controller.profiles.isEmpty)
                   const SelectableText(
-                    'No signing profiles found. Create one on the laptop with:\nnoir keys create-profile PROFILE_NAME\nThen refresh. Key material never enters the app.',
+                    'Your personal signing key could not be prepared. Refresh or contact the server owner. Key material never enters the app.',
                   ),
                 if (_controller.profiles.isNotEmpty)
                   DropdownButtonFormField<String>(

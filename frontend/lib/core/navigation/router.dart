@@ -13,13 +13,14 @@ import '../../features/build/build_screen.dart';
 import '../../features/signing/signing_screen.dart';
 import '../../features/audit/audit_screen.dart';
 import '../../features/history/history_screen.dart';
-import '../../features/jobs/jobs_screen.dart';
+import '../../features/history/build_history_screen.dart';
 
 GoRouter createNoirRouter() => GoRouter(
   routes: [
     GoRoute(path: '/', builder: (_, _) => const HomeScreen()),
     GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
-    GoRoute(path: '/jobs', builder: (_, _) => const JobsScreen()),
+    GoRoute(path: '/history', builder: (_, _) => const BuildHistoryScreen()),
+    GoRoute(path: '/jobs', redirect: (_, _) => '/history'),
     GoRoute(
       path: '/project/:id',
       builder: (context, state) => ChangeNotifierProvider(
@@ -53,8 +54,10 @@ GoRouter createNoirRouter() => GoRouter(
         ),
         GoRoute(
           path: 'sign',
-          builder: (_, state) =>
-              SigningScreen(projectId: state.pathParameters['id']!),
+          builder: (_, state) => SigningScreen(
+            projectId: state.pathParameters['id']!,
+            initialBuildId: state.uri.queryParameters['build'],
+          ),
         ),
         GoRoute(
           path: 'audit',

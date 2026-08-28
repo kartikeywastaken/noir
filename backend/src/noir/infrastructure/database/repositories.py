@@ -31,9 +31,13 @@ from noir.infrastructure.database.engine import (
     ManualSessionRow,
     PatchRow,
     PlanRow,
+    ProjectAccessRow,
     ProjectRow,
+    SigningAccessRow,
     SigningProfileRow,
+    TokenAccessRow,
     TokenRow,
+    UserRow,
     ValidationRow,
     get_session,
 )
@@ -61,6 +65,8 @@ class ProjectRepository:
                 updated_at=project.updated_at,
             )
             session.add(row)
+            if session.get(ProjectAccessRow, project.id) is None:
+                session.add(ProjectAccessRow(project_id=project.id, user_id="local"))
             session.commit()
         return project
 
@@ -90,9 +96,14 @@ class ProjectRepository:
             row.updated_at = datetime.now(UTC)
             session.commit()
 
-    def list_all(self) -> list[ProjectInfo]:
+    def list_all(self, *, user_id: str | None = None) -> list[ProjectInfo]:
         with get_session() as session:
-            rows = session.query(ProjectRow).order_by(ProjectRow.created_at.desc()).all()
+            query = session.query(ProjectRow)
+            if user_id is not None:
+                query = query.join(
+                    ProjectAccessRow, ProjectRow.id == ProjectAccessRow.project_id
+                ).filter(ProjectAccessRow.user_id == user_id)
+            rows = query.order_by(ProjectRow.created_at.desc()).all()
             return [self._to_model(r) for r in rows]
 
     def _to_model(self, row: ProjectRow) -> ProjectInfo:
@@ -136,6 +147,8 @@ class JobRepository:
                 finished_at=job.finished_at,
             )
             session.add(row)
+            if session.get(ProjectAccessRow, job.project_id) is None:
+                session.add(ProjectAccessRow(project_id=job.project_id, user_id="local"))
             session.commit()
         return job
 
@@ -190,9 +203,14 @@ class JobRepository:
             )
             return [self._to_model(r) for r in rows]
 
-    def list_all(self) -> list[JobInfo]:
+    def list_all(self, *, user_id: str | None = None) -> list[JobInfo]:
         with get_session() as session:
-            rows = session.query(JobRow).order_by(JobRow.created_at.desc()).all()
+            query = session.query(JobRow)
+            if user_id is not None:
+                query = query.join(
+                    ProjectAccessRow, JobRow.project_id == ProjectAccessRow.project_id
+                ).filter(ProjectAccessRow.user_id == user_id)
+            rows = query.order_by(JobRow.created_at.desc()).all()
             return [self._to_model(r) for r in rows]
 
     def _to_model(self, row: JobRow) -> JobInfo:
@@ -543,8 +561,11 @@ class BuildRepository:
 class SigningProfileRepository:
     """Data access for signing profiles."""
 
-    def create(self, profile: SigningProfile) -> SigningProfile:
+    def create(self, profile: SigningProfile, *, user_id: str = "local") -> SigningProfile:
         with get_session() as session:
+            access = session.get(SigningAccessRow, profile.name)
+            if access is not None and access.user_id != user_id:
+                raise ValueError("Signing profile belongs to a different workspace")
             row = SigningProfileRow(
                 name=profile.name,
                 profile_type=profile.profile_type.value,
@@ -554,6 +575,8 @@ class SigningProfileRepository:
                 created_at=profile.created_at,
             )
             session.merge(row)
+            if access is None:
+                session.add(SigningAccessRow(profile_name=profile.name, user_id=user_id))
             session.commit()
         return profile
 
@@ -571,9 +594,14 @@ class SigningProfileRepository:
                 created_at=row.created_at,
             )
 
-    def list_all(self) -> list[SigningProfile]:
+    def list_all(self, *, user_id: str | None = None) -> list[SigningProfile]:
         with get_session() as session:
-            rows = session.query(SigningProfileRow).all()
+            query = session.query(SigningProfileRow)
+            if user_id is not None:
+                query = query.join(
+                    SigningAccessRow, SigningProfileRow.name == SigningAccessRow.profile_name
+                ).filter(SigningAccessRow.user_id == user_id)
+            rows = query.all()
             return [
                 SigningProfile(
                     name=r.name,
@@ -690,6 +718,8 @@ class TokenRepository:
 
     def create(self, token: ApiToken) -> ApiToken:
         with get_session() as session:
+            if session.get(UserRow, token.user_id) is None:
+                raise ValueError("Workspace user does not exist")
             row = TokenRow(
                 token_id=token.token_id,
                 token_hash=token.token_hash,
@@ -697,6 +727,9 @@ class TokenRepository:
                 created_at=token.created_at,
             )
             session.add(row)
+            session.add(
+                TokenAccessRow(token_id=token.token_id, user_id=token.user_id, revoked=False)
+            )
             session.commit()
         return token
 
@@ -705,24 +738,34 @@ class TokenRepository:
             row = session.query(TokenRow).filter(TokenRow.token_hash == token_hash).first()
             if not row:
                 return None
+            access = session.get(TokenAccessRow, row.token_id)
+            user = session.get(UserRow, access.user_id) if access else None
+            if access is None or access.revoked or user is None or user.disabled:
+                return None
             return ApiToken(
                 token_id=row.token_id,
                 token_hash=row.token_hash,
                 name=row.name,
+                user_id=access.user_id,
                 created_at=row.created_at,
             )
 
     def list_all(self) -> list[ApiToken]:
         with get_session() as session:
-            rows = session.query(TokenRow).all()
+            rows = (
+                session.query(TokenRow, TokenAccessRow)
+                .join(TokenAccessRow, TokenRow.token_id == TokenAccessRow.token_id)
+                .all()
+            )
             return [
                 ApiToken(
                     token_id=r.token_id,
                     token_hash=r.token_hash,
                     name=r.name,
+                    user_id=access.user_id,
                     created_at=r.created_at,
                 )
-                for r in rows
+                for r, access in rows
             ]
 
 

@@ -120,7 +120,11 @@ class _HomeScreenState extends State<HomeScreen>
                           if (!conn.isConnected) ...[
                             const SizedBox(height: 12),
                             Text(
-                              'Connect to backend first',
+                              conn.state == BackendConnectionState.connecting
+                                  ? 'Connecting to your workspace…'
+                                  : conn.hasToken
+                                  ? 'Connection unavailable'
+                                  : 'Activate your private workspace',
                               style: NoirTypography.codeSm.copyWith(
                                 color: NoirColors.onSurfaceVariant.withValues(
                                   alpha: 0.4,
@@ -129,7 +133,9 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                             const SizedBox(height: 12),
                             NoirGhostButton(
-                              label: 'Connect backend',
+                              label: conn.hasToken
+                                  ? 'Connection settings'
+                                  : 'Enter invitation',
                               onPressed: () => context.push('/settings'),
                             ),
                           ],
@@ -216,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen>
             currentIndex: 0,
             onTap: (i) {
               if (i == 3) context.push('/settings');
-              if (i == 2) context.push('/jobs');
+              if (i == 2) context.push('/history');
               if (i == 1 && _recentKey.currentContext != null) {
                 Scrollable.ensureVisible(
                   _recentKey.currentContext!,

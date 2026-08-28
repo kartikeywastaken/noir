@@ -4,11 +4,56 @@ Flutter Android/macOS client for the existing NOIR Python backend. The selected 
 
 ## What runs where
 
-The laptop runs FastAPI, Gemini calls, Apktool, validation, rebuilds and signing. The phone runs the Flutter client. **This is not an on-device Python/Apktool port.** Nothing is installed, signed or approved automatically by the UI.
+The deployed EC2 backend runs FastAPI, Gemini calls, Apktool, validation, rebuilds and signing. The phone runs the Flutter client. **This is not an on-device Python/Apktool port.** Plan approval, patch approval and APK signing still require explicit actions. Personal signing-key provisioning happens when an invited user first opens signing.
 
 The backend and CLI remain usable independently. The app uses authenticated HTTP only; it never reads the backend database or calls Gemini directly.
 
-## Start the backend
+## Private cloud app
+
+The app defaults to `https://noir-16-171-197-228.sslip.io`. Invited users enter a
+one-time invitation code under **Config → Activate invitation**. Their session is saved
+in OS secure storage and reconnects automatically on startup/resume. The APK contains
+the public server URL, not a bearer token or Gemini key.
+
+The owner creates each invitation through SSH:
+
+```sh
+ssh -o IdentitiesOnly=yes -i /Users/kartik/Desktop/noir-server.pem ubuntu@16.171.197.228 \
+  'sudo -u noir env NOIR_DATA_DIR=/var/lib/noir/data /opt/noir/venv/bin/noir users invite "Friend name"'
+```
+
+Share the resulting `invite_code` privately with that person. Codes expire after seven
+days and can be used once. `noir users list` shows workspace IDs; issue another code
+with `users invite "Friend name" --user USER_ID` for the same person's second device
+or return after sign-out. Without `--user`, a new private workspace is created.
+`users revoke USER_ID` disables all of that user's sessions and unused invitations;
+it does not delete their builds. These are trusted server CLI commands, not public APIs.
+
+Each user sees only their projects, files, jobs, plans, patches, builds, downloads and
+signing profiles. Existing owner data stays in the `local` workspace. Accounts are
+isolated by server-side ownership checks; filtering in Flutter is not the security boundary.
+Changing accounts clears cached UI state and discards responses from the previous session.
+
+**History** replaces Jobs in navigation. It lists previous signed/unsigned/failed builds
+with timestamps, verified APK downloads, exact-build signing details and audit links.
+Active operations remain visible and cancellable. Plan/patch history remains available
+inside each project for approval recovery after an AI timeout. The old `/jobs` app route
+redirects to History; the underlying job API is retained for real progress and cancellation.
+
+The ready-to-install private-beta APK is `output/noir-private-beta.apk` (version 0.2.0+2).
+It is a release-mode build using the existing development signing identity so it can
+update the previously installed NOIR test app without erasing its saved session. It is
+not an app-store release; use a private production signing identity before wider distribution.
+
+```sh
+adb -d install -r /Users/kartik/Documents/ChatGPT/noir/frontend/output/noir-private-beta.apk
+```
+
+No ADB reverse, laptop backend, or custom URL is required for cloud use. The current
+hostname embeds the EC2 IP; if that IP changes, update the deployment and app origin.
+Build-time origin override: `flutter build apk --release --dart-define=NOIR_BACKEND_URL=https://your-server.example`.
+
+## Optional local backend / Advanced settings
 
 In terminal 1:
 
@@ -30,7 +75,7 @@ source .venv/bin/activate
 noir api token
 ```
 
-Paste that output in the app's **Config → NOIR bearer token**, not into source code. Credentials are saved in the OS keychain/keystore. Leave the token field blank to retain the saved token at the same address. A changed backend address requires explicitly providing its token.
+Paste that output in the app's **Config → Advanced → Custom backend / owner access**, not into source code. Credentials are saved in the OS keychain/keystore. Leave the token field blank to retain the saved token at the same address. A changed backend address requires explicitly providing its token.
 
 The Gemini key stays in the ignored file `backend/.env`:
 
@@ -95,7 +140,7 @@ Connect to `http://127.0.0.1:8787` using the same backend token. Network-client,
 
 ## Workflow
 
-1. Connect, select an APK and acknowledge authorization. The file streams from the native picker to the backend; decoding and analysis run as a real job. Jobs can be reopened after leaving the import dialog.
+1. Activate an invitation (or configure a local backend under Advanced), select an APK and acknowledge authorization. The file streams from the native picker to the backend; decoding and analysis run as a real job. Progress can be reopened in History after leaving the import dialog.
 2. Browse the decoded manifest, resources and Smali, or search file contents. The inventory shows SDK, permissions and compatibility warnings. These are decoded artifacts, not original Java/Kotlin source.
 3. **Ask AI:** explicitly consent to context upload, describe the change, review every plan field and its full hash, then approve. Patch generation is a separate action. Review the backend's full deterministic diff, approve the exact patch hash, then apply it. Missing/failed diffs cannot be approved.
 4. **Manual edit:** begin/resume a session, open a text file, edit and save to the backend. Discard only resets an unsaved buffer; it does not undo saved files. Record the session before AI/build operations. Stale saves preserve the buffer and report a conflict.
@@ -109,9 +154,9 @@ Create a signing profile on the laptop if needed:
 noir keys create-profile local-test
 ```
 
-Existing profiles, including `vpn-rename`, are listed automatically; their secrets never enter the app. Local re-signing changes the certificate and may prevent installation over the publisher's version. NOIR never auto-uninstalls or auto-installs another app.
+Existing profiles are listed only in their owning workspace; their secrets never enter the app. Re-signing changes the certificate and may prevent installation over the publisher's version. NOIR never auto-uninstalls or auto-installs another app.
 
-History reloads persisted plans/patches and their approval/revision state. After a timeout, refresh History or Jobs before retrying: a synchronous backend request may have finished even if its response was lost. The client never automatically replays a mutation.
+Project-specific plan/patch history reloads persisted approval/revision state. After an AI timeout, refresh that history before retrying: a synchronous backend request may have finished even if its response was lost. Global History shows builds and running operations. The client never automatically replays a mutation.
 
 Installed-application extraction remains a backend CLI/device feature. This client imports APK files through the native picker; it does not request broad installed-package visibility. Split APK installation is not added.
 
@@ -146,7 +191,7 @@ NOIR_RUN_E2E=1 JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH=/opt/homebrew/opt/ope
 
 No live Gemini request or installation on your phone is performed by these tests.
 
-Verification on this machine: 118 backend tests and 20 Flutter unit/widget tests pass; the isolated real-HTTP integration test passes separately. Flutter analysis and backend Ruff checks pass. The Android debug APK builds and passes `apksigner verify`. The macOS build remains unverified because full Xcode is missing.
+See `../backend/deploy/ec2/VERIFICATION.md` for deployment evidence. The suites include owner isolation, invite replay/revocation, private history, account-switch response protection, and the real Dart HTTP integration. The macOS app build still requires a complete Xcode installation.
 
 ## Implementation notes
 
