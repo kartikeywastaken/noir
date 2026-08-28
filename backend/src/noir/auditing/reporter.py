@@ -17,6 +17,7 @@ from noir.infrastructure.database.repositories import (
     ApprovalRepository,
     BuildRepository,
     EventRepository,
+    ManualSessionRepository,
     PatchRepository,
     PlanRepository,
     ProjectRepository,
@@ -101,6 +102,18 @@ class AuditReporter:
                     "patch_hash": p.compute_hash(),
                 }
                 for p in patches
+            ],
+            "manual_sessions": [
+                {
+                    "session_id": session.session_id,
+                    "active": session.active,
+                    "workspace_revision_start": session.workspace_revision_start,
+                    "changed_files": session.detected_changes,
+                    "message": self._redact(session.message),
+                    "started_at": session.started_at.isoformat(),
+                    "finished_at": session.finished_at.isoformat() if session.finished_at else None,
+                }
+                for session in ManualSessionRepository().list_by_project(project_id)
             ],
             "approvals": [
                 {
@@ -214,6 +227,20 @@ class AuditReporter:
                     )
                 if plan["risks"]:
                     lines.append(f"- **Risks:** {', '.join(plan['risks'])}")
+                lines.append("")
+
+        if data["manual_sessions"]:
+            lines.extend(["## Manual Edits", ""])
+            for session in data["manual_sessions"]:
+                state = "Active — not recorded" if session["active"] else "Recorded"
+                lines.append(f"### Session: {session['session_id']}")
+                lines.append("")
+                lines.append(f"- **Status:** {state}")
+                lines.append(f"- **Starting revision:** {session['workspace_revision_start']}")
+                if session["message"]:
+                    lines.append(f"- **Note:** {session['message']}")
+                for path in session["changed_files"]:
+                    lines.append(f"- **Changed file:** `{path}`")
                 lines.append("")
 
         if data["approvals"]:

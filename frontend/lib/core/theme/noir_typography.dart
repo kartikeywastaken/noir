@@ -1,6 +1,8 @@
 /// Obsidian Protocol typography.
 ///
 /// Inter for UI/content text, JetBrains Mono for technical data.
+library;
+
 import 'package:flutter/material.dart';
 
 class NoirTypography {

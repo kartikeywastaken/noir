@@ -1,4 +1,6 @@
 /// Ambient mesh gradient background layer.
+library;
+
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
 

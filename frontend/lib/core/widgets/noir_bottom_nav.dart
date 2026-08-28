@@ -1,4 +1,6 @@
 /// Bottom navigation bar with glow-dot active indicator.
+library;
+
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
 import '../theme/noir_typography.dart';
@@ -16,7 +18,7 @@ class NoirBottomNav extends StatelessWidget {
   static const _items = [
     _NavItem(Icons.grid_view, 'HOME'),
     _NavItem(Icons.layers, 'PROJECTS'),
-    _NavItem(Icons.developer_mode, 'TOOLS'),
+    _NavItem(Icons.work_history_outlined, 'JOBS'),
     _NavItem(Icons.settings, 'CONFIG'),
   ];
 
@@ -69,6 +71,10 @@ class NoirBottomNav extends StatelessWidget {
                     )
                   else
                     const SizedBox(height: 8),
+                  Text(
+                    _items[i].label,
+                    style: NoirTypography.labelCaps.copyWith(fontSize: 8),
+                  ),
                 ],
               ),
             ),

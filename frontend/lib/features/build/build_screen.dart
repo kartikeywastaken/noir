@@ -1,4 +1,6 @@
 /// Build screen — validation, rebuild with SSE monitoring, cancel.
+library;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -24,7 +26,9 @@ class _BuildScreenState extends State<BuildScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<BuildController>().loadBuilds(widget.projectId);
+    Future.microtask(() {
+      if (mounted) context.read<BuildController>().loadBuilds(widget.projectId);
+    });
   }
 
   @override
@@ -36,7 +40,13 @@ class _BuildScreenState extends State<BuildScreen> {
           appBar: NoirAppBar(
             title: 'VALIDATE & BUILD',
             showBackButton: true,
-            actions: const [SizedBox(width: 48)],
+            actions: [
+              IconButton(
+                tooltip: 'Refresh jobs and builds',
+                onPressed: () => ctrl.loadBuilds(widget.projectId),
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
           ),
           body: MeshGradientBackground(
             child: LayoutBuilder(
@@ -48,7 +58,11 @@ class _BuildScreenState extends State<BuildScreen> {
                       ? Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(child: _buildProgressPanel(ctrl)),
+                            Expanded(
+                              child: SingleChildScrollView(
+                                child: _buildProgressPanel(ctrl),
+                              ),
+                            ),
                             const SizedBox(width: 16),
                             Expanded(child: _buildLogPanel(ctrl)),
                           ],
@@ -66,15 +80,17 @@ class _BuildScreenState extends State<BuildScreen> {
               },
             ),
           ),
-          bottomNavigationBar: LayoutBuilder(builder: (context, constraints) {
-            if (constraints.maxWidth > 700) {
-              return Padding(
-                padding: const EdgeInsets.all(16),
-                child: _buildActions(ctrl),
-              );
-            }
-            return const SizedBox.shrink();
-          }),
+          bottomNavigationBar: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth > 700) {
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: _buildActions(ctrl),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
         );
       },
     );
@@ -88,9 +104,12 @@ class _BuildScreenState extends State<BuildScreen> {
           // Header
           Align(
             alignment: Alignment.topLeft,
-            child: Text('[ SYS.BUILD_STATUS ]',
-                style: NoirTypography.labelCaps
-                    .copyWith(color: NoirColors.onSurfaceVariant.withValues(alpha: 0.5))),
+            child: Text(
+              '[ SYS.BUILD_STATUS ]',
+              style: NoirTypography.labelCaps.copyWith(
+                color: NoirColors.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ),
           ),
           const SizedBox(height: 32),
 
@@ -118,7 +137,9 @@ class _BuildScreenState extends State<BuildScreen> {
                   child: CircularProgressIndicator(
                     strokeWidth: 3,
                     color: NoirColors.primary,
-                    value: ctrl.building ? null : (ctrl.currentJob?.isTerminal == true ? 1.0 : 0.0),
+                    value: ctrl.building
+                        ? null
+                        : (ctrl.currentJob?.isTerminal == true ? 1.0 : 0.0),
                   ),
                 ),
                 // Center text
@@ -135,8 +156,9 @@ class _BuildScreenState extends State<BuildScreen> {
                     const SizedBox(height: 4),
                     Text(
                       _stateSubtext(ctrl),
-                      style: NoirTypography.labelCaps
-                          .copyWith(color: NoirColors.onSurfaceVariant),
+                      style: NoirTypography.labelCaps.copyWith(
+                        color: NoirColors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -146,15 +168,38 @@ class _BuildScreenState extends State<BuildScreen> {
           const SizedBox(height: 32),
 
           // Validation summary
-          if (ctrl.validation != null)
-            _validationSummary(ctrl),
+          if (ctrl.validation != null) _validationSummary(ctrl),
+
+          if (ctrl.currentJob != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: SelectableText(
+                'Job: ${ctrl.currentJob!.jobId}\nState: ${ctrl.currentJob!.state}\nStage: ${ctrl.currentJob!.stage}${ctrl.currentJob!.resultData['cancel_requested'] == true ? '\nCancellation requested; awaiting worker.' : ''}',
+                style: NoirTypography.codeSm,
+              ),
+            ),
+          for (final build in ctrl.builds)
+            ListTile(
+              title: Text(build.buildId, style: NoirTypography.codeSm),
+              subtitle: Text(
+                build.success
+                    ? 'Built · revision ${build.workspaceRevision}${build.signedApkHash != null ? ' · signed' : ' · unsigned'}'
+                    : build.errorMessage ?? 'Build failed',
+              ),
+              trailing: build.success ? const Icon(Icons.chevron_right) : null,
+              onTap: build.success
+                  ? () => context.push('/project/${widget.projectId}/sign')
+                  : null,
+            ),
 
           // Error
           if (ctrl.error != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: Text(ctrl.error!,
-                  style: NoirTypography.codeSm.copyWith(color: NoirColors.error)),
+              child: Text(
+                ctrl.error!,
+                style: NoirTypography.codeSm.copyWith(color: NoirColors.error),
+              ),
             ),
         ],
       ),
@@ -179,25 +224,33 @@ class _BuildScreenState extends State<BuildScreen> {
         ),
         if (v.findings.isNotEmpty) ...[
           const SizedBox(height: 12),
-          ...v.findings.take(5).map((f) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  children: [
-                    Icon(
-                      f.severity == 'error' ? Icons.error_outline : Icons.warning_amber,
-                      size: 12,
-                      color: NoirColors.onSurfaceVariant.withValues(alpha: 0.6),
+          ...v.findings.map(
+            (f) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    f.severity == 'error'
+                        ? Icons.error_outline
+                        : Icons.warning_amber,
+                    size: 12,
+                    color: NoirColors.onSurfaceVariant.withValues(alpha: 0.6),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      f.message,
+                      style: NoirTypography.codeSm.copyWith(
+                        color: NoirColors.onSurfaceVariant.withValues(
+                          alpha: 0.6,
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(f.message,
-                          style: NoirTypography.codeSm.copyWith(
-                            color: NoirColors.onSurfaceVariant.withValues(alpha: 0.6),
-                          )),
-                    ),
-                  ],
-                ),
-              )),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ],
     );
@@ -206,27 +259,31 @@ class _BuildScreenState extends State<BuildScreen> {
   Widget _validationBadge(String label, String value, bool alert) {
     return Column(
       children: [
-        Text(value,
-            style: NoirTypography.headlineMd.copyWith(
-              color: alert ? NoirColors.primary : NoirColors.onSurfaceVariant,
-            )),
-        Text(label,
-            style: NoirTypography.labelCaps
-                .copyWith(color: NoirColors.onSurfaceVariant.withValues(alpha: 0.5))),
+        Text(
+          value,
+          style: NoirTypography.headlineMd.copyWith(
+            color: alert ? NoirColors.primary : NoirColors.onSurfaceVariant,
+          ),
+        ),
+        Text(
+          label,
+          style: NoirTypography.labelCaps.copyWith(
+            color: NoirColors.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+        ),
       ],
     );
   }
 
   Widget _buildLogPanel(BuildController ctrl) {
-    return LogViewer(
-      entries: ctrl.logEntries,
-      title: 'SYSTEM_LOG',
-    );
+    return LogViewer(entries: ctrl.logEntries, title: 'SYSTEM_LOG');
   }
 
   Widget _buildActions(BuildController ctrl) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 8,
+      runSpacing: 8,
       children: [
         if (ctrl.building)
           NoirGhostButton(
@@ -246,7 +303,7 @@ class _BuildScreenState extends State<BuildScreen> {
             label: 'Build',
             icon: Icons.build,
             loading: ctrl.building,
-            onPressed: ctrl.validation?.passed == true
+            onPressed: ctrl.validation?.passed == true && !ctrl.validating
                 ? () => ctrl.startBuild(widget.projectId)
                 : null,
           ),
@@ -269,6 +326,7 @@ class _BuildScreenState extends State<BuildScreen> {
     if (ctrl.currentJob?.state == 'succeeded') return 'COMPLETE';
     if (ctrl.currentJob?.state == 'failed') return 'FAILED';
     if (ctrl.currentJob?.state == 'cancelled') return 'CANCELLED';
+    if (ctrl.currentJob?.state == 'interrupted') return 'INTERRUPTED';
     return 'READY';
   }
 

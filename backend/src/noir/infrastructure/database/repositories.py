@@ -621,6 +621,16 @@ class ManualSessionRepository:
                 return None
             return self._to_model(row)
 
+    def list_by_project(self, project_id: str) -> list[ManualEditSession]:
+        with get_session() as session:
+            rows = (
+                session.query(ManualSessionRow)
+                .filter(ManualSessionRow.project_id == project_id)
+                .order_by(ManualSessionRow.started_at.desc())
+                .all()
+            )
+            return [self._to_model(row) for row in rows]
+
     def finish(self, session_id: str, detected_changes: list[str], message: str) -> None:
         with get_session() as session:
             row = session.get(ManualSessionRow, session_id)

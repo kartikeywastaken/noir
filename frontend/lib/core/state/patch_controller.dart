@@ -1,10 +1,12 @@
 /// Patch controller — generate, review, approve, apply, undo.
-import 'package:flutter/material.dart';
+library;
+
+import 'safe_notifier.dart';
 import '../../data/api/noir_api_client.dart';
 import '../../data/api/api_exceptions.dart';
 import '../../data/models/models.dart';
 
-class PatchController extends ChangeNotifier {
+class PatchController extends SafeNotifier {
   PatchController(this._api);
 
   final NoirApiClient _api;
@@ -77,7 +79,11 @@ class PatchController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _api.approvePatch(projectId, _currentPatch!.patchId, _currentPatch!.patchHash);
+      await _api.approvePatch(
+        projectId,
+        _currentPatch!.patchId,
+        _currentPatch!.patchHash,
+      );
       return true;
     } on ApiException catch (e) {
       _error = e.message;

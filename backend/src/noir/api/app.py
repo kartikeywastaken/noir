@@ -121,6 +121,28 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     def get_cfg() -> NoirConfig:
         return cfg
 
+    def review_state(project_id: str, target_hash: str, revision: int, scope: str) -> dict:
+        """Read persisted review state; mutation services remain authoritative."""
+        from noir.domain.enums import ApprovalScope
+        from noir.infrastructure.database.repositories import ApprovalRepository, ProjectRepository
+
+        project = ProjectRepository().get(project_id)
+        if not project:
+            raise HTTPException(404, "Project not found")
+        stale = revision != project.workspace_revision
+        approved = (
+            not stale
+            and ApprovalRepository().find_valid(
+                project_id, ApprovalScope(scope), target_hash, project.workspace_revision
+            )
+            is not None
+        )
+        return {
+            "approved": approved,
+            "stale": stale,
+            "current_revision": project.workspace_revision,
+        }
+
     # ── Health ────────────────────────────────────────────────────
 
     @app.get("/v1/health")
@@ -194,7 +216,16 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
                         tmp.unlink()
                         return existing.model_dump(mode="json")
             job = queue.submit(
-                "import", uuid4().hex[:16], {"path": str(tmp), "sha256": digest}, idempotency_key
+                "import",
+                uuid4().hex[:16],
+                {
+                    "path": str(tmp),
+                    "sha256": digest,
+                    "original_filename": Path(
+                        (file.filename or "uploaded.apk").replace("\\", "/")
+                    ).name,
+                },
+                idempotency_key,
             )
             return job.model_dump(mode="json")
         except BaseException:
@@ -206,13 +237,17 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     # ── Analysis ──────────────────────────────────────────────────
 
     @app.get("/v1/projects/{project_id}/analysis", dependencies=[Depends(_verify_token)])
-    def get_analysis(project_id: str):
+    def get_analysis(project_id: str, compact: bool = False):
         from noir.analysis.analyzer import AnalysisService
 
         result = AnalysisService(cfg).get_analysis(project_id)
         if not result:
             raise HTTPException(404, "Analysis not found")
-        return result.model_dump(mode="json")
+        # The phone inventory needs metadata, not tens of thousands of indexed methods.
+        excluded = (
+            {"smali_classes", "apktool_metadata", "input_cert_info", "assets"} if compact else set()
+        )
+        return result.model_dump(mode="json", exclude=excluded)
 
     # ── Files ─────────────────────────────────────────────────────
 
@@ -287,9 +322,7 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             ]
         }
 
-    @app.get(
-        "/v1/projects/{project_id}/plans/{plan_id}", dependencies=[Depends(_verify_token)]
-    )
+    @app.get("/v1/projects/{project_id}/plans/{plan_id}", dependencies=[Depends(_verify_token)])
     def get_plan(project_id: str, plan_id: str):
         from noir.application.patch_service import PlanService
 
@@ -298,6 +331,9 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             raise HTTPException(404, "Plan not found")
         data = plan.model_dump(mode="json")
         data["plan_hash"] = plan.compute_hash()
+        data["review"] = review_state(
+            project_id, plan.compute_hash(), plan.workspace_revision, "plan"
+        )
         return data
 
     @app.post(
@@ -367,17 +403,20 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             ]
         }
 
-    @app.get(
-        "/v1/projects/{project_id}/patches/{patch_id}", dependencies=[Depends(_verify_token)]
-    )
+    @app.get("/v1/projects/{project_id}/patches/{patch_id}", dependencies=[Depends(_verify_token)])
     def get_patch(project_id: str, patch_id: str):
         from noir.application.patch_service import PatchService
+        from noir.infrastructure.database.repositories import PatchRepository
 
         patch = PatchService(cfg).get_patch(patch_id)
         if not patch or patch.project_id != project_id:
             raise HTTPException(404, "Patch not found")
         data = patch.model_dump(mode="json")
         data["patch_hash"] = patch.compute_hash()
+        data["review"] = review_state(
+            project_id, patch.compute_hash(), patch.workspace_revision, "patch"
+        )
+        data["applied"] = PatchRepository().is_applied(patch_id)
         return data
 
     @app.get(

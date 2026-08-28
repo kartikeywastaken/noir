@@ -1,216 +1,200 @@
-/// Import flow — authorization dialog, upload with progress, job monitoring.
 import 'dart:async';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-
+import 'package:uuid/uuid.dart';
 import '../../core/state/connection_controller.dart';
 import '../../core/state/projects_controller.dart';
-import '../../core/theme/noir_colors.dart';
-import '../../core/theme/noir_typography.dart';
-import '../../core/widgets/noir_button.dart';
 import '../../data/models/models.dart';
 
-void showImportFlow(BuildContext context, String filePath) {
-  showDialog(
+Future<void> showImportFlow(BuildContext context, PlatformFile file) async {
+  final id = await showDialog<String>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _ImportDialog(filePath: filePath),
+    builder: (_) => _ImportDialog(file: file),
   );
+  if (id != null && context.mounted) {
+    await context.read<ProjectsController>().loadProjects();
+    if (context.mounted) context.push('/project/$id');
+  }
 }
 
 class _ImportDialog extends StatefulWidget {
-  const _ImportDialog({required this.filePath});
-  final String filePath;
-
+  const _ImportDialog({required this.file});
+  final PlatformFile file;
   @override
   State<_ImportDialog> createState() => _ImportDialogState();
 }
 
 class _ImportDialogState extends State<_ImportDialog> {
+  final _key = const Uuid().v4();
   bool _authorized = false;
   bool _uploading = false;
-  bool _monitoring = false;
-  String _status = 'Awaiting authorization';
+  bool _polling = false;
+  bool _cancelling = false;
   String? _error;
   JobInfo? _job;
-  Timer? _pollTimer;
-
+  Timer? _timer;
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 
+  Future<void> _start() async {
+    if (!_authorized || _uploading || _job != null) return;
+    setState(() {
+      _uploading = true;
+      _error = null;
+    });
+    try {
+      final api = context.read<ConnectionController>().api;
+      final length = await widget.file.length();
+      final job = await api.importApkStream(
+        widget.file.name,
+        length,
+        widget.file.readAsByteStream(),
+        idempotencyKey: _key,
+      );
+      if (!mounted) return;
+      setState(() {
+        _job = job;
+        _uploading = false;
+      });
+      await _poll();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _error = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _poll() async {
+    if (_polling || _job == null || !mounted) return;
+    _timer?.cancel();
+    _polling = true;
+    try {
+      final job = await context.read<ConnectionController>().api.getJob(
+        _job!.jobId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _job = job;
+        _error = null;
+      });
+      if (job.state == 'succeeded') {
+        final result = job.resultData['result'];
+        final id = job.projectId.isNotEmpty
+            ? job.projectId
+            : result is Map
+            ? result['project_id'] as String?
+            : null;
+        if (id == null) {
+          throw StateError(
+            'Import completed but no project ID was returned. Open Jobs.',
+          );
+        }
+        Navigator.pop(context, id);
+      } else if (job.isTerminal) {
+        setState(() => _error = job.errorMessage ?? 'Job ${job.state}');
+      } else {
+        _timer = Timer(const Duration(seconds: 2), _poll);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = 'Monitoring paused: $e. Refresh to reconnect.');
+      }
+    } finally {
+      _polling = false;
+    }
+  }
+
+  Future<void> _cancel() async {
+    setState(() => _cancelling = true);
+    try {
+      final job = await context.read<ConnectionController>().api.cancelJob(
+        _job!.jobId,
+      );
+      if (mounted) {
+        setState(() => _job = job);
+        await _poll();
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+    if (mounted) setState(() => _cancelling = false);
+  }
+
   @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: NoirColors.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(4),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_uploading,
+    child: AlertDialog(
+      title: const Text('Import APK'),
+      content: SizedBox(
+        width: 450,
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('IMPORT APK',
-                  style: NoirTypography.labelCaps.copyWith(
-                    color: NoirColors.primary,
-                    letterSpacing: 2,
-                  )),
-              const SizedBox(height: 16),
-
+              Text(widget.file.name),
+              const SizedBox(height: 12),
+              if (_job == null)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'I am authorized to decode and analyze this APK.',
+                  ),
+                  value: _authorized,
+                  onChanged: _uploading
+                      ? null
+                      : (v) => setState(() => _authorized = v ?? false),
+                ),
               Text(
-                widget.filePath.split('/').last,
-                style: NoirTypography.codeSm.copyWith(color: NoirColors.onSurfaceVariant),
+                _uploading
+                    ? 'Uploading APK…'
+                    : _job == null
+                    ? 'Awaiting authorization'
+                    : 'Job: ${_job!.jobId}\nStage: ${_job!.stage}\nState: ${_job!.state}',
               ),
-              const SizedBox(height: 16),
-
-              if (!_uploading && !_monitoring) ...[
-                // Authorization checkbox
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: Checkbox(
-                        value: _authorized,
-                        onChanged: (v) => setState(() => _authorized = v ?? false),
-                        activeColor: NoirColors.primary,
-                        checkColor: NoirColors.black,
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'I am authorized to decode and analyze this APK',
-                        style: NoirTypography.codeSm.copyWith(
-                          color: NoirColors.onSurfaceVariant.withValues(alpha: 0.8),
-                        ),
-                      ),
-                    ),
-                  ],
+              if (_uploading || _job?.isTerminal == false)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: LinearProgressIndicator(),
                 ),
-              ],
-
-              const SizedBox(height: 16),
-
-              // Status
-              Text(
-                _status,
-                style: NoirTypography.codeSm.copyWith(
-                  color: NoirColors.onSurfaceVariant.withValues(alpha: 0.6),
+              if (_job?.resultData['cancel_requested'] == true)
+                const Text('Cancellation requested; awaiting worker.'),
+              if (_error != null) SelectableText(_error!),
+              if (_job != null)
+                const Text(
+                  'Closing this window does not cancel the backend job. Reopen it in Jobs.',
                 ),
-              ),
-
-              if (_uploading || _monitoring)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: LinearProgressIndicator(
-                    color: NoirColors.primary,
-                    backgroundColor: NoirColors.outlineVariant,
-                    value: _monitoring ? null : null,
-                  ),
-                ),
-
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(_error!,
-                      style: NoirTypography.codeSm.copyWith(color: NoirColors.error)),
-                ),
-
-              const SizedBox(height: 24),
-
-              // Actions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  NoirGhostButton(
-                    label: 'Cancel',
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                  const SizedBox(width: 12),
-                  NoirPrimaryButton(
-                    label: _uploading || _monitoring ? 'Importing...' : 'Import',
-                    icon: Icons.file_download,
-                    loading: _uploading || _monitoring,
-                    onPressed: _authorized && !_uploading && !_monitoring
-                        ? _startImport
-                        : null,
-                  ),
-                ],
-              ),
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Future<void> _startImport() async {
-    setState(() {
-      _uploading = true;
-      _status = 'Uploading APK...';
-      _error = null;
-    });
-
-    try {
-      final projects = context.read<ProjectsController>();
-      _job = await projects.importApk(widget.filePath);
-
-      setState(() {
-        _uploading = false;
-        _monitoring = true;
-        _status = 'Decoding... (job: ${_job!.jobId})';
-      });
-
-      _pollForCompletion();
-    } catch (e) {
-      setState(() {
-        _uploading = false;
-        _error = e.toString();
-        _status = 'Import failed';
-      });
-    }
-  }
-
-  void _pollForCompletion() {
-    final api = context.read<ConnectionController>().api;
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-      try {
-        final job = await api.getJob(_job!.jobId);
-        if (job.isTerminal) {
-          timer.cancel();
-          if (job.state == 'succeeded') {
-            if (!mounted) return;
-            // Refresh projects and navigate
-            await context.read<ProjectsController>().loadProjects();
-            final projectId = job.resultData['project_id'] as String?;
-            if (!mounted) return;
-            Navigator.of(context).pop();
-            if (projectId != null) {
-              context.push('/project/$projectId');
-            }
-          } else {
-            setState(() {
-              _monitoring = false;
-              _error = job.errorMessage ?? 'Import failed: ${job.state}';
-              _status = 'Import failed';
-            });
-          }
-        } else {
-          setState(() {
-            _status = 'Decoding... (${job.state})';
-          });
-        }
-      } catch (_) {}
-    });
-  }
+      actions: [
+        TextButton(
+          onPressed: _uploading ? null : () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        if (_job == null)
+          FilledButton(
+            onPressed: _authorized && !_uploading ? _start : null,
+            child: const Text('Import'),
+          ),
+        if (_job != null)
+          TextButton(onPressed: _poll, child: const Text('Refresh')),
+        if (_job?.isTerminal == false)
+          TextButton(
+            onPressed: _cancelling ? null : _cancel,
+            child: const Text('Request cancellation'),
+          ),
+      ],
+    ),
+  );
 }

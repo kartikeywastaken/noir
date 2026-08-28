@@ -1,4 +1,6 @@
 /// Animated glow dot status indicator.
+library;
+
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
 
@@ -19,7 +21,12 @@ class GlowDot extends StatelessWidget {
         color: dotColor,
         shape: BoxShape.circle,
         boxShadow: active
-            ? [BoxShadow(color: dotColor.withValues(alpha: 0.8), blurRadius: 10)]
+            ? [
+                BoxShadow(
+                  color: dotColor.withValues(alpha: 0.8),
+                  blurRadius: 10,
+                ),
+              ]
             : null,
       ),
     );

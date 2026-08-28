@@ -1,4 +1,6 @@
 /// Status chip: [DECODED], [BUILDING], [SIGNED] etc.
+library;
+
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
 import '../theme/noir_typography.dart';
@@ -14,7 +16,9 @@ class StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: bright ? Colors.white.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.1),
+        color: bright
+            ? Colors.white.withValues(alpha: 0.2)
+            : Colors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(2),
         border: bright
             ? Border.all(color: Colors.white.withValues(alpha: 0.3))

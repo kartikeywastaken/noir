@@ -2,6 +2,8 @@
 ///
 /// All colors are neutral grayscale. No hue-based tokens.
 /// Hierarchy is conveyed through luminosity and opacity.
+library;
+
 import 'package:flutter/material.dart';
 
 class NoirColors {
@@ -23,27 +25,27 @@ class NoirColors {
 
   // ── Primary ──────────────────────────────────────────────────
   static const Color primary = Color(0xFFFFFFFF);
-  static const Color onPrimary = Color(0xFF2F3131);
+  static const Color onPrimary = Color(0xFF303030);
   static const Color primaryContainer = Color(0xFFE2E2E2);
-  static const Color onPrimaryContainer = Color(0xFF636565);
+  static const Color onPrimaryContainer = Color(0xFF646464);
 
   // ── On-surface ───────────────────────────────────────────────
   static const Color onSurface = Color(0xFFE2E2E2);
-  static const Color onSurfaceVariant = Color(0xFFC4C7C8);
+  static const Color onSurfaceVariant = Color(0xFFC6C6C6);
   static const Color onBackground = Color(0xFFE2E2E2);
 
   // ── Outline ──────────────────────────────────────────────────
-  static const Color outline = Color(0xFF8E9192);
-  static const Color outlineVariant = Color(0xFF444748);
+  static const Color outline = Color(0xFF909090);
+  static const Color outlineVariant = Color(0xFF464646);
 
   // ── Surface tint & variant ───────────────────────────────────
-  static const Color surfaceTint = Color(0xFFC6C6C7);
+  static const Color surfaceTint = Color(0xFFC6C6C6);
   static const Color surfaceVariant = Color(0xFF353535);
 
   // ── Inverse ──────────────────────────────────────────────────
   static const Color inverseSurface = Color(0xFFE2E2E2);
   static const Color inverseOnSurface = Color(0xFF303030);
-  static const Color inversePrimary = Color(0xFF5D5F5F);
+  static const Color inversePrimary = Color(0xFF5E5E5E);
 
   // ── Glass panels ─────────────────────────────────────────────
   static Color glassBackground = Colors.white.withValues(alpha: 0.03);

@@ -1,6 +1,8 @@
 /// Glassmorphic panel — the core container of the NOIR UI.
 ///
 /// Translucent background with backdrop blur and thin border.
+library;
+
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
@@ -24,8 +26,12 @@ class GlassPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = borderRadius ?? BorderRadius.circular(4);
-    final bg = highlight ? NoirColors.glassHighlight : NoirColors.glassBackground;
-    final border = highlight ? NoirColors.glassBorderHighlight : NoirColors.glassBorder;
+    final bg = highlight
+        ? NoirColors.glassHighlight
+        : NoirColors.glassBackground;
+    final border = highlight
+        ? NoirColors.glassBorderHighlight
+        : NoirColors.glassBorder;
 
     Widget panel = ClipRRect(
       borderRadius: radius,

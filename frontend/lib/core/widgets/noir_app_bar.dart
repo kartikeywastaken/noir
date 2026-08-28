@@ -1,5 +1,8 @@
 /// NOIR top app bar — 83px height, terminal icon, centered title, settings action.
+library;
+
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../theme/noir_colors.dart';
 import '../theme/noir_typography.dart';
 
@@ -38,32 +41,50 @@ class NoirAppBar extends StatelessWidget implements PreferredSizeWidget {
           const SizedBox(width: 16),
           if (showBackButton)
             IconButton(
-              icon: const Icon(Icons.arrow_back, color: NoirColors.primary, size: 20),
-              onPressed: () => Navigator.maybePop(context),
+              icon: const Icon(
+                Icons.arrow_back,
+                color: NoirColors.primary,
+                size: 20,
+              ),
+              onPressed: () {
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/');
+                }
+              },
             )
           else if (leading != null)
             leading!
           else
-            IconButton(
-              icon: const Icon(Icons.terminal, color: NoirColors.primary, size: 20),
-              onPressed: null,
+            Image.asset(
+              'assets/branding/phantom.png',
+              width: 40,
+              height: 40,
+              semanticLabel: 'NOIR Phantom',
             ),
-          const Spacer(),
-          Text(
-            title ?? 'NOIR',
-            style: NoirTypography.labelCaps.copyWith(
-              color: NoirColors.primary,
-              fontSize: title != null ? 10 : 24,
-              letterSpacing: title != null ? 1.0 : 3.2,
-              fontWeight: FontWeight.w700,
-              fontFamily: title != null ? 'JetBrainsMono' : 'Inter',
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              title ?? 'NOIR',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: NoirTypography.labelCaps.copyWith(
+                color: NoirColors.primary,
+                fontSize: title != null ? 10 : 24,
+                letterSpacing: title != null ? 1.0 : 3.2,
+                fontWeight: FontWeight.w700,
+                fontFamily: title != null ? 'JetBrainsMono' : 'Inter',
+              ),
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: 12),
           if (actions != null)
             ...actions!
           else
             IconButton(
+              tooltip: 'Connection settings',
               icon: Icon(
                 Icons.sensors,
                 color: NoirColors.primary.withValues(alpha: 0.5),

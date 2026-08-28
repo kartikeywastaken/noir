@@ -1,93 +1,74 @@
-/// Signing controller — profiles, signing flow, download.
-import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import '../../data/api/noir_api_client.dart';
 import '../../data/api/api_exceptions.dart';
 import '../../data/models/models.dart';
+import 'safe_notifier.dart';
 
-class SigningController extends ChangeNotifier {
-  SigningController(this._api);
+String _digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
-  final NoirApiClient _api;
-
-  List<SigningProfile> _profiles = [];
-  List<SigningProfile> get profiles => _profiles;
-
-  String? _selectedProfile;
-  String? get selectedProfile => _selectedProfile;
-
-  bool _signing = false;
-  bool get signing => _signing;
-
-  Map<String, dynamic>? _signResult;
-  Map<String, dynamic>? get signResult => _signResult;
-
-  Map<String, dynamic>? _verifyResult;
-  Map<String, dynamic>? get verifyResult => _verifyResult;
-
-  String? _error;
-  String? get error => _error;
+class SigningController extends SafeNotifier {
+  SigningController(this.api);
+  final NoirApiClient api;
+  List<SigningProfile> profiles = [];
+  String? selectedProfile;
+  bool signing = false;
+  String? error;
+  Map<String, dynamic>? signResult;
+  Map<String, dynamic>? verifyResult;
 
   Future<void> loadProfiles() async {
     try {
-      _profiles = await _api.listSigningProfiles();
-      notifyListeners();
-    } catch (_) {}
+      profiles = await api.listSigningProfiles();
+    } catch (e) {
+      error = e.toString();
+    }
+    notifyListeners();
   }
 
   void selectProfile(String name) {
-    _selectedProfile = name;
+    selectedProfile = name;
     notifyListeners();
   }
 
-  Future<bool> sign(String projectId, String buildId) async {
-    if (_selectedProfile == null) return false;
-    _signing = true;
-    _error = null;
+  Future<bool> sign(String id, String build) async {
+    if (signing || selectedProfile == null) return false;
+    signing = true;
+    error = null;
+    signResult = null;
+    verifyResult = null;
     notifyListeners();
-
     try {
-      _signResult = await _api.signBuild(projectId, buildId, _selectedProfile!);
+      signResult = await api.signBuild(id, build, selectedProfile!);
       return true;
-    } on ApiException catch (e) {
-      _error = e.message;
+    } catch (e) {
+      error = e.toString();
       return false;
     } finally {
-      _signing = false;
+      signing = false;
       notifyListeners();
     }
   }
 
-  Future<bool> verify(String projectId, String buildId) async {
-    _error = null;
-    try {
-      _verifyResult = await _api.verifyBuild(projectId, buildId);
-      notifyListeners();
-      return true;
-    } on ApiException catch (e) {
-      _error = e.message;
-      notifyListeners();
-      return false;
+  Future<Uint8List> verifiedDownload(String id, BuildResult build) async {
+    final expected = build.signedApkHash;
+    if (expected == null || !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(expected)) {
+      throw ApiException(
+        'No trusted signed artifact hash is recorded for this build.',
+      );
     }
-  }
-
-  Future<bool> download(String projectId, String buildId, String savePath) async {
-    _error = null;
-    try {
-      final bytes = await _api.downloadArtifact(projectId, buildId);
-      await File(savePath).writeAsBytes(bytes);
-      return true;
-    } on ApiException catch (e) {
-      _error = e.message;
-      notifyListeners();
-      return false;
+    verifyResult = await api.verifyBuild(id, build.buildId);
+    if (verifyResult!['verified'] != true) {
+      throw ApiException(
+        'APK signature verification failed. Download blocked.',
+      );
     }
-  }
-
-  void clear() {
-    _signResult = null;
-    _verifyResult = null;
-    _error = null;
-    notifyListeners();
+    final bytes = await api.downloadArtifact(id, build.buildId);
+    if (await compute(_digest, bytes) != expected.toLowerCase()) {
+      throw ApiException(
+        'Downloaded SHA-256 differs from the recorded build. File was NOT saved.',
+      );
+    }
+    return bytes;
   }
 }

@@ -1,124 +1,146 @@
-/// Build controller — validation, build jobs, monitoring via SSE.
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 import '../../data/api/noir_api_client.dart';
-import '../../data/api/api_exceptions.dart';
 import '../../data/models/models.dart';
+import 'safe_notifier.dart';
 
-class BuildController extends ChangeNotifier {
-  BuildController(this._api);
+/// Polling reads persisted jobs/events. No estimated percentages or automatic POST retries.
+class BuildController extends SafeNotifier {
+  BuildController(this.api);
+  final NoirApiClient api;
+  ValidationResult? validation;
+  JobInfo? currentJob;
+  List<BuildResult> builds = [];
+  final List<String> _logs = [];
+  List<String> get logEntries => List.unmodifiable(_logs);
+  bool validating = false;
+  bool building = false;
+  bool monitoring = false;
+  String? error;
+  String? _projectId;
+  String? _cursor;
+  Timer? _timer;
+  bool _polling = false;
 
-  final NoirApiClient _api;
-
-  ValidationResult? _validation;
-  ValidationResult? get validation => _validation;
-
-  JobInfo? _currentJob;
-  JobInfo? get currentJob => _currentJob;
-
-  List<BuildResult> _builds = [];
-  List<BuildResult> get builds => _builds;
-
-  List<String> _logEntries = [];
-  List<String> get logEntries => List.unmodifiable(_logEntries);
-
-  bool _validating = false;
-  bool get validating => _validating;
-
-  bool _building = false;
-  bool get building => _building;
-
-  String? _error;
-  String? get error => _error;
-
-  StreamSubscription? _eventSub;
-
-  void clear() {
-    _eventSub?.cancel();
-    _validation = null;
-    _currentJob = null;
-    _logEntries = [];
-    _error = null;
+  Future<ValidationResult?> validate(String id) async {
+    if (validating || building) return null;
+    validating = true;
+    validation = null;
+    error = null;
     notifyListeners();
-  }
-
-  Future<ValidationResult?> validate(String projectId) async {
-    _validating = true;
-    _error = null;
-    notifyListeners();
-
     try {
-      _validation = await _api.validate(projectId);
-      return _validation;
-    } on ApiException catch (e) {
-      _error = e.message;
+      validation = await api.validate(id);
+      return validation;
+    } catch (e) {
+      error = e.toString();
       return null;
     } finally {
-      _validating = false;
+      validating = false;
       notifyListeners();
     }
   }
 
-  Future<JobInfo?> startBuild(String projectId) async {
-    _building = true;
-    _error = null;
-    _logEntries = [];
+  Future<JobInfo?> startBuild(String id) async {
+    if (building || validating || validation?.passed != true) return null;
+    building = true;
+    error = null;
     notifyListeners();
-
     try {
-      _currentJob = await _api.startBuild(projectId);
-      _monitorJob(_currentJob!.jobId);
-      return _currentJob;
-    } on ApiException catch (e) {
-      _error = e.message;
-      _building = false;
-      notifyListeners();
+      final project = await api.getProject(id);
+      if (project.workspaceRevision != validation!.workspaceRevision) {
+        validation = null;
+        throw StateError('Workspace revision changed. Validate again.');
+      }
+      currentJob = await api.startBuild(id, idempotencyKey: const Uuid().v4());
+      _projectId = id;
+      _cursor = null;
+      _logs.clear();
+      await _poll();
+      return currentJob;
+    } catch (e) {
+      error = e.toString();
+      building = false;
       return null;
+    } finally {
+      notifyListeners();
     }
   }
 
-  void _monitorJob(String jobId) {
-    _eventSub?.cancel();
-    _eventSub = _api.streamJobEvents(jobId).listen(
-      (event) {
-        _logEntries.add(event.message);
-        notifyListeners();
-      },
-      onDone: () async {
-        // Fetch final job state
-        try {
-          _currentJob = await _api.getJob(jobId);
-        } catch (_) {}
-        _building = false;
-        notifyListeners();
-      },
-      onError: (e) {
-        _error = e.toString();
-        _building = false;
-        notifyListeners();
-      },
-    );
+  Future<void> loadBuilds(String id) async {
+    _projectId = id;
+    error = null;
+    try {
+      builds = await api.listBuilds(id);
+      final jobs = (await api.listJobs(
+        projectId: id,
+      )).where((j) => j.resultData['operation'] == 'build').toList();
+      jobs.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final active = jobs.where((j) => !j.isTerminal).toList();
+      final job = active.isNotEmpty ? active.first : jobs.firstOrNull;
+      if (currentJob?.jobId != job?.jobId) {
+        _cursor = null;
+        _logs.clear();
+      }
+      currentJob = job;
+      if (job != null) await _poll();
+    } catch (e) {
+      error = e.toString();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _poll() async {
+    if (_polling || disposed || currentJob == null) return;
+    _timer?.cancel();
+    _polling = true;
+    monitoring = true;
+    try {
+      currentJob = await api.getJob(currentJob!.jobId);
+      building = !currentJob!.isTerminal;
+      // Cursor-based read with deduplication handled by the backend.
+      while (!disposed) {
+        final events = await api.listEvents(_projectId!, after: _cursor);
+        for (final event in events) {
+          if (event.jobId == currentJob!.jobId) {
+            _logs.add('[${event.severity}] ${event.message}');
+          }
+          _cursor = event.eventId;
+        }
+        if (events.length < 100) break;
+      }
+      if (currentJob!.isTerminal) {
+        builds = await api.listBuilds(_projectId!);
+        if (currentJob!.state != 'succeeded') {
+          error = currentJob!.errorMessage ?? 'Job ${currentJob!.state}';
+        }
+      }
+    } catch (e) {
+      // Loss of monitoring is not cancellation or successful completion.
+      error = 'Monitoring interrupted: $e. Refresh to reconnect.';
+      monitoring = false;
+    } finally {
+      _polling = false;
+      if (!disposed && currentJob?.isTerminal == false && monitoring) {
+        _timer = Timer(const Duration(seconds: 2), _poll);
+      }
+      notifyListeners();
+    }
   }
 
   Future<void> cancelBuild() async {
-    if (_currentJob == null) return;
+    if (currentJob == null || currentJob!.isTerminal) return;
     try {
-      await _api.cancelJob(_currentJob!.jobId);
-      _logEntries.add('Cancellation requested...');
+      currentJob = await api.cancelJob(currentJob!.jobId);
+      await _poll();
+    } catch (e) {
+      error = e.toString();
       notifyListeners();
-    } catch (_) {}
-  }
-
-  Future<void> loadBuilds(String projectId) async {
-    try {
-      _builds = await _api.listBuilds(projectId);
-      notifyListeners();
-    } catch (_) {}
+    }
   }
 
   @override
   void dispose() {
-    _eventSub?.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 }

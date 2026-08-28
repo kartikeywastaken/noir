@@ -1,4 +1,6 @@
 /// Home screen — hero import panel + recent projects.
+library;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -25,9 +27,21 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _fadeController;
   late final Animation<double> _fadeAnimation;
+  late final ConnectionController _connection;
+  bool _wasConnected = false;
+  final _recentKey = GlobalKey();
+
+  void _connectionChanged() {
+    if (!mounted) return;
+    if (_connection.isConnected && !_wasConnected) {
+      context.read<ProjectsController>().loadProjects();
+    }
+    _wasConnected = _connection.isConnected;
+  }
 
   @override
   void initState() {
@@ -42,15 +56,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
     _fadeController.forward();
 
-    final conn = context.read<ConnectionController>();
-    if (conn.isConnected) {
-      context.read<ProjectsController>().loadProjects();
-    }
+    _connection = context.read<ConnectionController>();
+    _connection.addListener(_connectionChanged);
+    Future.microtask(_connectionChanged);
   }
 
   @override
   void dispose() {
     _fadeController.dispose();
+    _connection.removeListener(_connectionChanged);
     super.dispose();
   }
 
@@ -60,9 +74,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       builder: (context, conn, projects, _) {
         return Scaffold(
           backgroundColor: NoirColors.black,
-          appBar: NoirAppBar(
-            onSettingsTap: () => context.push('/settings'),
-          ),
+          appBar: NoirAppBar(onSettingsTap: () => context.push('/settings')),
           body: MeshGradientBackground(
             child: FadeTransition(
               opacity: _fadeAnimation,
@@ -72,7 +84,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   // Hero panel
                   CornerMarkers(
                     child: GlassPanel(
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 48,
+                      ),
                       child: Column(
                         children: [
                           Text(
@@ -87,7 +102,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           Text(
                             'Select an APK to decode its resource\nand bytecode structure for analysis.',
                             style: NoirTypography.codeSm.copyWith(
-                              color: NoirColors.onSurfaceVariant.withValues(alpha: 0.7),
+                              color: NoirColors.onSurfaceVariant.withValues(
+                                alpha: 0.7,
+                              ),
                               height: 1.6,
                             ),
                             textAlign: TextAlign.center,
@@ -105,8 +122,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             Text(
                               'Connect to backend first',
                               style: NoirTypography.codeSm.copyWith(
-                                color: NoirColors.onSurfaceVariant.withValues(alpha: 0.4),
+                                color: NoirColors.onSurfaceVariant.withValues(
+                                  alpha: 0.4,
+                                ),
                               ),
+                            ),
+                            const SizedBox(height: 12),
+                            NoirGhostButton(
+                              label: 'Connect backend',
+                              onPressed: () => context.push('/settings'),
                             ),
                           ],
                         ],
@@ -118,21 +142,38 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   // Recent projects
                   if (conn.isConnected) ...[
                     Row(
+                      key: _recentKey,
                       children: [
-                        Icon(Icons.history, size: 14,
-                            color: NoirColors.onSurfaceVariant.withValues(alpha: 0.5)),
+                        Icon(
+                          Icons.history,
+                          size: 14,
+                          color: NoirColors.onSurfaceVariant.withValues(
+                            alpha: 0.5,
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           'RECENT WORKSPACES',
-                          style: NoirTypography.labelCaps
-                              .copyWith(color: NoirColors.onSurfaceVariant),
+                          style: NoirTypography.labelCaps.copyWith(
+                            color: NoirColors.onSurfaceVariant,
+                          ),
                         ),
                         const Spacer(),
+                        IconButton(
+                          tooltip: 'Refresh workspaces',
+                          onPressed: projects.loading
+                              ? null
+                              : projects.loadProjects,
+                          icon: const Icon(Icons.refresh, size: 18),
+                        ),
                         if (projects.loading)
                           const SizedBox(
                             width: 12,
                             height: 12,
-                            child: CircularProgressIndicator(strokeWidth: 1, color: NoirColors.primary),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1,
+                              color: NoirColors.primary,
+                            ),
                           ),
                       ],
                     ),
@@ -141,8 +182,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     if (projects.error != null)
                       GlassPanel(
                         padding: const EdgeInsets.all(16),
-                        child: Text(projects.error!,
-                            style: NoirTypography.codeSm.copyWith(color: NoirColors.error)),
+                        child: Text(
+                          projects.error!,
+                          style: NoirTypography.codeSm.copyWith(
+                            color: NoirColors.error,
+                          ),
+                        ),
                       ),
 
                     if (projects.projects.isEmpty && !projects.loading)
@@ -151,13 +196,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         child: Text(
                           'No projects yet. Import an APK to get started.',
                           style: NoirTypography.bodySm.copyWith(
-                            color: NoirColors.onSurfaceVariant.withValues(alpha: 0.5),
+                            color: NoirColors.onSurfaceVariant.withValues(
+                              alpha: 0.5,
+                            ),
                           ),
                           textAlign: TextAlign.center,
                         ),
                       ),
 
-                    ...projects.projects.map((p) => _buildProjectCard(context, p)),
+                    ...projects.projects.map(
+                      (p) => _buildProjectCard(context, p),
+                    ),
                   ],
                 ],
               ),
@@ -167,6 +216,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             currentIndex: 0,
             onTap: (i) {
               if (i == 3) context.push('/settings');
+              if (i == 2) context.push('/jobs');
+              if (i == 1 && _recentKey.currentContext != null) {
+                Scrollable.ensureVisible(
+                  _recentKey.currentContext!,
+                  duration: const Duration(milliseconds: 250),
+                );
+              } else if (i == 1) {
+                context.push('/settings');
+              }
             },
           ),
         );
@@ -179,8 +237,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final timeAgo = elapsed.inHours < 1
         ? '${elapsed.inMinutes}m ago'
         : elapsed.inHours < 24
-            ? '${elapsed.inHours}h ago'
-            : '${elapsed.inDays}d ago';
+        ? '${elapsed.inHours}h ago'
+        : '${elapsed.inDays}d ago';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -203,7 +261,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     project.packageName.isNotEmpty
                         ? project.packageName
                         : project.originalFilename,
-                    style: NoirTypography.codeLg.copyWith(color: NoirColors.primary),
+                    style: NoirTypography.codeLg.copyWith(
+                      color: NoirColors.primary,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
@@ -235,21 +295,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _selectAndImport(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.any,
-      allowMultiple: false,
-    );
-    if (result == null || result.files.isEmpty) return;
-    final path = result.files.first.path;
-    if (path == null) return;
-    if (!path.endsWith('.apk')) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select an APK file')),
+    try {
+      final file = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['apk'],
       );
-      return;
+      if (file == null) return;
+      if (!file.name.toLowerCase().endsWith('.apk')) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select an APK file')),
+        );
+        return;
+      }
+      if (!context.mounted) return;
+      showImportFlow(context, file);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open the APK picker. Please try again.'),
+          ),
+        );
+      }
     }
-    if (!mounted) return;
-    showImportFlow(context, path);
   }
 }

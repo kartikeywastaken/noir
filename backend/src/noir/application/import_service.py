@@ -77,6 +77,7 @@ class ImportService:
         *,
         authorized: bool = False,
         project_id: str | None = None,
+        original_filename: str | None = None,
     ) -> dict:
         """Import and decode an APK.
 
@@ -103,7 +104,7 @@ class ImportService:
 
         # Create project
         project = ProjectInfo(
-            original_filename=apk_path.name,
+            original_filename=Path(original_filename).name if original_filename else apk_path.name,
             authorization_acknowledged=True,
             authorization_timestamp=datetime.now(UTC),
         )

@@ -1,109 +1,189 @@
-/// Workspace file tree and viewer controller.
-import 'package:flutter/material.dart';
+import 'dart:convert';
 import '../../data/api/noir_api_client.dart';
 import '../../data/api/api_exceptions.dart';
 import '../../data/models/models.dart';
+import 'safe_notifier.dart';
 
-class WorkspaceController extends ChangeNotifier {
-  WorkspaceController(this._api);
+class WorkspaceController extends SafeNotifier {
+  WorkspaceController(this.api);
+  final NoirApiClient api;
+  String? projectId;
+  ProjectInfo? project;
+  AnalysisResult? analysis;
+  ManualSession? session;
+  List<FileEntry> files = [];
+  String currentSubdir = '';
+  String? selectedFilePath;
+  String? fileContent;
+  String? draft;
+  int? fileRevision;
+  bool loadingFiles = false;
+  bool loadingContent = false;
+  bool busy = false;
+  String? error;
+  int _fileRequest = 0;
+  int _treeRequest = 0;
 
-  final NoirApiClient _api;
+  bool get dirty => draft != fileContent;
+  bool get manualActive => session?.active == true;
+  bool get editable =>
+      manualActive &&
+      fileContent != null &&
+      !fileContent!.contains('\uFFFD') &&
+      !fileContent!.contains('\u0000');
 
-  String? _projectId;
-  String? get projectId => _projectId;
+  Future<void> initialize(String id) async {
+    projectId = id;
+    await refresh();
+    await loadFiles();
+  }
 
-  ProjectInfo? _project;
-  ProjectInfo? get project => _project;
-
-  AnalysisResult? _analysis;
-  AnalysisResult? get analysis => _analysis;
-
-  List<FileEntry> _files = [];
-  List<FileEntry> get files => _files;
-
-  String _currentSubdir = '';
-  String get currentSubdir => _currentSubdir;
-
-  String? _selectedFilePath;
-  String? get selectedFilePath => _selectedFilePath;
-
-  String? _fileContent;
-  String? get fileContent => _fileContent;
-
-  bool _loadingFiles = false;
-  bool get loadingFiles => _loadingFiles;
-
-  bool _loadingContent = false;
-  bool get loadingContent => _loadingContent;
-
-  String? _error;
-  String? get error => _error;
-
-  void setProjectId(String id) {
-    _projectId = id;
-    _files = [];
-    _selectedFilePath = null;
-    _fileContent = null;
-    _currentSubdir = '';
+  Future<void> refresh() async {
+    try {
+      project = await api.getProject(projectId!);
+      session = await api.getManualSession(projectId!);
+      analysis = await api.getAnalysis(projectId!);
+      error = null;
+    } catch (e) {
+      error = e.toString();
+    }
     notifyListeners();
-  }
-
-  Future<void> loadProject() async {
-    if (_projectId == null) return;
-    try {
-      _project = await _api.getProject(_projectId!);
-      notifyListeners();
-    } catch (_) {}
-  }
-
-  Future<void> loadAnalysis() async {
-    if (_projectId == null) return;
-    try {
-      _analysis = await _api.getAnalysis(_projectId!);
-      notifyListeners();
-    } catch (_) {}
   }
 
   Future<void> loadFiles({String subdir = ''}) async {
-    if (_projectId == null) return;
-    _loadingFiles = true;
-    _error = null;
-    _currentSubdir = subdir;
+    final request = ++_treeRequest;
+    loadingFiles = true;
+    error = null;
     notifyListeners();
-
     try {
-      _files = await _api.listFiles(_projectId!, subdir: subdir);
-    } on ApiException catch (e) {
-      _error = e.message;
+      final result = await api.listFiles(projectId!, subdir: subdir);
+      if (request != _treeRequest) return;
+      files = result;
+      currentSubdir = subdir;
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      if (request == _treeRequest) loadingFiles = false;
+      notifyListeners();
     }
-
-    _loadingFiles = false;
-    notifyListeners();
   }
 
   Future<void> openFile(String path) async {
-    if (_projectId == null) return;
-    _selectedFilePath = path;
-    _loadingContent = true;
-    _fileContent = null;
-    notifyListeners();
-
-    try {
-      _fileContent = await _api.readFile(_projectId!, path);
-    } on ApiException catch (e) {
-      _fileContent = '// Error loading file: ${e.message}';
+    if (dirty) {
+      throw ApiException('Save or discard the unsaved editor buffer first.');
     }
+    final request = ++_fileRequest;
+    selectedFilePath = path;
+    fileContent = null;
+    draft = null;
+    fileRevision = null;
+    loadingContent = true;
+    error = null;
+    notifyListeners();
+    try {
+      final revision = (await api.getProject(projectId!)).workspaceRevision;
+      final content = await api.readFile(projectId!, path);
+      if (request != _fileRequest) return;
+      fileRevision = revision;
+      fileContent = content;
+      draft = content;
+    } catch (e) {
+      if (request == _fileRequest) error = e.toString();
+    } finally {
+      if (request == _fileRequest) loadingContent = false;
+      notifyListeners();
+    }
+  }
 
-    _loadingContent = false;
+  void closeFile() {
+    if (dirty) return;
+    _fileRequest++;
+    selectedFilePath = null;
+    fileContent = null;
+    draft = null;
+    fileRevision = null;
     notifyListeners();
   }
 
-  Future<List<Map<String, dynamic>>> searchFiles(String query) async {
-    if (_projectId == null) return [];
+  void edit(String value) {
+    draft = value;
+    notifyListeners();
+  }
+
+  void discardDraft() {
+    draft = fileContent;
+    notifyListeners();
+  }
+
+  Future<void> beginManual() async {
+    if (busy) return;
+    busy = true;
+    error = null;
+    notifyListeners();
     try {
-      return await _api.searchFiles(_projectId!, query);
-    } catch (_) {
-      return [];
+      final current = await api.getManualSession(projectId!);
+      if (!current.active) await api.beginManualSession(projectId!);
+      session = await api.getManualSession(projectId!);
+      project = await api.getProject(projectId!);
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveFile() async {
+    if (busy || !editable || !dirty || fileRevision == null) return false;
+    busy = true;
+    error = null;
+    notifyListeners();
+    final content = draft!;
+    try {
+      if (utf8.encode(content).length > 1000000) {
+        throw ApiException('Text exceeds the 1 MB edit limit.');
+      }
+      await api.replaceFile(
+        projectId!,
+        selectedFilePath!,
+        content,
+        fileRevision!,
+      );
+      fileContent = content;
+      return true;
+    } catch (e) {
+      error = e.toString();
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> record() async {
+    if (busy || dirty || !manualActive) return false;
+    busy = true;
+    error = null;
+    notifyListeners();
+    try {
+      final result = await api.recordManualChanges(
+        projectId!,
+        'Manual edits recorded from NOIR app',
+      );
+      session = await api.getManualSession(projectId!);
+      project = await api.getProject(projectId!);
+      fileRevision = null;
+      if (result['validation']?['passed'] == false) {
+        error =
+            'Changes recorded, but validation failed. Open Validate & Build for findings.';
+      }
+      return true;
+    } catch (e) {
+      error = e.toString();
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
     }
   }
 }

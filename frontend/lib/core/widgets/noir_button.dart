@@ -1,4 +1,6 @@
 /// Primary and ghost button variants with glow effects.
+library;
+
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
 import '../theme/noir_typography.dart';
@@ -24,7 +26,12 @@ class NoirPrimaryButton extends StatelessWidget {
       duration: const Duration(milliseconds: 300),
       decoration: BoxDecoration(
         boxShadow: onPressed != null
-            ? [BoxShadow(color: Colors.white.withValues(alpha: 0.15), blurRadius: 20)]
+            ? [
+                BoxShadow(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  blurRadius: 20,
+                ),
+              ]
             : null,
       ),
       child: ElevatedButton(
@@ -44,9 +51,13 @@ class NoirPrimaryButton extends StatelessWidget {
             else if (icon != null)
               Icon(icon, size: 20),
             if (icon != null || loading) const SizedBox(width: 8),
-            Text(label.toUpperCase(),
-                style: NoirTypography.codeSm
-                    .copyWith(letterSpacing: 1.6, fontWeight: FontWeight.w700)),
+            Text(
+              label.toUpperCase(),
+              style: NoirTypography.codeSm.copyWith(
+                letterSpacing: 1.6,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),
@@ -92,7 +103,9 @@ class _NoirGhostButtonState extends State<NoirGhostButton> {
                 : Colors.white.withValues(alpha: 0.3),
           ),
           borderRadius: BorderRadius.circular(2),
-          color: _hovered ? Colors.white.withValues(alpha: 0.05) : Colors.transparent,
+          color: _hovered
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.transparent,
         ),
         child: Material(
           color: Colors.transparent,
@@ -102,7 +115,9 @@ class _NoirGhostButtonState extends State<NoirGhostButton> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               child: Row(
-                mainAxisSize: widget.expand ? MainAxisSize.max : MainAxisSize.min,
+                mainAxisSize: widget.expand
+                    ? MainAxisSize.max
+                    : MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   if (widget.loading)
@@ -116,7 +131,8 @@ class _NoirGhostButtonState extends State<NoirGhostButton> {
                     )
                   else if (widget.icon != null)
                     Icon(widget.icon, size: 18, color: NoirColors.primary),
-                  if (widget.icon != null || widget.loading) const SizedBox(width: 8),
+                  if (widget.icon != null || widget.loading)
+                    const SizedBox(width: 8),
                   Text(
                     widget.label.toUpperCase(),
                     style: NoirTypography.codeSm.copyWith(

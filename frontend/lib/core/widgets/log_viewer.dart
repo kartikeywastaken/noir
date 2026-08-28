@@ -1,4 +1,6 @@
 /// Auto-scrolling terminal-style log panel.
+library;
+
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
 import '../theme/noir_typography.dart';
@@ -60,15 +62,23 @@ class _LogViewerState extends State<LogViewer> {
             ),
             child: Row(
               children: [
-                Icon(Icons.terminal, size: 14,
-                    color: NoirColors.onSurfaceVariant.withValues(alpha: 0.7)),
+                Icon(
+                  Icons.terminal,
+                  size: 14,
+                  color: NoirColors.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
                 const SizedBox(width: 8),
-                Text(widget.title,
-                    style: NoirTypography.labelCaps
-                        .copyWith(color: NoirColors.onSurfaceVariant)),
+                Text(
+                  widget.title,
+                  style: NoirTypography.labelCaps.copyWith(
+                    color: NoirColors.onSurfaceVariant,
+                  ),
+                ),
                 const Spacer(),
-                _dot(), const SizedBox(width: 4),
-                _dot(), const SizedBox(width: 4),
+                _dot(),
+                const SizedBox(width: 4),
+                _dot(),
+                const SizedBox(width: 4),
                 _dot(active: true),
               ],
             ),
@@ -105,7 +115,12 @@ class _LogViewerState extends State<LogViewer> {
         shape: BoxShape.circle,
         color: active ? NoirColors.primary : NoirColors.outlineVariant,
         boxShadow: active
-            ? [BoxShadow(color: Colors.white.withValues(alpha: 0.8), blurRadius: 8)]
+            ? [
+                BoxShadow(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  blurRadius: 8,
+                ),
+              ]
             : null,
       ),
     );

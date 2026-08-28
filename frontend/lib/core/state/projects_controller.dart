@@ -1,10 +1,13 @@
 /// Project list and selection controller.
-import 'package:flutter/material.dart';
+library;
+
+import 'safe_notifier.dart';
 import '../../data/api/noir_api_client.dart';
+import 'package:uuid/uuid.dart';
 import '../../data/api/api_exceptions.dart';
 import '../../data/models/models.dart';
 
-class ProjectsController extends ChangeNotifier {
+class ProjectsController extends SafeNotifier {
   ProjectsController(this._api);
 
   final NoirApiClient _api;
@@ -53,6 +56,6 @@ class ProjectsController extends ChangeNotifier {
   }
 
   Future<JobInfo> importApk(String filePath) async {
-    return _api.importApk(filePath);
+    return _api.importApk(filePath, idempotencyKey: const Uuid().v4());
   }
 }

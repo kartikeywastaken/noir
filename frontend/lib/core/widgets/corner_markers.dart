@@ -1,4 +1,6 @@
 /// Decorative L-shaped corner markers from the home screen hero panel.
+library;
+
 import 'package:flutter/material.dart';
 
 class CornerMarkers extends StatelessWidget {

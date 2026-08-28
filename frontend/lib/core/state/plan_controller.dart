@@ -1,11 +1,12 @@
 /// Plan controller — create, review, approve/reject.
-import 'dart:async';
-import 'package:flutter/material.dart';
+library;
+
+import 'safe_notifier.dart';
 import '../../data/api/noir_api_client.dart';
 import '../../data/api/api_exceptions.dart';
 import '../../data/models/models.dart';
 
-class PlanController extends ChangeNotifier {
+class PlanController extends SafeNotifier {
   PlanController(this._api);
 
   final NoirApiClient _api;
@@ -28,13 +29,21 @@ class PlanController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ChangePlan?> createPlan(String projectId, String request) async {
+  Future<ChangePlan?> createPlan(
+    String projectId,
+    String request, {
+    required bool allowAiUpload,
+  }) async {
     _generating = true;
     _error = null;
     notifyListeners();
 
     try {
-      _currentPlan = await _api.createPlan(projectId, request);
+      _currentPlan = await _api.createPlan(
+        projectId,
+        request,
+        allowAiUpload: allowAiUpload,
+      );
       return _currentPlan;
     } on ApiException catch (e) {
       _error = e.message;
@@ -66,7 +75,11 @@ class PlanController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _api.approvePlan(projectId, _currentPlan!.planId, _currentPlan!.planHash);
+      await _api.approvePlan(
+        projectId,
+        _currentPlan!.planId,
+        _currentPlan!.planHash,
+      );
       return true;
     } on ApiException catch (e) {
       _error = e.message;

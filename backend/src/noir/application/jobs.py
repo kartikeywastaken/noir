@@ -144,6 +144,7 @@ class TaskQueue:
                         payload["path"],
                         authorized=True,
                         project_id=job.project_id,
+                        original_filename=payload.get("original_filename"),
                     )
                 elif job.result_data["operation"] == "build":
                     from noir.application.build_service import BuildService

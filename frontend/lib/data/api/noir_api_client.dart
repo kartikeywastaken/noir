@@ -1,463 +1,496 @@
-/// NOIR HTTP API client — typed, authenticated, with SSE support.
-///
-/// Uses package:http for requests. Bearer token injected on all protected calls.
-/// Credentials are never logged. Multipart upload supports progress callback.
+/// Authenticated backend adapter. Mutation requests are never auto-replayed.
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
-
 import '../models/models.dart';
 import 'api_exceptions.dart';
 
 class NoirApiClient {
-  NoirApiClient({String? baseUrl, this.token})
-      : baseUrl = baseUrl ?? 'http://127.0.0.1:8787';
-
+  NoirApiClient({String? baseUrl, this.token, http.Client? client})
+    : baseUrl = normalizeBaseUrl(baseUrl ?? 'http://127.0.0.1:8787'),
+      _client = client ?? http.Client();
   String baseUrl;
   String? token;
-  final http.Client _client = http.Client();
-
-  /// In-flight request tracking to prevent duplicate submissions.
+  final http.Client _client;
   final Set<String> _inFlight = {};
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
+  static String normalizeBaseUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        (uri.path.isNotEmpty && uri.path != '/') ||
+        !['http', 'https'].contains(uri.scheme)) {
+      throw ApiException(
+        'Enter a backend origin, e.g. http://127.0.0.1:8787 (no path or credentials).',
+      );
+    }
+    if (uri.scheme == 'http' &&
+        !['127.0.0.1', 'localhost', '::1', '10.0.2.2'].contains(uri.host)) {
+      throw ApiException(
+        'Unencrypted HTTP is allowed only for loopback/Android emulator. Use HTTPS for remote hosts.',
+      );
+    }
+    return uri.replace(path: '').toString().replaceFirst(RegExp(r'/$'), '');
+  }
 
-  // ── Helpers ──────────────────────────────────────────────────
+  Uri _uri(String path, [Map<String, String>? query]) => Uri.parse(
+    '${normalizeBaseUrl(baseUrl)}$path',
+  ).replace(queryParameters: query);
 
-  Uri _uri(String path, [Map<String, String>? query]) =>
-      Uri.parse('$baseUrl$path').replace(queryParameters: query);
+  String _redact(String value) => token?.isNotEmpty == true
+      ? value.replaceAll(token!, '[REDACTED]')
+      : value;
 
-  Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
+  Future<http.Response> _send(
+    http.BaseRequest request, {
+    Duration timeout = const Duration(seconds: 30),
+    bool mutation = false,
+  }) async {
+    request.followRedirects = false;
     try {
-      final response = await _client
-          .get(_uri(path, query), headers: _headers)
-          .timeout(const Duration(seconds: 30));
-      return _handleResponse(response);
-    } on SocketException {
-      throw ConnectionException();
+      return await (() async => http.Response.fromStream(
+        await _client.send(request),
+      ))().timeout(timeout);
     } on TimeoutException {
-      throw ConnectionException('Request timed out');
-    }
-  }
-
-  Future<Map<String, dynamic>> _post(String path,
-      {Map<String, dynamic>? body, Map<String, String>? query, String? dedupeKey}) async {
-    final key = dedupeKey ?? path;
-    if (_inFlight.contains(key)) {
-      throw ApiException('Request already in flight');
-    }
-    _inFlight.add(key);
-    try {
-      final response = await _client
-          .post(_uri(path, query),
-              headers: _headers, body: body != null ? jsonEncode(body) : null)
-          .timeout(const Duration(seconds: 120));
-      return _handleResponse(response);
+      throw ConnectionException(
+        mutation
+            ? 'Response timed out. The server may still finish this operation. Refresh history/jobs before retrying; it has NOT been replayed.'
+            : 'Request timed out. Check the backend connection.',
+      );
     } on SocketException {
-      throw ConnectionException();
-    } on TimeoutException {
-      throw ConnectionException('Request timed out');
-    } finally {
-      _inFlight.remove(key);
+      throw ConnectionException(
+        mutation
+            ? 'Connection lost. Check history/jobs before retrying this operation.'
+            : null,
+      );
+    } on http.ClientException {
+      throw ConnectionException(
+        mutation
+            ? 'Connection lost. Check history/jobs before retrying this operation.'
+            : null,
+      );
     }
   }
 
-  Future<Map<String, dynamic>> _put(String path,
-      {required Map<String, dynamic> body}) async {
+  Map<String, dynamic> _response(http.Response response) {
+    Map<String, dynamic>? data;
     try {
-      final response = await _client
-          .put(_uri(path), headers: _headers, body: jsonEncode(body))
-          .timeout(const Duration(seconds: 30));
-      return _handleResponse(response);
-    } on SocketException {
-      throw ConnectionException();
-    } on TimeoutException {
-      throw ConnectionException('Request timed out');
-    }
-  }
-
-  Map<String, dynamic> _handleResponse(http.Response response) {
-    if (response.statusCode == 401) throw UnauthorizedException();
-    if (response.statusCode == 404) {
-      final body = _tryParseJson(response.body);
-      throw NotFoundException(body?['detail'] as String? ?? 'Not found');
-    }
-    if (response.statusCode == 409) {
-      final body = _tryParseJson(response.body);
-      throw ConflictException(body?['detail'] as String? ?? body?['error'] as String?);
-    }
-    if (response.statusCode == 422) {
-      throw ValidationException();
-    }
-    if (response.statusCode >= 400) {
-      final body = _tryParseJson(response.body);
-      final msg = body?['detail'] as String? ?? body?['error'] as String? ?? 'Request failed';
-      throw ApiException(msg, statusCode: response.statusCode);
-    }
-    if (response.body.isEmpty) return {};
-    return jsonDecode(response.body) as Map<String, dynamic>;
-  }
-
-  Map<String, dynamic>? _tryParseJson(String body) {
-    try {
-      return jsonDecode(body) as Map<String, dynamic>;
+      data =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     } catch (_) {
-      return null;
+      /* Error responses can be plain text. */
     }
+    final detail = data?['detail'] ?? data?['error'];
+    final message = _redact(
+      detail is String ? detail : 'Request failed (${response.statusCode}).',
+    );
+    if (response.statusCode == 401) throw UnauthorizedException();
+    if (response.statusCode == 404) throw NotFoundException(message);
+    if (response.statusCode == 409) throw ConflictException(message);
+    if (response.statusCode == 422) throw ValidationException(message);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(message, statusCode: response.statusCode);
+    }
+    if (data == null) {
+      throw ApiException('Backend returned an invalid JSON object.');
+    }
+    return data;
   }
 
-  // ── Health (no auth) ─────────────────────────────────────────
-
-  Future<HealthResponse> getHealth() async {
+  Future<Map<String, dynamic>> _request(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? query,
+    bool authenticated = true,
+    String? idempotencyKey,
+  }) async {
+    final mutation = method != 'GET';
+    final key = '$method:$path:${query ?? {}}';
+    if (mutation && !_inFlight.add(key)) {
+      throw ApiException('Request already in flight.');
+    }
     try {
-      final response = await _client
-          .get(_uri('/v1/health'), headers: {'Content-Type': 'application/json'})
-          .timeout(const Duration(seconds: 10));
-      if (response.statusCode != 200) throw ServerException();
-      return HealthResponse.fromJson(jsonDecode(response.body));
-    } on SocketException {
-      throw ConnectionException();
-    } on TimeoutException {
-      throw ConnectionException('Health check timed out');
+      if (authenticated && (token == null || token!.trim().isEmpty)) {
+        throw UnauthorizedException();
+      }
+      final request = http.Request(method, _uri(path, query));
+      if (authenticated) request.headers['Authorization'] = 'Bearer $token';
+      if (idempotencyKey != null) {
+        request.headers['Idempotency-Key'] = idempotencyKey;
+      }
+      if (body != null) {
+        request.headers['Content-Type'] = 'application/json';
+        request.body = jsonEncode(body);
+      }
+      return _response(
+        await _send(
+          request,
+          mutation: mutation,
+          timeout: Duration(seconds: mutation ? 300 : 30),
+        ),
+      );
+    } finally {
+      if (mutation) _inFlight.remove(key);
     }
   }
 
-  /// Test authenticated connection (calls projects list).
+  Future<HealthResponse> getHealth() async => HealthResponse.fromJson(
+    await _request('GET', '/v1/health', authenticated: false),
+  );
   Future<bool> testAuth() async {
-    await _get('/v1/projects');
+    await _request('GET', '/v1/projects', query: {'limit': '1'});
     return true;
   }
 
-  // ── Projects ─────────────────────────────────────────────────
-
   Future<List<ProjectInfo>> listProjects() async {
-    final data = await _get('/v1/projects');
-    return (data['projects'] as List)
-        .map((p) => ProjectInfo.fromJson(p as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<ProjectInfo> getProject(String projectId) async {
-    final data = await _get('/v1/projects/$projectId');
-    return ProjectInfo.fromJson(data);
-  }
-
-  Future<AnalysisResult> getAnalysis(String projectId) async {
-    final data = await _get('/v1/projects/$projectId/analysis');
-    return AnalysisResult.fromJson(data);
-  }
-
-  // ── Import ───────────────────────────────────────────────────
-
-  Future<JobInfo> importApk(
-    String filePath, {
-    String? idempotencyKey,
-    void Function(int sent, int total)? onProgress,
-  }) async {
-    final uri = _uri('/v1/import', {'authorized': 'true'});
-    final request = http.MultipartRequest('POST', uri);
-    request.headers['Authorization'] = 'Bearer $token';
-    if (idempotencyKey != null) {
-      request.headers['Idempotency-Key'] = idempotencyKey;
-    }
-    request.files.add(await http.MultipartFile.fromPath('file', filePath));
-
-    try {
-      final streamedResponse = await request.send().timeout(const Duration(minutes: 10));
-      final response = await http.Response.fromStream(streamedResponse);
-      final data = _handleResponse(response);
-      return JobInfo.fromJson(data);
-    } on SocketException {
-      throw ConnectionException();
-    }
-  }
-
-  // ── Files ────────────────────────────────────────────────────
-
-  Future<List<FileEntry>> listFiles(String projectId, {String subdir = ''}) async {
-    final data = await _get('/v1/projects/$projectId/files',
-        query: subdir.isNotEmpty ? {'subdir': subdir} : null);
-    return (data['files'] as List)
-        .map((f) => FileEntry.fromJson(f as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<String> readFile(String projectId, String path) async {
-    final data = await _get('/v1/projects/$projectId/files/read', query: {'path': path});
-    return data['content'] as String? ?? '';
-  }
-
-  Future<List<Map<String, dynamic>>> searchFiles(String projectId, String query) async {
-    final data = await _get('/v1/projects/$projectId/files/search', query: {'q': query});
-    return List<Map<String, dynamic>>.from(data['results'] ?? []);
-  }
-
-  // ── Plans ────────────────────────────────────────────────────
-
-  Future<ChangePlan> createPlan(String projectId, String request, {bool allowAiUpload = true}) async {
-    final data = await _post('/v1/projects/$projectId/plans',
-        body: {'user_request': request, 'allow_ai_upload': allowAiUpload},
-        dedupeKey: 'plan-create-$projectId');
-    return ChangePlan.fromJson(data);
-  }
-
-  Future<List<Map<String, dynamic>>> listPlans(String projectId) async {
-    final data = await _get('/v1/projects/$projectId/plans');
-    return List<Map<String, dynamic>>.from(data['plans'] ?? []);
-  }
-
-  Future<ChangePlan> getPlan(String projectId, String planId) async {
-    final data = await _get('/v1/projects/$projectId/plans/$planId');
-    return ChangePlan.fromJson(data);
-  }
-
-  Future<ApprovalRecord> approvePlan(String projectId, String planId, String hash) async {
-    final data = await _post('/v1/projects/$projectId/plans/$planId/approve',
-        body: {'hash': hash}, dedupeKey: 'plan-approve-$planId');
-    return ApprovalRecord.fromJson(data);
-  }
-
-  Future<void> rejectPlan(String projectId, String planId) async {
-    await _post('/v1/projects/$projectId/plans/$planId/reject',
-        dedupeKey: 'plan-reject-$planId');
-  }
-
-  // ── Patches ──────────────────────────────────────────────────
-
-  Future<PatchSet> generatePatch(String projectId, String planId) async {
-    final data = await _post('/v1/projects/$projectId/patches',
-        query: {'plan_id': planId}, dedupeKey: 'patch-gen-$planId');
-    return PatchSet.fromJson(data);
-  }
-
-  Future<List<Map<String, dynamic>>> listPatches(String projectId) async {
-    final data = await _get('/v1/projects/$projectId/patches');
-    return List<Map<String, dynamic>>.from(data['patches'] ?? []);
-  }
-
-  Future<PatchSet> getPatch(String projectId, String patchId) async {
-    final data = await _get('/v1/projects/$projectId/patches/$patchId');
-    return PatchSet.fromJson(data);
-  }
-
-  Future<List<PatchDiffEntry>> getPatchDiff(String projectId, String patchId) async {
-    final data = await _get('/v1/projects/$projectId/patches/$patchId/diff');
-    return (data['diff'] as List? ?? [])
-        .map((d) => PatchDiffEntry.fromJson(d as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<ApprovalRecord> approvePatch(String projectId, String patchId, String hash) async {
-    final data = await _post('/v1/projects/$projectId/patches/$patchId/approve',
-        body: {'hash': hash}, dedupeKey: 'patch-approve-$patchId');
-    return ApprovalRecord.fromJson(data);
-  }
-
-  Future<Map<String, dynamic>> applyPatch(String projectId, String patchId) async {
-    return _post('/v1/projects/$projectId/patches/$patchId/apply',
-        dedupeKey: 'patch-apply-$patchId');
-  }
-
-  Future<Map<String, dynamic>> undoPatch(String projectId, String patchId) async {
-    return _post('/v1/projects/$projectId/patches/$patchId/undo',
-        dedupeKey: 'patch-undo-$patchId');
-  }
-
-  // ── Manual Session ───────────────────────────────────────────
-
-  Future<ManualSession> getManualSession(String projectId) async {
-    final data = await _get('/v1/projects/$projectId/manual/session');
-    return ManualSession.fromJson(data);
-  }
-
-  Future<Map<String, dynamic>> beginManualSession(String projectId) async {
-    return _post('/v1/projects/$projectId/manual/begin',
-        dedupeKey: 'manual-begin-$projectId');
-  }
-
-  Future<Map<String, dynamic>> replaceFile(
-      String projectId, String relativePath, String content, int expectedRevision) async {
-    return _put('/v1/projects/$projectId/files', body: {
-      'relative_path': relativePath,
-      'content': content,
-      'expected_revision': expectedRevision,
-    });
-  }
-
-  Future<Map<String, dynamic>> recordManualChanges(String projectId, String message) async {
-    return _post('/v1/projects/$projectId/manual/record',
-        body: {'message': message}, dedupeKey: 'manual-record-$projectId');
-  }
-
-  // ── Validation & Build ───────────────────────────────────────
-
-  Future<ValidationResult> validate(String projectId) async {
-    final data = await _post('/v1/projects/$projectId/validate',
-        dedupeKey: 'validate-$projectId');
-    return ValidationResult.fromJson(data);
-  }
-
-  Future<JobInfo> startBuild(String projectId, {String? idempotencyKey}) async {
-    final headers = <String, String>{..._headers};
-    if (idempotencyKey != null) headers['Idempotency-Key'] = idempotencyKey;
-
-    try {
-      final response = await _client
-          .post(_uri('/v1/projects/$projectId/build'), headers: headers)
-          .timeout(const Duration(seconds: 30));
-      return JobInfo.fromJson(_handleResponse(response));
-    } on SocketException {
-      throw ConnectionException();
-    }
-  }
-
-  Future<List<BuildResult>> listBuilds(String projectId) async {
-    final data = await _get('/v1/projects/$projectId/builds');
-    return (data['builds'] as List)
-        .map((b) => BuildResult.fromJson(b as Map<String, dynamic>))
-        .toList();
-  }
-
-  // ── Signing ──────────────────────────────────────────────────
-
-  Future<List<SigningProfile>> listSigningProfiles() async {
-    final data = await _get('/v1/keys');
-    return (data['profiles'] as List)
-        .map((p) => SigningProfile.fromJson(p as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<Map<String, dynamic>> signBuild(
-      String projectId, String buildId, String profile) async {
-    return _post('/v1/projects/$projectId/sign',
-        body: {'build_id': buildId, 'profile': profile, 'confirm': true},
-        dedupeKey: 'sign-$buildId');
-  }
-
-  Future<Map<String, dynamic>> verifyBuild(String projectId, String buildId) async {
-    return _get('/v1/projects/$projectId/builds/$buildId/verify');
-  }
-
-  /// Download signed APK bytes.
-  Future<List<int>> downloadArtifact(String projectId, String buildId,
-      {String artifact = 'signed'}) async {
-    final uri = _uri('/v1/projects/$projectId/builds/$buildId/download',
-        {'artifact': artifact});
-    try {
-      final response = await _client
-          .get(uri, headers: {if (token != null) 'Authorization': 'Bearer $token'})
-          .timeout(const Duration(minutes: 5));
-      if (response.statusCode == 401) throw UnauthorizedException();
-      if (response.statusCode == 404) throw NotFoundException('Artifact not found');
-      if (response.statusCode >= 400) throw ServerException();
-      return response.bodyBytes;
-    } on SocketException {
-      throw ConnectionException();
-    }
-  }
-
-  // ── Audit ────────────────────────────────────────────────────
-
-  Future<Map<String, dynamic>> getAuditJson(String projectId) async {
-    return _get('/v1/projects/$projectId/audit', query: {'format': 'json'});
-  }
-
-  Future<String> getAuditMarkdown(String projectId) async {
-    final data = await _get('/v1/projects/$projectId/audit', query: {'format': 'markdown'});
-    return data['markdown'] as String? ?? '';
-  }
-
-  // ── Events ───────────────────────────────────────────────────
-
-  Future<List<AuditEvent>> listEvents(String projectId, {String? after}) async {
-    final query = <String, String>{};
-    if (after != null) query['after'] = after;
-    final data = await _get('/v1/projects/$projectId/events', query: query.isEmpty ? null : query);
-    return (data['events'] as List)
-        .map((e) => AuditEvent.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  // ── Jobs ─────────────────────────────────────────────────────
-
-  Future<List<JobInfo>> listJobs({String? projectId}) async {
-    final query = projectId != null ? {'project_id': projectId} : null;
-    final data = await _get('/v1/jobs', query: query);
-    return (data['jobs'] as List)
-        .map((j) => JobInfo.fromJson(j as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<JobInfo> getJob(String jobId) async {
-    final data = await _get('/v1/jobs/$jobId');
-    return JobInfo.fromJson(data);
-  }
-
-  Future<void> cancelJob(String jobId) async {
-    await _post('/v1/jobs/$jobId/cancel', dedupeKey: 'cancel-$jobId');
-  }
-
-  /// Stream SSE events for a job. Reconnects with backoff.
-  Stream<AuditEvent> streamJobEvents(String jobId, {String? after}) async* {
-    var cursor = after;
-    var retries = 0;
-    const maxRetries = 5;
-
-    while (retries < maxRetries) {
-      try {
-        final query = <String, String>{};
-        if (cursor != null) query['after'] = cursor;
-        final request = http.Request(
-            'GET', _uri('/v1/jobs/$jobId/events', query.isEmpty ? null : query));
-        request.headers['Authorization'] = 'Bearer $token';
-        request.headers['Accept'] = 'text/event-stream';
-
-        final streamedResponse = await _client.send(request);
-        if (streamedResponse.statusCode == 401) throw UnauthorizedException();
-        if (streamedResponse.statusCode == 404) throw NotFoundException('Job not found');
-
-        final seen = <String>{};
-        await for (final chunk in streamedResponse.stream.transform(utf8.decoder)) {
-          for (final line in chunk.split('\n')) {
-            if (line.startsWith('id: ')) {
-              cursor = line.substring(4).trim();
-            } else if (line.startsWith('data: ')) {
-              final jsonStr = line.substring(6).trim();
-              if (jsonStr.isEmpty) continue;
-              try {
-                final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-                final event = AuditEvent.fromJson(data);
-                if (!seen.contains(event.eventId)) {
-                  seen.add(event.eventId);
-                  yield event;
-                }
-              } catch (_) {
-                // Skip malformed events
-              }
-            } else if (line.startsWith('event: done')) {
-              return; // Job finished
-            }
-          }
-        }
-        return; // Stream ended normally
-      } on UnauthorizedException {
-        rethrow;
-      } on NotFoundException {
-        rethrow;
-      } catch (_) {
-        retries++;
-        if (retries >= maxRetries) rethrow;
-        await Future.delayed(Duration(seconds: retries * 2));
+    final projects = <ProjectInfo>[];
+    while (true) {
+      final data = await _request(
+        'GET',
+        '/v1/projects',
+        query: {'offset': '${projects.length}', 'limit': '100'},
+      );
+      final page = (data['projects'] as List)
+          .map((p) => ProjectInfo.fromJson(p))
+          .toList();
+      projects.addAll(page);
+      if (page.isEmpty || projects.length >= (data['total'] as int)) {
+        return projects;
       }
     }
   }
 
-  void dispose() {
-    _client.close();
+  Future<ProjectInfo> getProject(String id) async =>
+      ProjectInfo.fromJson(await _request('GET', '/v1/projects/$id'));
+  Future<AnalysisResult> getAnalysis(String id) async =>
+      AnalysisResult.fromJson(
+        await _request(
+          'GET',
+          '/v1/projects/$id/analysis',
+          query: {'compact': 'true'},
+        ),
+      );
+
+  Future<JobInfo> importApk(
+    String filePath, {
+    required String idempotencyKey,
+  }) async {
+    final file = File(filePath);
+    return importApkStream(
+      file.uri.pathSegments.last,
+      await file.length(),
+      file.openRead(),
+      idempotencyKey: idempotencyKey,
+    );
   }
+
+  Future<JobInfo> importApkStream(
+    String filename,
+    int length,
+    Stream<List<int>> bytes, {
+    required String idempotencyKey,
+  }) async {
+    if (token?.isNotEmpty != true) throw UnauthorizedException();
+    final request = http.MultipartRequest(
+      'POST',
+      _uri('/v1/import', {'authorized': 'true'}),
+    );
+    request.headers['Authorization'] = 'Bearer $token';
+    request.headers['Idempotency-Key'] = idempotencyKey;
+    request.files.add(
+      http.MultipartFile('file', bytes, length, filename: filename),
+    );
+    return JobInfo.fromJson(
+      _response(
+        await _send(
+          request,
+          timeout: const Duration(minutes: 10),
+          mutation: true,
+        ),
+      ),
+    );
+  }
+
+  Future<List<FileEntry>> listFiles(String id, {String subdir = ''}) async {
+    final data = await _request(
+      'GET',
+      '/v1/projects/$id/files',
+      query: subdir.isEmpty ? null : {'subdir': subdir},
+    );
+    // Backend returns recursive relative paths, not directory entry objects.
+    final entries = <String, FileEntry>{};
+    final prefix = subdir.isEmpty ? '' : '$subdir/';
+    for (final path in List<String>.from(data['files'])) {
+      if (!path.startsWith(prefix)) continue;
+      final rest = path.substring(prefix.length);
+      if (rest.isEmpty) continue;
+      final name = rest.split('/').first;
+      entries[name] = FileEntry(
+        name: name,
+        path: '$prefix$name',
+        isDirectory: rest.contains('/'),
+      );
+    }
+    return entries.values.toList()..sort((a, b) {
+      if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.compareTo(b.name);
+    });
+  }
+
+  Future<String> readFile(String id, String path) async =>
+      (await _request(
+            'GET',
+            '/v1/projects/$id/files/read',
+            query: {'path': path},
+          ))['content']
+          as String;
+  Future<List<Map<String, dynamic>>> searchFiles(
+    String id,
+    String query,
+  ) async => List<Map<String, dynamic>>.from(
+    (await _request(
+      'GET',
+      '/v1/projects/$id/files/search',
+      query: {'q': query},
+    ))['results'],
+  );
+  Future<void> replaceFile(
+    String id,
+    String path,
+    String content,
+    int revision,
+  ) async {
+    await _request(
+      'PUT',
+      '/v1/projects/$id/files',
+      body: {
+        'relative_path': path,
+        'content': content,
+        'expected_revision': revision,
+      },
+    );
+  }
+
+  Future<ChangePlan> createPlan(
+    String id,
+    String request, {
+    required bool allowAiUpload,
+  }) async => ChangePlan.fromJson(
+    await _request(
+      'POST',
+      '/v1/projects/$id/plans',
+      body: {'user_request': request, 'allow_ai_upload': allowAiUpload},
+    ),
+  );
+  Future<List<Map<String, dynamic>>> listPlans(String id) async =>
+      List<Map<String, dynamic>>.from(
+        (await _request('GET', '/v1/projects/$id/plans'))['plans'],
+      );
+  Future<ChangePlan> getPlan(String id, String plan) async =>
+      ChangePlan.fromJson(
+        await _request('GET', '/v1/projects/$id/plans/$plan'),
+      );
+  Future<ApprovalRecord> approvePlan(
+    String id,
+    String plan,
+    String hash,
+  ) async => ApprovalRecord.fromJson(
+    await _request(
+      'POST',
+      '/v1/projects/$id/plans/$plan/approve',
+      body: {'hash': hash},
+    ),
+  );
+  Future<void> rejectPlan(String id, String plan) async {
+    await _request('POST', '/v1/projects/$id/plans/$plan/reject');
+  }
+
+  Future<PatchSet> generatePatch(String id, String plan) async =>
+      PatchSet.fromJson(
+        await _request(
+          'POST',
+          '/v1/projects/$id/patches',
+          query: {'plan_id': plan},
+        ),
+      );
+  Future<List<Map<String, dynamic>>> listPatches(String id) async =>
+      List<Map<String, dynamic>>.from(
+        (await _request('GET', '/v1/projects/$id/patches'))['patches'],
+      );
+  Future<PatchSet> getPatch(String id, String patch) async => PatchSet.fromJson(
+    await _request('GET', '/v1/projects/$id/patches/$patch'),
+  );
+  Future<List<PatchDiffEntry>> getPatchDiff(String id, String patch) async =>
+      ((await _request('GET', '/v1/projects/$id/patches/$patch/diff'))['diff']
+              as List)
+          .map((d) => PatchDiffEntry.fromJson(d))
+          .toList();
+  Future<ApprovalRecord> approvePatch(
+    String id,
+    String patch,
+    String hash,
+  ) async => ApprovalRecord.fromJson(
+    await _request(
+      'POST',
+      '/v1/projects/$id/patches/$patch/approve',
+      body: {'hash': hash},
+    ),
+  );
+  Future<Map<String, dynamic>> applyPatch(String id, String patch) =>
+      _request('POST', '/v1/projects/$id/patches/$patch/apply');
+  Future<Map<String, dynamic>> undoPatch(String id, String patch) =>
+      _request('POST', '/v1/projects/$id/patches/$patch/undo');
+
+  Future<ManualSession> getManualSession(String id) async =>
+      ManualSession.fromJson(
+        await _request('GET', '/v1/projects/$id/manual/session'),
+      );
+  Future<void> beginManualSession(String id) async {
+    await _request('POST', '/v1/projects/$id/manual/begin');
+  }
+
+  Future<Map<String, dynamic>> recordManualChanges(String id, String message) =>
+      _request(
+        'POST',
+        '/v1/projects/$id/manual/record',
+        body: {'message': message},
+      );
+  Future<ValidationResult> validate(String id) async =>
+      ValidationResult.fromJson(
+        await _request('POST', '/v1/projects/$id/validate'),
+      );
+  Future<JobInfo> startBuild(
+    String id, {
+    required String idempotencyKey,
+  }) async => JobInfo.fromJson(
+    await _request(
+      'POST',
+      '/v1/projects/$id/build',
+      idempotencyKey: idempotencyKey,
+    ),
+  );
+  Future<List<BuildResult>> listBuilds(String id) async =>
+      ((await _request('GET', '/v1/projects/$id/builds'))['builds'] as List)
+          .map((b) => BuildResult.fromJson(b))
+          .toList();
+
+  Future<List<SigningProfile>> listSigningProfiles() async =>
+      ((await _request('GET', '/v1/keys'))['profiles'] as List)
+          .map((p) => SigningProfile.fromJson(p))
+          .toList();
+  Future<Map<String, dynamic>> signBuild(
+    String id,
+    String build,
+    String profile,
+  ) => _request(
+    'POST',
+    '/v1/projects/$id/sign',
+    body: {'build_id': build, 'profile': profile, 'confirm': true},
+  );
+  Future<Map<String, dynamic>> verifyBuild(String id, String build) =>
+      _request('GET', '/v1/projects/$id/builds/$build/verify');
+
+  Future<Uint8List> downloadArtifact(
+    String id,
+    String build, {
+    String artifact = 'signed',
+  }) async {
+    if (token?.isNotEmpty != true) throw UnauthorizedException();
+    final request = http.Request(
+      'GET',
+      _uri('/v1/projects/$id/builds/$build/download', {'artifact': artifact}),
+    );
+    request.headers['Authorization'] = 'Bearer $token';
+    final response = await _send(request, timeout: const Duration(minutes: 10));
+    if (response.statusCode != 200) _response(response);
+    return response.bodyBytes;
+  }
+
+  Future<Map<String, dynamic>> getAuditJson(String id) =>
+      _request('GET', '/v1/projects/$id/audit', query: {'format': 'json'});
+  Future<String> getAuditMarkdown(String id) async =>
+      (await _request(
+            'GET',
+            '/v1/projects/$id/audit',
+            query: {'format': 'markdown'},
+          ))['markdown']
+          as String;
+  Future<List<AuditEvent>> listEvents(String id, {String? after}) async =>
+      ((await _request(
+                'GET',
+                '/v1/projects/$id/events',
+                query: {'after': ?after, 'limit': '100'},
+              ))['events']
+              as List)
+          .map((e) => AuditEvent.fromJson(e))
+          .toList();
+  Future<List<JobInfo>> listJobs({String? projectId}) async =>
+      ((await _request(
+                'GET',
+                '/v1/jobs',
+                query: {'project_id': ?projectId},
+              ))['jobs']
+              as List)
+          .map((j) => JobInfo.fromJson(j))
+          .toList();
+  Future<JobInfo> getJob(String id) async =>
+      JobInfo.fromJson(await _request('GET', '/v1/jobs/$id'));
+  Future<JobInfo> cancelJob(String id) async =>
+      JobInfo.fromJson(await _request('POST', '/v1/jobs/$id/cancel'));
+
+  /// SSE frames may span arbitrary network chunks; only complete frames count.
+  Stream<AuditEvent> streamJobEvents(String id, {String? after}) async* {
+    final request = http.Request(
+      'GET',
+      _uri('/v1/jobs/$id/events', {'after': ?after}),
+    );
+    if (token?.isNotEmpty != true) throw UnauthorizedException();
+    request.headers.addAll({
+      'Authorization': 'Bearer $token',
+      'Accept': 'text/event-stream',
+    });
+    request.followRedirects = false;
+    final response = await _client.send(request);
+    if (response.statusCode != 200) {
+      _response(await http.Response.fromStream(response));
+      return;
+    }
+    final seen = <String>{?after};
+    var type = '';
+    final data = <String>[];
+    await for (final line
+        in response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
+      if (line.isEmpty) {
+        if (type == 'done') return;
+        if (type == 'error') {
+          throw ApiException(
+            'Event stream cursor rejected. Refresh job status.',
+          );
+        }
+        if (data.isNotEmpty) {
+          final event = AuditEvent.fromJson(jsonDecode(data.join('\n')));
+          if (event.eventId.isNotEmpty && seen.add(event.eventId)) yield event;
+        }
+        type = '';
+        data.clear();
+      } else if (line.startsWith('event:')) {
+        type = line.substring(6).trim();
+      } else if (line.startsWith('data:')) {
+        data.add(line.substring(5).trimLeft());
+      }
+    }
+  }
+
+  void dispose() => _client.close();
 }

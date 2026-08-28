@@ -1,4 +1,6 @@
 /// Complete NOIR ThemeData built from the Obsidian Protocol design system.
+library;
+
 import 'package:flutter/material.dart';
 import 'noir_colors.dart';
 import 'noir_typography.dart';
@@ -14,6 +16,18 @@ class NoirTheme {
       fontFamily: 'Inter',
       colorScheme: const ColorScheme.dark(
         primary: NoirColors.primary,
+        secondary: NoirColors.primary,
+        onSecondary: NoirColors.black,
+        secondaryContainer: NoirColors.surfaceContainerHigh,
+        onSecondaryContainer: NoirColors.primary,
+        tertiary: NoirColors.onSurface,
+        onTertiary: NoirColors.black,
+        tertiaryContainer: NoirColors.surfaceContainerHigh,
+        onTertiaryContainer: NoirColors.primary,
+        surfaceTint: Colors.transparent,
+        onError: NoirColors.black,
+        errorContainer: NoirColors.surfaceContainerHigh,
+        onErrorContainer: NoirColors.primary,
         onPrimary: NoirColors.onPrimary,
         primaryContainer: NoirColors.primaryContainer,
         onPrimaryContainer: NoirColors.onPrimaryContainer,
@@ -28,11 +42,19 @@ class NoirTheme {
         error: NoirColors.error,
       ),
       textTheme: TextTheme(
-        headlineLarge: NoirTypography.headlineLg.copyWith(color: NoirColors.primary),
-        headlineMedium: NoirTypography.headlineMd.copyWith(color: NoirColors.primary),
+        headlineLarge: NoirTypography.headlineLg.copyWith(
+          color: NoirColors.primary,
+        ),
+        headlineMedium: NoirTypography.headlineMd.copyWith(
+          color: NoirColors.primary,
+        ),
         bodyLarge: NoirTypography.bodyLg.copyWith(color: NoirColors.onSurface),
-        bodySmall: NoirTypography.bodySm.copyWith(color: NoirColors.onSurfaceVariant),
-        labelSmall: NoirTypography.labelCaps.copyWith(color: NoirColors.onSurfaceVariant),
+        bodySmall: NoirTypography.bodySm.copyWith(
+          color: NoirColors.onSurfaceVariant,
+        ),
+        labelSmall: NoirTypography.labelCaps.copyWith(
+          color: NoirColors.onSurfaceVariant,
+        ),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: NoirColors.surface.withValues(alpha: 0.8),
@@ -55,7 +77,9 @@ class NoirTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: NoirColors.primary,
           foregroundColor: NoirColors.black,
-          textStyle: NoirTypography.codeLg.copyWith(fontWeight: FontWeight.w700),
+          textStyle: NoirTypography.codeLg.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
           elevation: 0,
@@ -85,7 +109,10 @@ class NoirTheme {
           borderRadius: BorderRadius.circular(2),
           borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
         hintStyle: NoirTypography.codeSm.copyWith(
           color: NoirColors.onSurfaceVariant.withValues(alpha: 0.5),
         ),
@@ -106,7 +133,9 @@ class NoirTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: NoirColors.surfaceContainerHigh,
-        contentTextStyle: NoirTypography.bodySm.copyWith(color: NoirColors.onSurface),
+        contentTextStyle: NoirTypography.bodySm.copyWith(
+          color: NoirColors.onSurface,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         behavior: SnackBarBehavior.floating,
       ),
@@ -114,18 +143,29 @@ class NoirTheme {
         backgroundColor: NoirColors.surfaceContainerLow,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(4),
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 1),
+          side: BorderSide(
+            color: Colors.white.withValues(alpha: 0.15),
+            width: 1,
+          ),
         ),
-        titleTextStyle: NoirTypography.headlineMd.copyWith(color: NoirColors.primary),
-        contentTextStyle: NoirTypography.bodySm.copyWith(color: NoirColors.onSurfaceVariant),
+        titleTextStyle: NoirTypography.headlineMd.copyWith(
+          color: NoirColors.primary,
+        ),
+        contentTextStyle: NoirTypography.bodySm.copyWith(
+          color: NoirColors.onSurfaceVariant,
+        ),
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: NoirColors.primary,
         linearTrackColor: NoirColors.outlineVariant,
       ),
       scrollbarTheme: ScrollbarThemeData(
-        thumbColor: WidgetStateProperty.all(Colors.white.withValues(alpha: 0.2)),
-        trackColor: WidgetStateProperty.all(Colors.white.withValues(alpha: 0.05)),
+        thumbColor: WidgetStateProperty.all(
+          Colors.white.withValues(alpha: 0.2),
+        ),
+        trackColor: WidgetStateProperty.all(
+          Colors.white.withValues(alpha: 0.05),
+        ),
         radius: const Radius.circular(2),
         thickness: WidgetStateProperty.all(4),
       ),
