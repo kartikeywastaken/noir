@@ -68,7 +68,7 @@ Active operations remain visible and cancellable. Plan/patch history remains ava
 inside each project for approval recovery after an AI timeout. The old `/jobs` app route
 redirects to History; the underlying job API is retained for real progress and cancellation.
 
-The ready-to-install private-beta APK is `output/noir-private-beta.apk` (version 0.3.0+3).
+The ready-to-install private-beta APK is `frontend/output/noir-private-beta.apk` (version 0.3.0+3).
 It is a release-mode build using the existing development signing identity so it can
 update the previously installed NOIR test app without erasing its saved session. It is
 not an app-store release; use a private production signing identity before wider distribution.
@@ -124,7 +124,7 @@ adb -d install -r /Users/kartik/Documents/ChatGPT/noir/frontend/output/noir-debu
 adb -d reverse tcp:8787 tcp:8787
 ```
 
-The ready-to-install `output/noir-debug.apk` is the locally built and signature-verified **NOIR development app** (Android 7.0/API 24 or newer). It is not the repackaged VPN APK. The universal debug build includes multiple CPU architectures and is about 155 MB; this is not a release-size estimate.
+The ready-to-install `frontend/output/noir-debug.apk` is the locally built and signature-verified **NOIR development app** (Android 7.0/API 24 or newer). It is not the repackaged VPN APK. The universal debug build includes multiple CPU architectures and is about 155 MB; this is not a release-size estimate.
 
 Use `http://127.0.0.1:8787` in the app and tap **Save & test connection**. Keep the backend terminal running. Repeat the reverse command after reconnecting USB.
 
@@ -219,16 +219,16 @@ NOIR_RUN_E2E=1 JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH=/opt/homebrew/opt/ope
 
 No live Gemini request or installation on your phone is performed by these tests.
 
-See `../backend/deploy/ec2/VERIFICATION.md` for deployment evidence. The suites include owner isolation, invite replay/revocation, private history, account-switch response protection, and the real Dart HTTP integration. The macOS app build still requires a complete Xcode installation.
+See `backend/deploy/ec2/VERIFICATION.md` for deployment evidence. The suites include owner isolation, invite replay/revocation, private history, account-switch response protection, and the real Dart HTTP integration. The macOS app build still requires a complete Xcode installation.
 
 ## Implementation notes
 
-- Flutter sources: `lib/features`, `lib/core`, `lib/data`; route-scoped workspace/build state avoids cross-project reuse.
+- Flutter sources: `frontend/lib/features`, `frontend/lib/core`, `frontend/lib/data`; route-scoped workspace/build state avoids cross-project reuse.
 - Backend review reads add persisted approval/stale/applied state. Mutation services still enforce hashes, project ownership, revisions, locks and consent.
 - A compact analysis response avoids sending the entire Smali index to the phone; the original full API response remains available.
 - API imports preserve the uploaded filename. Audit reports now include recorded manual sessions.
 - Signing/export verifies before saving. An unsigned rebuilt APK is never labelled as signed.
-- The bundled Phantom master is `assets/branding/phantom.png`. Regenerate launchers with `dart run flutter_launcher_icons`.
+- The bundled Phantom master is `frontend/assets/branding/phantom.png`. Regenerate launchers from `frontend/` with `dart run flutter_launcher_icons`.
 - Debug signing is for local development, not store distribution. Configure a private release signing identity and production transport before distributing NOIR.
 
 Setup references: [Flutter Android setup](https://docs.flutter.dev/platform-integration/android/setup), [secure-storage platform configuration](https://pub.dev/packages/flutter_secure_storage/versions/10.3.1), [native file picker](https://pub.dev/packages/file_picker).
