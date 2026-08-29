@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
 import 'api_exceptions.dart';
+import 'transfer_progress.dart';
 
 class NoirApiClient {
   static const cloudBaseUrl = String.fromEnvironment(
@@ -240,6 +241,7 @@ class NoirApiClient {
   Future<JobInfo> importApk(
     String filePath, {
     required String idempotencyKey,
+    TransferCallback? onProgress,
   }) async {
     final file = File(filePath);
     return importApkStream(
@@ -247,6 +249,7 @@ class NoirApiClient {
       await file.length(),
       file.openRead(),
       idempotencyKey: idempotencyKey,
+      onProgress: onProgress,
     );
   }
 
@@ -255,6 +258,7 @@ class NoirApiClient {
     int length,
     Stream<List<int>> bytes, {
     required String idempotencyKey,
+    TransferCallback? onProgress,
   }) async {
     if (token?.isNotEmpty != true) throw UnauthorizedException();
     final request = http.MultipartRequest(
@@ -263,8 +267,22 @@ class NoirApiClient {
     );
     request.headers['Authorization'] = 'Bearer $token';
     request.headers['Idempotency-Key'] = idempotencyKey;
+    final revision = credentialRevision;
+    Stream<List<int>> counted() async* {
+      var sent = 0;
+      onProgress?.call(TransferProgress(0, length));
+      await for (final chunk in bytes) {
+        if (revision != credentialRevision) {
+          throw ApiException('Workspace changed. Upload stopped.');
+        }
+        sent += chunk.length;
+        onProgress?.call(TransferProgress(sent, length));
+        yield chunk;
+      }
+    }
+
     request.files.add(
-      http.MultipartFile('file', bytes, length, filename: filename),
+      http.MultipartFile('file', counted(), length, filename: filename),
     );
     return JobInfo.fromJson(
       _response(
@@ -460,6 +478,7 @@ class NoirApiClient {
     String id,
     String build, {
     String artifact = 'signed',
+    TransferCallback? onProgress,
   }) async {
     if (token?.isNotEmpty != true) throw UnauthorizedException();
     final request = http.Request(
@@ -467,10 +486,96 @@ class NoirApiClient {
       _uri('/v1/projects/$id/builds/$build/download', {'artifact': artifact}),
     );
     request.headers['Authorization'] = 'Bearer $token';
-    final response = await _send(request, timeout: const Duration(minutes: 10));
-    if (response.statusCode != 200) _response(response);
-    return response.bodyBytes;
+    request.followRedirects = false;
+    final revision = credentialRevision;
+    void checkIdentity() {
+      if (revision != credentialRevision) {
+        throw ApiException('Workspace changed. Download discarded.');
+      }
+    }
+
+    try {
+      final response = await _client
+          .send(request)
+          .timeout(const Duration(seconds: 30));
+      checkIdentity();
+      if (response.statusCode != 200) {
+        final error = await http.Response.fromStream(
+          response,
+        ).timeout(const Duration(seconds: 30));
+        checkIdentity();
+        _response(error);
+      }
+      final result = BytesBuilder(copy: false);
+      final total = response.contentLength;
+      onProgress?.call(TransferProgress(0, total));
+      await for (final chunk in response.stream.timeout(
+        const Duration(seconds: 60),
+      )) {
+        checkIdentity();
+        result.add(chunk);
+        onProgress?.call(TransferProgress(result.length, total));
+      }
+      checkIdentity();
+      if (total != null && result.length != total) {
+        throw ApiException(
+          'Download incomplete. Nothing was saved; try downloading again.',
+        );
+      }
+      return result.takeBytes();
+    } on TimeoutException {
+      throw ConnectionException(
+        'Download stalled. Your APK is safe in History; download it again.',
+      );
+    } on SocketException {
+      throw ConnectionException(
+        'Download connection lost. Try downloading again from History.',
+      );
+    } on http.ClientException {
+      throw ConnectionException(
+        'Download connection lost. Try downloading again from History.',
+      );
+    }
   }
+
+  Future<JobInfo> prepareWorkflow(
+    String id,
+    String text,
+    int revision,
+    String key,
+  ) async => JobInfo.fromJson(
+    await _request(
+      'POST',
+      '/v1/projects/$id/workflow/prepare',
+      idempotencyKey: key,
+      body: {
+        'user_request': text,
+        'allow_ai_upload': true,
+        'revision': revision,
+      },
+    ),
+  );
+
+  Future<JobInfo> finishWorkflow(
+    String id,
+    ChangePlan plan,
+    PatchSet patch,
+    String key,
+  ) async => JobInfo.fromJson(
+    await _request(
+      'POST',
+      '/v1/projects/$id/workflow/finish',
+      idempotencyKey: key,
+      body: {
+        'plan_id': plan.planId,
+        'patch_id': patch.patchId,
+        'plan_hash': plan.planHash,
+        'patch_hash': patch.patchHash,
+        'revision': plan.workspaceRevision,
+        'confirm': true,
+      },
+    ),
+  );
 
   Future<Map<String, dynamic>> getAuditJson(String id) =>
       _request('GET', '/v1/projects/$id/audit', query: {'format': 'json'});

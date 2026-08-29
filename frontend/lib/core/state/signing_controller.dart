@@ -2,6 +2,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import '../../data/api/noir_api_client.dart';
 import '../../data/api/api_exceptions.dart';
+import '../../data/api/transfer_progress.dart';
 import '../../data/models/models.dart';
 import 'safe_notifier.dart';
 
@@ -57,7 +58,11 @@ class SigningController extends SafeNotifier {
     }
   }
 
-  Future<Uint8List> verifiedDownload(String id, BuildResult build) async {
+  Future<Uint8List> verifiedDownload(
+    String id,
+    BuildResult build, {
+    TransferCallback? onProgress,
+  }) async {
     final revision = api.credentialRevision;
     final expected = build.signedApkHash;
     if (expected == null || !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(expected)) {
@@ -71,7 +76,11 @@ class SigningController extends SafeNotifier {
         'APK signature verification failed. Download blocked.',
       );
     }
-    final bytes = await api.downloadArtifact(id, build.buildId);
+    final bytes = await api.downloadArtifact(
+      id,
+      build.buildId,
+      onProgress: onProgress,
+    );
     if (await compute(_digest, bytes) != expected.toLowerCase()) {
       throw ApiException(
         'Downloaded SHA-256 differs from the recorded build. File was NOT saved.',

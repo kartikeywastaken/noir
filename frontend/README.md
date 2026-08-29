@@ -4,7 +4,32 @@ Flutter Android/macOS client for the existing NOIR Python backend. The selected 
 
 ## What runs where
 
-The deployed EC2 backend runs FastAPI, Gemini calls, Apktool, validation, rebuilds and signing. The phone runs the Flutter client. **This is not an on-device Python/Apktool port.** Plan approval, patch approval and APK signing still require explicit actions. Personal signing-key provisioning happens when an invited user first opens signing.
+The deployed EC2 backend runs FastAPI, Gemini calls, Apktool, validation, rebuilds and signing. The phone runs the Flutter client. **This is not an on-device Python/Apktool port.** The normal workflow combines exact plan/patch approval and signing consent into one review action. Advanced tools retain their separate approval controls.
+
+## Three-step workflow (0.3.0)
+
+1. **APK:** choose an authorized APK. Upload shows measured bytes, percentage and bytes
+   remaining; decoding follows automatically. Upload completion is separate from processing.
+2. **Changes:** describe the change, consent to Gemini context upload and select Preview
+   changes. NOIR prepares an **unapproved, unapplied** plan/patch preview in a persistent job.
+   Review the outcome, risks, permissions and file diffs, then select **Approve & make APK**.
+   This explicitly approves both exact hashes and signing; no hidden approvals occur on upload
+   or preview generation. Edit request returns to the same step without a rejection loop.
+3. **Download:** validation, rebuild, alignment, signing and verification run automatically.
+   Download shows real byte progress and verifies signature/SHA-256 before saving.
+
+Navigation is **Home / History / Config**, with no Projects tab or recent-project section.
+History retains builds and processing/preparation jobs; Resume reopens the three-step flow.
+Manual editing and detailed tools remain under Advanced tools, not in the default path.
+These are three screens/stages, not a promise that file picking, AI consent and approval
+can safely happen in three total taps.
+
+Only read-only status checks reconnect automatically. Processing has real stage labels,
+not fabricated percentages. Interrupted work is not silently replayed. After an ordinary
+signing failure, Retry remaining build steps reuses a successful recorded build and never
+applies the same patch twice. Uploads are not resumable byte-range transfers; interrupted
+uploads may require selecting the file again. Unknown download lengths show bytes without
+an invented percentage. Android still controls its native save-file confirmation.
 
 The backend and CLI remain usable independently. The app uses authenticated HTTP only; it never reads the backend database or calls Gemini directly.
 
@@ -19,10 +44,13 @@ The owner creates each invitation through SSH:
 
 ```sh
 ssh -o IdentitiesOnly=yes -i /Users/kartik/Desktop/noir-server.pem ubuntu@16.171.197.228 \
-  'sudo -u noir env NOIR_DATA_DIR=/var/lib/noir/data /opt/noir/venv/bin/noir users invite "Friend name"'
+  'sudo -u noir env NOIR_DATA_DIR=/var/lib/noir/data /opt/noir/venv/bin/noir users invite "Friend name" --code-only'
 ```
 
-Share the resulting `invite_code` privately with that person. Codes expire after seven
+Share the resulting code privately with that person. `--code-only` avoids copying an ID
+or surrounding terminal formatting. The app also accepts wrapped codes or copied invitation
+JSON. Errors distinguish an incorrect code from an already-used, expired or revoked one.
+Activating one invitation does not invalidate any other invitation. Codes expire after seven
 days and can be used once. `noir users list` shows workspace IDs; issue another code
 with `users invite "Friend name" --user USER_ID` for the same person's second device
 or return after sign-out. Without `--user`, a new private workspace is created.
@@ -40,7 +68,7 @@ Active operations remain visible and cancellable. Plan/patch history remains ava
 inside each project for approval recovery after an AI timeout. The old `/jobs` app route
 redirects to History; the underlying job API is retained for real progress and cancellation.
 
-The ready-to-install private-beta APK is `output/noir-private-beta.apk` (version 0.2.0+2).
+The ready-to-install private-beta APK is `output/noir-private-beta.apk` (version 0.3.0+3).
 It is a release-mode build using the existing development signing identity so it can
 update the previously installed NOIR test app without erasing its saved session. It is
 not an app-store release; use a private production signing identity before wider distribution.
@@ -138,7 +166,7 @@ flutter run -d macos
 
 Connect to `http://127.0.0.1:8787` using the same backend token. Network-client, keychain and user-selected-file permissions are declared in the macOS entitlements. No browser build is provided.
 
-## Workflow
+## Advanced workflow (optional)
 
 1. Activate an invitation (or configure a local backend under Advanced), select an APK and acknowledge authorization. The file streams from the native picker to the backend; decoding and analysis run as a real job. Progress can be reopened in History after leaving the import dialog.
 2. Browse the decoded manifest, resources and Smali, or search file contents. The inventory shows SDK, permissions and compatibility warnings. These are decoded artifacts, not original Java/Kotlin source.

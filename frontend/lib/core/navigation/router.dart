@@ -18,6 +18,10 @@ import '../../features/history/build_history_screen.dart';
 GoRouter createNoirRouter() => GoRouter(
   routes: [
     GoRoute(path: '/', builder: (_, _) => const HomeScreen()),
+    GoRoute(
+      path: '/workflow/:id',
+      builder: (_, state) => HomeScreen(projectId: state.pathParameters['id']!),
+    ),
     GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
     GoRoute(path: '/history', builder: (_, _) => const BuildHistoryScreen()),
     GoRoute(path: '/jobs', redirect: (_, _) => '/history'),

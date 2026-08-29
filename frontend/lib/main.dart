@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'core/navigation/router.dart';
 import 'core/state/connection_controller.dart';
 import 'core/state/projects_controller.dart';
+import 'core/state/workflow_controller.dart';
 import 'core/theme/noir_theme.dart';
 
 void main() {
@@ -59,8 +60,15 @@ class _NoirAppState extends State<NoirApp> with WidgetsBindingObserver {
     value: _connection,
     child: KeyedSubtree(
       key: ValueKey(_sessionEpoch),
-      child: ChangeNotifierProvider(
-        create: (_) => ProjectsController(_connection.api),
+      child: MultiProvider(
+        providers: [
+          ChangeNotifierProvider(
+            create: (_) => ProjectsController(_connection.api),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => WorkflowController(_connection.api),
+          ),
+        ],
         child: MaterialApp.router(
           title: 'NOIR',
           debugShowCheckedModeBanner: false,

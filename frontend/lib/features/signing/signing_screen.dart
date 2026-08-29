@@ -7,6 +7,8 @@ import '../../core/state/signing_controller.dart';
 import '../../core/widgets/noir_button.dart';
 import '../../core/widgets/review_layout.dart';
 import '../../data/models/models.dart';
+import '../../data/api/transfer_progress.dart';
+import '../../core/widgets/transfer_bar.dart';
 
 class SigningScreen extends StatefulWidget {
   const SigningScreen({
@@ -28,6 +30,7 @@ class _SigningScreenState extends State<SigningScreen> {
   bool _busy = true;
   String? _error;
   String? _saved;
+  TransferProgress? _downloadProgress;
   BuildResult? get _selected =>
       _builds.where((b) => b.buildId == _buildId).firstOrNull;
 
@@ -103,9 +106,16 @@ class _SigningScreenState extends State<SigningScreen> {
       _busy = true;
       _error = null;
       _saved = null;
+      _downloadProgress = null;
     });
     try {
-      final bytes = await _controller.verifiedDownload(widget.projectId, build);
+      final bytes = await _controller.verifiedDownload(
+        widget.projectId,
+        build,
+        onProgress: (p) {
+          if (mounted) setState(() => _downloadProgress = p);
+        },
+      );
       if (!mounted) return;
       final saved = await FilePicker.saveFile(
         fileName: 'noir-${widget.projectId}-${build.buildId}-signed.apk',
@@ -134,6 +144,13 @@ class _SigningScreenState extends State<SigningScreen> {
       error: _error,
       onRefresh: _refresh,
       children: [
+        if (_downloadProgress != null)
+          TransferBar(
+            progress: _downloadProgress!,
+            title: _downloadProgress!.fraction == 1
+                ? 'Received · verifying and saving'
+                : 'Downloading APK',
+          ),
         if (_builds.isEmpty && !_busy)
           const Section(
             title: 'NO SUCCESSFUL BUILD',

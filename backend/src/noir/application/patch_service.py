@@ -145,7 +145,7 @@ class PatchService:
         self.manifest_repo = FileManifestRepository()
 
     @locked_project
-    def store_patch(self, patch: PatchSet) -> PatchSet:
+    def store_patch(self, patch: PatchSet, *, preview: bool = False) -> PatchSet:
         """Store a new patch set."""
         project = self.project_repo.get(patch.project_id)
         if not project:
@@ -166,7 +166,7 @@ class PatchService:
             self.plan_repo.get_hash(patch.plan_id) or "",
             project.workspace_revision,
         )
-        if not plan_approval and patch.provenance == Provenance.AI_GENERATED:
+        if not preview and not plan_approval and patch.provenance == Provenance.AI_GENERATED:
             raise PlanServiceError("Plan must be approved before generating patches")
 
         workspace = ProjectWorkspace(patch.project_id, self.config)
@@ -189,7 +189,9 @@ class PatchService:
                 project_id=patch.project_id,
                 stage=WorkflowStage.GENERATING_PATCH,
                 severity=EventSeverity.INFO,
-                message=f"Patch generated: {patch.patch_id}",
+                message=(
+                    f"{'Unapproved preview' if preview else 'Patch'} generated: {patch.patch_id}"
+                ),
                 metadata={"patch_hash": patch.compute_hash()},
             )
         )

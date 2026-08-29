@@ -1,7 +1,7 @@
 # NOIR EC2 deployment
 
 This is deployment configuration for the existing backend, not a replacement engine.
-The Flutter application and core NOIR workflows are unchanged.
+The existing core tools remain in use; the app now also offers the queued three-step workflow.
 
 ## Connect from the NOIR app
 
@@ -42,7 +42,7 @@ not installed or enabled on this cloud server; download APKs to the phone for in
 Run on the server (or wrap in the SSH command below):
 
 ```sh
-sudo -u noir env NOIR_DATA_DIR=/var/lib/noir/data /opt/noir/venv/bin/noir users invite "Friend name"
+sudo -u noir env NOIR_DATA_DIR=/var/lib/noir/data /opt/noir/venv/bin/noir users invite "Friend name" --code-only
 sudo -u noir env NOIR_DATA_DIR=/var/lib/noir/data /opt/noir/venv/bin/noir users list
 ```
 
@@ -57,6 +57,23 @@ Invited workspaces get independent keys when the app first prepares signing; the
 and job streams/cancellation enforce ownership before accessing data. Upload idempotency
 keys are namespaced per user. Authentication codes and session tokens are stored hashed;
 the existing owner's bootstrap token remains encrypted by systemd as described below.
+
+## Three-step jobs
+
+`POST /v1/projects/{id}/workflow/prepare` queues plan and unapplied patch preparation.
+It requires `user_request`, `revision`, `allow_ai_upload: true` and an Idempotency-Key.
+No approval is recorded. `POST /v1/projects/{id}/workflow/finish` accepts the reviewed
+plan/patch IDs, their exact hashes, original revision and `confirm: true`. It queues
+approval/application, validation, rebuild and personal-key signing/verification.
+Both routes enforce workspace ownership. Existing advanced routes remain compatible.
+Check `/v1/jobs/{job_id}` and events; do not hold one HTTP request open for AI generation.
+Explicit finish retries reuse safe completed checkpoints. Interrupted jobs require review
+and an explicit retry, never automatic mutation replay.
+
+One worker serializes these tasks to fit the existing small VM. Heavy work can queue;
+this change does not claim to make Gemini or Apktool instantaneous. Preparation shares
+one static analysis between the two AI calls, and health capability probes are cached for
+60 seconds to avoid repeatedly launching tool/version processes on phone resume.
 
 ## SSH, status, logs, restart
 

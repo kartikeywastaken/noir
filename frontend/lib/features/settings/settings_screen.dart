@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/state/connection_controller.dart';
 import '../../core/widgets/noir_button.dart';
 import '../../core/widgets/review_layout.dart';
+import '../../core/widgets/noir_bottom_nav.dart';
 import '../../data/api/noir_api_client.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -53,6 +55,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) => Consumer<ConnectionController>(
     builder: (context, connection, _) => ReviewLayout(
       title: 'YOUR WORKSPACE',
+      bottomNavigationBar: NoirBottomNav(
+        currentIndex: 2,
+        onTap: (i) {
+          if (i == 0) context.go('/');
+          if (i == 1) context.go('/history');
+        },
+      ),
       busy: _busy,
       error: _error ?? connection.errorMessage,
       children: [
@@ -68,7 +77,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Your projects, builds and signing keys are private. NOIR reconnects automatically after activation.',
+                'Your APKs, build history and signing keys are private. NOIR reconnects automatically after activation.',
               ),
               if (connection.isConnected) ...[
                 const SizedBox(height: 8),
@@ -93,7 +102,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 TextField(
                   controller: _invite,
                   enabled: !_busy,
-                  obscureText: true,
+                  obscureText: false,
                   autocorrect: false,
                   enableSuggestions: false,
                   decoration: const InputDecoration(

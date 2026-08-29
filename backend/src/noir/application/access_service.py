@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -38,6 +39,26 @@ class AccessError(ValueError):
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def normalize_invite(code: str) -> str:
+    """Accept a raw code or copied CLI/JSON output, never alter its case."""
+    code = code.strip()
+    if code.startswith("{"):
+        try:
+            code = json.loads(code)["invite_code"]
+        except (ValueError, KeyError, TypeError):
+            raise AccessError("Paste the invitation code, not a user ID or bearer token") from None
+    elif "invite_code:" in code:
+        code = code.split("invite_code:", 1)[1].split("expires_at:", 1)[0]
+    if not isinstance(code, str):
+        raise AccessError("Invitation code must be text")
+    code = "".join(code.strip(" \t\r\n`\"'").split())
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", code):
+        raise AccessError(
+            "Copy the complete 43-character invite_code, not the user_id or invite_id"
+        )
+    return code
 
 
 class AccessService:
@@ -80,15 +101,23 @@ class AccessService:
             }
 
     def redeem(self, code: str) -> dict:
-        digest = hashlib.sha256(code.strip().encode()).hexdigest()
+        digest = hashlib.sha256(normalize_invite(code).encode()).hexdigest()
         raw_token = secrets.token_urlsafe(48)
         token_id = uuid4().hex[:16]
         now = _now()
         with get_session() as session:
             invite = session.query(InviteRow).filter(InviteRow.code_hash == digest).first()
             user = session.get(UserRow, invite.user_id) if invite else None
-            if invite is None or user is None or user.disabled:
-                raise AccessError("Invite is invalid, expired, revoked, or already used")
+            if invite is None:
+                raise AccessError("Code not recognized. Check that you copied the full invite_code")
+            if user is None or user.disabled or invite.revoked:
+                raise AccessError("This invitation was revoked. Ask the owner for access")
+            if invite.redeemed_at is not None:
+                raise AccessError(
+                    "This code was already used. Ask for a new code for the same workspace"
+                )
+            if invite.expires_at <= now:
+                raise AccessError("This invitation expired. Ask the owner for a new code")
             # Conditional update consumes the invitation exactly once, including
             # simultaneous requests. Token creation commits in the same transaction.
             result = session.execute(

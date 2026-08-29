@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -66,7 +68,22 @@ class ImportRequest(BaseModel):
 
 
 class InviteRedeemRequest(BaseModel):
-    code: str = Field(min_length=16, max_length=256)
+    code: str = Field(min_length=1, max_length=4096)
+
+
+class WorkflowPrepareRequest(BaseModel):
+    user_request: str = Field(min_length=1, max_length=16000)
+    allow_ai_upload: bool = False
+    revision: int = Field(ge=0)
+
+
+class WorkflowFinishRequest(BaseModel):
+    plan_id: str
+    patch_id: str
+    plan_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    patch_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    revision: int = Field(ge=0)
+    confirm: bool = False
 
 
 class PlanCreateRequest(BaseModel):
@@ -171,11 +188,19 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
 
     # ── Health ────────────────────────────────────────────────────
 
+    health_cache = {}
+    health_lock = threading.Lock()
+
     @app.get("/v1/health")
     def health():
         from noir.application.doctor import run_doctor
 
-        report = run_doctor(cfg)
+        # Doctor launches tool/version probes. Do not spawn several JVMs on every
+        # app resume/health poll; refresh capabilities at most once per minute.
+        with health_lock:
+            if time.monotonic() >= health_cache.get("expires", 0):
+                health_cache.update(report=run_doctor(cfg), expires=time.monotonic() + 60)
+            report = health_cache["report"]
         return {
             "status": "ok",
             "version": "0.1.0",
@@ -295,6 +320,48 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             await file.close()
 
     # ── Analysis ──────────────────────────────────────────────────
+
+    @app.post("/v1/projects/{project_id}/workflow/prepare", status_code=202)
+    def prepare_workflow(
+        project_id: str,
+        req: WorkflowPrepareRequest,
+        principal: Principal,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+    ):
+        if not req.allow_ai_upload:
+            raise HTTPException(400, "Consent is required to send APK context to Gemini")
+        try:
+            job = queue.submit(
+                "workflow_prepare",
+                project_id,
+                req.model_dump(),
+                f"{principal.user_id}:prepare:{idempotency_key}",
+            )
+            return job.model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.post("/v1/projects/{project_id}/workflow/finish", status_code=202)
+    def finish_workflow(
+        project_id: str,
+        req: WorkflowFinishRequest,
+        principal: Principal,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+    ):
+        from noir.application.workflow_service import check_finish
+
+        payload = {**req.model_dump(), "user_id": principal.user_id}
+        try:
+            check_finish(cfg, project_id, payload)
+            job = queue.submit(
+                "workflow_finish",
+                project_id,
+                payload,
+                f"{principal.user_id}:finish:{idempotency_key}",
+            )
+            return job.model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @app.get("/v1/projects/{project_id}/analysis", dependencies=[Depends(_verify_token)])
     def get_analysis(project_id: str, compact: bool = False):

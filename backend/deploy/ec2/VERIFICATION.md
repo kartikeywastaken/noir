@@ -2,6 +2,40 @@
 
 Endpoint: `https://noir-16-171-197-228.sslip.io`
 
+## Three-step workflow update — 2026-08-29
+
+- Backend source/database backup: `/var/backups/noir/20260828T201717Z`. The updated
+  service is healthy; existing users, invitations, signing keys and builds were preserved.
+- Database inspection showed the two reported invitations were unused, unrevoked and
+  unexpired; redeeming a different invitation had not invalidated them. A live follow-up
+  activated three distinct temporary invitations independently. Those test users were
+  disabled afterward without touching existing users or invitations.
+- A real cloud workflow imported the NOIR-owned fixture, prepared a Gemini plan and exact
+  patch preview, survived an intentional client disconnect, and proved the preview could
+  not apply before explicit combined approval. Cross-workspace reads/approval were denied.
+- After approval, validation/rebuild/personal-key signing/signature verification/download
+  and private History passed. Independent `aapt2` inspection found label `NOIR Three Step`,
+  package `com.noir.testfixture`; independent `apksigner` verification passed v1/v2/v3.
+- Measured fixture timings: import 2.59 s; queued preparation submission 0.30 s;
+  AI plan/patch preparation 26.81 s; apply/validate/rebuild/sign/report 4.64 s.
+- Backend: 153 passed, 1 skipped with real Android E2E enabled; normal suite 150 passed,
+  4 skipped. Flutter: 33 passed, 1 opt-in integration test skipped; analysis clean.
+- Transfer tests cover exact upload bytes/remaining, known and unknown download lengths,
+  truncated downloads, and account changes during download. Workflow tests cover no hidden
+  preview approval, exact-hash confirmation, foreign-workspace denial, cancellation before
+  execution and signing retry without rebuilding or applying a patch twice.
+- Android app `0.3.0+3` passed release build, release lint, 16 KiB-aware zip alignment and
+  independent signature inspection. APK SHA-256:
+  `02ab210cf08dff41e2da94ddbf6c45f1ae044470d89e443b8e541dce32f7aaed`.
+
+Observed slowness on the previously used large APK was real tool work: about 29 seconds
+for decode/analysis and roughly 46–56 seconds for rebuild. A recent Gemini call also
+returned incomplete/invalid JSON and required its configured retry. One worker deliberately
+serializes memory-heavy work on the 4 GiB VM, so concurrent operations can queue. This update
+removes duplicate analysis inside three-step preparation, caches expensive health probes,
+makes AI work persistent rather than a fragile long phone request, and reports build failures
+as failures. It cannot eliminate Gemini latency, model-format failures or Apktool build time.
+
 ## Private-workspace update
 
 - The deployed API now enforces individual ownership for projects, files, plans,

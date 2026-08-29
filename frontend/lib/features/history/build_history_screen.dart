@@ -8,6 +8,8 @@ import '../../core/state/signing_controller.dart';
 import '../../core/widgets/noir_bottom_nav.dart';
 import '../../core/widgets/review_layout.dart';
 import '../../data/models/models.dart';
+import '../../data/api/transfer_progress.dart';
+import '../../core/widgets/transfer_bar.dart';
 
 class BuildHistoryScreen extends StatefulWidget {
   const BuildHistoryScreen({super.key});
@@ -22,6 +24,7 @@ class _BuildHistoryScreenState extends State<BuildHistoryScreen> {
   bool _busy = false;
   String? _error;
   String? _saved;
+  TransferProgress? _downloadProgress;
   Timer? _timer;
 
   @override
@@ -101,9 +104,16 @@ class _BuildHistoryScreenState extends State<BuildHistoryScreen> {
       _busy = true;
       _error = null;
       _saved = null;
+      _downloadProgress = null;
     });
     try {
-      final bytes = await signing.verifiedDownload(build.projectId, build);
+      final bytes = await signing.verifiedDownload(
+        build.projectId,
+        build,
+        onProgress: (p) {
+          if (mounted) setState(() => _downloadProgress = p);
+        },
+      );
       if (!mounted) return;
       final saved = await FilePicker.saveFile(
         fileName: 'noir-${build.projectId}-${build.buildId}-signed.apk',
@@ -136,12 +146,10 @@ class _BuildHistoryScreenState extends State<BuildHistoryScreen> {
       Wrap(
         spacing: 8,
         children: [
-          if (job.resultData['operation'] != 'import' ||
-              job.state == 'succeeded')
-            TextButton(
-              onPressed: () => context.push('/project/${job.projectId}'),
-              child: const Text('Open workspace'),
-            ),
+          TextButton(
+            onPressed: () => context.go('/workflow/${job.projectId}'),
+            child: const Text('Resume'),
+          ),
           if (!job.isTerminal)
             TextButton(
               onPressed: _busy ? null : () => _cancel(job),
@@ -193,11 +201,13 @@ class _BuildHistoryScreenState extends State<BuildHistoryScreen> {
                   onPressed: () => context.push(
                     '/project/${build.projectId}/sign?build=${Uri.encodeQueryComponent(build.buildId)}',
                   ),
-                  child: Text(signed ? 'Build details' : 'Signing details'),
+                  child: Text(
+                    signed ? 'Advanced build details' : 'Advanced signing',
+                  ),
                 ),
               TextButton(
-                onPressed: () => context.push('/project/${build.projectId}'),
-                child: const Text('Open workspace'),
+                onPressed: () => context.go('/workflow/${build.projectId}'),
+                child: const Text('Resume workflow'),
               ),
               TextButton(
                 onPressed: () =>
@@ -219,6 +229,7 @@ class _BuildHistoryScreenState extends State<BuildHistoryScreen> {
           (job) =>
               job.isTerminal &&
               (job.resultData['operation'] == 'import' ||
+                  job.resultData['operation'] == 'workflow_prepare' ||
                   job.state != 'succeeded'),
         )
         .toList();
@@ -228,17 +239,24 @@ class _BuildHistoryScreenState extends State<BuildHistoryScreen> {
       error: _error,
       onRefresh: () => _load(),
       bottomNavigationBar: NoirBottomNav(
-        currentIndex: 2,
+        currentIndex: 1,
         onTap: (index) {
-          if (index == 0 || index == 1) context.go('/');
-          if (index == 3) context.push('/settings');
+          if (index == 0) context.go('/');
+          if (index == 2) context.go('/settings');
         },
       ),
       children: [
+        if (_downloadProgress != null)
+          TransferBar(
+            progress: _downloadProgress!,
+            title: _downloadProgress!.fraction == 1
+                ? 'Received · verifying and saving'
+                : 'Downloading APK',
+          ),
         const Section(
           title: 'YOUR PREVIOUS BUILDS',
           child: Text(
-            'Only your workspace is shown. Download signed APKs again, reopen a project, or review its audit report.',
+            'Only your private workspace is shown. Download signed APKs again, resume a workflow, or review its audit report.',
           ),
         ),
         if (active.isNotEmpty)

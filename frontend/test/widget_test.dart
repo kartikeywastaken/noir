@@ -66,7 +66,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('DECODE & MODIFY'), findsOneWidget);
+      expect(find.text('YOUR APK. YOUR CHANGES.'), findsOneWidget);
+      expect(find.text('PROJECTS'), findsNothing);
       expect(find.bySemanticsLabel('NOIR Phantom'), findsOneWidget);
       final select = tester.widget<NoirPrimaryButton>(
         find.widgetWithText(NoirPrimaryButton, 'SELECT APK'),

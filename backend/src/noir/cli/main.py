@@ -1005,12 +1005,17 @@ def users_invite(
         None, "--user", help="Invite another device to an existing workspace"
     ),
     hours: int = typer.Option(168, min=1, max=720, help="One-time invitation expiry"),
+    code_only: bool = typer.Option(False, "--code-only", help="Print only the shareable code"),
 ):
     """Create one private workspace invite; share the code only with its recipient."""
     _init()
     from noir.application.access_service import AccessService
 
-    output(AccessService().invite(name, user_id=user_id, hours=hours))
+    invitation = AccessService().invite(name, user_id=user_id, hours=hours)
+    if code_only:
+        typer.echo(invitation["invite_code"])
+    else:
+        output(invitation)
 
 
 @users_app.command("list")

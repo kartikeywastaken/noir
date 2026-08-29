@@ -60,8 +60,13 @@ class TaskQueue:
         self.config = config
         self.stop_event = threading.Event()
         self.thread = None
+        self.submit_lock = threading.Lock()
 
     def submit(self, operation, project_id, payload, idempotency_key=None):
+        with self.submit_lock:
+            return self._submit(operation, project_id, payload, idempotency_key)
+
+    def _submit(self, operation, project_id, payload, idempotency_key=None):
         repo = JobRepository()
         tasks = repo.list_all()
         if idempotency_key:
@@ -70,11 +75,23 @@ class TaskQueue:
                     if task.project_id != project_id or task.result_data.get("payload") != payload:
                         raise ValueError("Idempotency key reused with different request")
                     return task
+        if operation.startswith("workflow_"):
+            for task in tasks:
+                if (
+                    task.project_id == project_id
+                    and task.state in (JobState.QUEUED, JobState.RUNNING)
+                    and task.result_data.get("operation")
+                ):
+                    raise ValueError(
+                        "This APK already has an active operation. Resume it from History"
+                    )
         if sum(task.state == JobState.QUEUED for task in tasks) >= 32:
             raise ValueError("Job queue is full")
         stage = (
             WorkflowStage.VALIDATING_INPUT if operation == "import" else WorkflowStage.REBUILDING
         )
+        if operation == "workflow_prepare":
+            stage = WorkflowStage.PLANNING
         job = JobInfo(
             project_id=project_id,
             stage=stage,
@@ -154,6 +171,15 @@ class TaskQueue:
                     if not project or project.workspace_revision != payload["revision"]:
                         raise ValueError("Queued build references a stale revision")
                     result = BuildService(self.config).build(job.project_id).model_dump(mode="json")
+                    if not result["success"]:
+                        raise ValueError(result.get("error_message") or "APK rebuild failed")
+                elif job.result_data["operation"] in {"workflow_prepare", "workflow_finish"}:
+                    from noir.application.workflow_service import finish, prepare
+
+                    action = (
+                        prepare if job.result_data["operation"] == "workflow_prepare" else finish
+                    )
+                    result = action(self.config, job)
                 else:
                     raise ValueError("Unsupported queued operation")
             job.result_data["result"] = result
