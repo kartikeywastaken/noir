@@ -108,9 +108,11 @@ class NoirConfig(BaseSettings):
     max_expanded_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
     max_compression_ratio: float = 100.0
     max_upload_size: int = 500 * 1024 * 1024  # 500 MB
-    upload_chunk_size: int = 256 * 1024  # 256 KiB, acknowledged independently
-    max_upload_chunk_size: int = 1024 * 1024  # hard server-side request cap
+    upload_chunk_size: int = 8 * 1024 * 1024  # 8 MiB, acknowledged independently
+    max_upload_chunk_size: int = 16 * 1024 * 1024  # hard server-side request cap
     upload_session_ttl: int = 24 * 60 * 60
+    upload_fsync_interval_ms: int = 75  # max hold time for group-commit window
+    upload_fsync_batch_max: int = 8  # max chunks per commit batch
 
     @field_validator("android_sdk_dir", mode="before")
     @classmethod

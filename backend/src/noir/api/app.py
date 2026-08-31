@@ -26,6 +26,11 @@ from noir.infrastructure.database.repositories import TokenRepository
 
 # ── Auth ─────────────────────────────────────────────────────────────
 
+_token_cache: dict[str, tuple[ApiToken, float]] = {}
+_token_cache_lock = threading.Lock()
+_TOKEN_CACHE_TTL = 5.0  # seconds — revocation takes effect within this window
+_TOKEN_CACHE_MAX = 128
+
 
 def _verify_token(
     request: Request, authorization: str | None = Header(None, alias="Authorization")
@@ -39,8 +44,22 @@ def _verify_token(
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     token = authorization[7:]
     token_hash = hashlib.sha256(token.encode()).hexdigest()
-    repo = TokenRepository()
-    found = repo.find_by_hash(token_hash)
+    now = time.monotonic()
+    found: ApiToken | None = None
+    with _token_cache_lock:
+        cached = _token_cache.get(token_hash)
+        if cached and now - cached[1] < _TOKEN_CACHE_TTL:
+            found = cached[0]
+    if found is None:
+        repo = TokenRepository()
+        found = repo.find_by_hash(token_hash)
+        if found:
+            with _token_cache_lock:
+                _token_cache[token_hash] = (found, now)
+                # Evict oldest entries if cache exceeds max size
+                if len(_token_cache) > _TOKEN_CACHE_MAX:
+                    oldest_key = min(_token_cache, key=lambda k: _token_cache[k][1])
+                    del _token_cache[oldest_key]
     if not found:
         raise HTTPException(status_code=401, detail="Invalid API token")
     access = AccessService()
@@ -239,6 +258,9 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     @app.post("/v1/auth/logout")
     def logout(principal: Principal):
         AccessService().logout(principal.token_id)
+        # Evict from token cache so revocation takes effect immediately
+        with _token_cache_lock:
+            _token_cache.pop(principal.token_hash, None)
         return {"signed_out": True}
 
     @app.get("/v1/history")
