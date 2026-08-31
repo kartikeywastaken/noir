@@ -11,7 +11,7 @@ with the APK. The following advanced settings are for the existing owner workspa
 
 - Backend URL: `https://noir-16-171-197-228.sslip.io`
 - Bearer token: the `bearer_token` value in the private local file
-  `/Users/kartik/.noir/deployments/ec2-stockholm/connection.json`.
+  `~/.noir/deployments/ec2-stockholm/connection.json`.
 - Signing profile: `cloud-test`.
 - Tap **Save & Test Connection**. No laptop server, ADB reverse, or tunnel is needed.
 
@@ -25,8 +25,10 @@ Gemini 3.7 can be reconsidered after a successful live probe.
 
 ## What runs on the instance
 
-- Ubuntu 24.04, Python 3.12 venv, Java 21.
+- Ubuntu 24.04, Python 3.12 venv, Java 21, and .NET 8.
 - The same Apktool 3.0.3 JAR used on the laptop, checked against SHA-256.
+- The bundled dnlib CIL companion is built from `tools/noir-cil-tool` during deployment.
+- LIEF, Capstone, and Keystone provide bounded ELF inspection/disassembly/assembly.
 - Official Android SDK build-tools 36.0.0 and platform android-36.
 - One NOIR worker under the unprivileged `noir` account.
 - Caddy HTTPS with automatic certificate renewal and HTTP-to-HTTPS redirection.
@@ -85,7 +87,7 @@ On the Mac:
 
 ```sh
 ssh -o IdentitiesOnly=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-  -i /Users/kartik/Desktop/noir-server.pem ubuntu@16.171.197.228
+  -i ~/.ssh/noir-server.pem ubuntu@16.171.197.228
 ```
 
 On the instance:
@@ -153,13 +155,24 @@ Files in this directory:
 - `noir.service`, `backend.env`, `Caddyfile`: service and proxy configuration.
 - `smoke.py`: real HTTPS API workflow against a generated, owned test APK, never the VPN APK.
 
+Deployment archives now contain both top-level `backend/` and `tools/` directories so the
+bundled CIL tool is reproducible on the server. For an upgrade, create the private archive
+from the repository root with:
+
+```sh
+git archive --format=tar.gz --output=backend-private.tar.gz HEAD backend tools
+```
+
+This intentionally archives committed source only, excluding local virtual environments,
+API keys, generated build output, and ignored test data.
+
 Local test output and connection details are kept outside Git in
-`/Users/kartik/.noir/deployments/ec2-stockholm/`. The `plan`, `patch`, and `finish` smoke
+`~/.noir/deployments/ec2-stockholm/`. The `plan`, `patch`, and `finish` smoke
 stages create a project and make live Gemini calls; review the saved plan and diff between
 stages. The `check` stage is read-only:
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir
+cd noir
 backend/.venv/bin/python backend/deploy/ec2/smoke.py check
 ```
 

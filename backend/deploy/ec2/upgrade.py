@@ -39,6 +39,12 @@ def main() -> None:
         shutil.copytree(
             "/opt/noir/backend", backup / "backend", ignore=shutil.ignore_patterns("__pycache__")
         )
+        if Path("/opt/noir/tools").is_dir():
+            shutil.copytree(
+                "/opt/noir/tools",
+                backup / "tools",
+                ignore=shutil.ignore_patterns("bin", "obj"),
+            )
         shutil.copy2("/opt/noir/deployment/service.py", backup / "service.py")
         shutil.copy2("/etc/noir/backend.env", backup / "backend.env")
         shutil.copy2("/etc/systemd/system/noir.service", backup / "noir.service")
@@ -46,13 +52,38 @@ def main() -> None:
             # Only extract this application; refuse symlinks and path traversal.
             for member in archive.getmembers():
                 if (
-                    (member.name != "backend" and not member.name.startswith("backend/"))
+                    (
+                        member.name not in {"backend", "tools"}
+                        and not member.name.startswith(("backend/", "tools/"))
+                    )
                     or ".." in Path(member.name).parts
                     or member.issym()
                     or member.islnk()
                 ):
                     raise RuntimeError("Unexpected deployment archive member")
             archive.extractall("/opt/noir", filter="data")
+        if not shutil.which("dotnet"):
+            subprocess.run(
+                [
+                    "apt-get",
+                    "-o",
+                    "DPkg::Lock::Timeout=180",
+                    "install",
+                    "-y",
+                    "dotnet-sdk-8.0",
+                ],
+                check=True,
+            )
+        subprocess.run(
+            [
+                "dotnet",
+                "build",
+                "/opt/noir/tools/noir-cil-tool/noir-cil-tool.csproj",
+                "--configuration",
+                "Release",
+            ],
+            check=True,
+        )
         for retired in (
             "src/noir/infrastructure/ai/errors.py",
             "src/noir/infrastructure/ai/openai.py",
@@ -90,6 +121,8 @@ def main() -> None:
             "NOIR_AI_PROVIDER",
             "NOIR_AI_MODEL",
             "NOIR_AI_FALLBACK_MODEL",
+            "NOIR_DOTNET_TOOL_PATH",
+            "NOIR_CIL_TOOL_PATH",
         ):
             current_environment[name] = desired_environment[name]
         Path("/etc/noir/backend.env").write_text(

@@ -51,7 +51,7 @@ def main() -> None:
             "signing_profile": "cloud-test",
             "ssh_user": "ubuntu",
             "ssh_host": "16.171.197.228",
-            "ssh_key": "/Users/kartik/Desktop/noir-server.pem",
+            "ssh_key": str(Path.home() / "Desktop" / "noir-server.pem"),
             "note": (
                 "Owner workspace access only. Keep this token private; "
                 "invite other users separately. "

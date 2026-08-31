@@ -47,7 +47,7 @@ def admin(*arguments: str) -> dict:
             "-o",
             "ConnectTimeout=15",
             "-i",
-            "/Users/kartik/Desktop/noir-server.pem",
+            str(Path.home() / "Desktop" / "noir-server.pem"),
             "ubuntu@16.171.197.228",
             remote,
         ],

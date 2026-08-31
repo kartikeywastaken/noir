@@ -58,6 +58,18 @@ class NoirConfig(BaseSettings):
     aapt2_path: str = ""
     adb_path: str = ""
 
+    # ── Binary patch helpers ──────────────────────────────────────────
+    dotnet_tool_path: str = "dotnet"
+    noir_cil_tool_path: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("NOIR_CIL_TOOL_PATH", "noir_cil_tool_path"),
+    )
+    max_assembly_size: int = 15 * 1024 * 1024
+    max_native_library_size: int = 128 * 1024 * 1024
+    max_il2cpp_metadata_size: int = 64 * 1024 * 1024
+    cil_patch_timeout: int = 60
+    native_patch_timeout: int = 60
+
     # ── AI ────────────────────────────────────────────────────────────
     ai_provider: str = "gemini"
     ai_model: str = "gemini-3.6-flash"
@@ -143,6 +155,7 @@ class NoirConfig(BaseSettings):
             "apksigner": self.apksigner_path,
             "aapt2": self.aapt2_path,
             "adb": self.adb_path,
+            "dotnet": self.dotnet_tool_path,
         }
         if tool in explicit and explicit[tool]:
             return explicit[tool]

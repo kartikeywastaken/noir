@@ -24,6 +24,7 @@ from noir.infrastructure.database.repositories import (
     ValidationRepository,
 )
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace
+from noir.patches.engine import BINARY_OPERATIONS
 
 
 class AuditReporter:
@@ -76,6 +77,9 @@ class AuditReporter:
                 "permissions": analysis.permissions if analysis else [],
                 "components_count": len(analysis.components) if analysis else 0,
                 "smali_classes_count": len(analysis.smali_classes) if analysis else 0,
+                "runtime": analysis.runtime if analysis else "dalvik",
+                "managed_assemblies": analysis.managed_assemblies if analysis else [],
+                "native_abis": analysis.native_abis if analysis else [],
             },
             "plans": [
                 {
@@ -89,6 +93,9 @@ class AuditReporter:
                     "component_changes": p.component_changes,
                     "network_destinations": p.network_destinations,
                     "risks": p.risks,
+                    "native_runtime": p.native_runtime,
+                    "binary_targets": p.binary_targets,
+                    "binary_risks": p.binary_risks,
                     "plan_hash": p.compute_hash(),
                 }
                 for p in plans
@@ -100,6 +107,7 @@ class AuditReporter:
                     "provenance": p.provenance.value,
                     "operations_count": len(p.operations),
                     "patch_hash": p.compute_hash(),
+                    "binary_operations": self._binary_operations(project_id, p),
                 }
                 for p in patches
             ],
@@ -170,6 +178,111 @@ class AuditReporter:
 
         return report
 
+    def _binary_operations(self, project_id: str, patch) -> list[dict[str, Any]]:
+        workspace = ProjectWorkspace(project_id, self.config)
+        journal_path = workspace.changes_dir / "journal" / f"journal_{patch.patch_id}.json"
+        journal = {}
+        if journal_path.is_file():
+            try:
+                journal = json.loads(journal_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                journal = {}
+        entries = {
+            entry.get("path"): entry
+            for entry in journal.get("files", [])
+            if isinstance(entry, dict)
+        }
+        result = []
+        for operation in patch.operations:
+            if operation.operation not in BINARY_OPERATIONS:
+                continue
+            entry = entries.get(operation.relative_path, {})
+            offset = operation.native_offset
+            length = operation.native_length
+            abi = operation.native_abi
+            correlation_error = None
+            if operation.operation.value.startswith("il2cpp_") and (
+                offset is None or length is None or abi is None
+            ):
+                try:
+                    from noir.infrastructure.il2cpp.metadata import Il2CppMetadata
+
+                    metadata = sorted(workspace.decoded_dir.rglob("global-metadata.dat"))
+                    target = workspace.safe_path(operation.relative_path)
+                    reference = Il2CppMetadata(metadata[0], target).find_method(
+                        operation.il2cpp_type_full_name or "",
+                        operation.il2cpp_method_signature or "",
+                    )
+                    offset = reference.file_offset if offset is None else offset
+                    length = reference.size if length is None else length
+                    abi = reference.abi if abi is None else abi
+                except Exception as exc:
+                    correlation_error = (
+                        "Unable to reconstruct the approved IL2CPP range: "
+                        f"{exc}"
+                    )
+            record = {
+                "operation": operation.operation.value,
+                "target": operation.relative_path,
+                "abi": abi,
+                "skipped_abis": operation.native_skipped_abis,
+                "skip_reason": operation.native_skip_reason,
+                "affected_scope": operation.affected_scope,
+                "whole_file_preimage_hash": operation.expected_preimage_hash,
+                "whole_file_postimage_hash": entry.get("after_hash"),
+                "method_il_preimage_hash": operation.expected_method_il_hash,
+                "native_range_preimage_hash": (
+                    operation.expected_native_bytes_hash
+                    or operation.expected_function_bytes_hash
+                ),
+                "offset": offset,
+                "length": length,
+                "correlation_error": correlation_error,
+                "before_disassembly": [],
+                "after_disassembly": [],
+            }
+            if offset is not None and length:
+                self._add_disassembly_audit(
+                    workspace,
+                    entry,
+                    operation.relative_path,
+                    offset,
+                    length,
+                    abi,
+                    record,
+                )
+            result.append(record)
+        return result
+
+    @staticmethod
+    def _add_disassembly_audit(
+        workspace, entry, relative_path, offset, length, abi, record
+    ) -> None:
+        try:
+            from noir.infrastructure.native.adapter import disassemble_range, range_hash
+
+            backup = workspace.changes_dir / "journal" / entry["backup"]
+            current = (
+                workspace.changes_dir / "journal" / entry["after_backup"]
+                if entry.get("after_backup")
+                else workspace.safe_path(relative_path)
+            )
+            record["before_disassembly"] = disassemble_range(
+                backup,
+                offset,
+                length,
+                abi=abi,
+            )
+            record["after_disassembly"] = disassemble_range(
+                current,
+                offset,
+                length,
+                abi=abi,
+            )
+            record["native_range_postimage_hash"] = range_hash(current, offset, length)
+        except Exception as exc:
+            record["disassembly_note"] = f"Unavailable: {exc}"
+
     def generate_json(self, project_id: str) -> str:
         """Generate JSON audit report."""
         data = self.generate(project_id)
@@ -200,6 +313,7 @@ class AuditReporter:
         lines.append(f"| Version | {inp['version_name']} ({inp['version_code']}) |")
         lines.append(f"| Min SDK | {inp['min_sdk']} |")
         lines.append(f"| Target SDK | {inp['target_sdk']} |")
+        lines.append(f"| Runtime | {inp['runtime']} |")
         authorized = "Acknowledged" if proj["authorization_acknowledged"] else "Not acknowledged"
         lines.append(f"| Authorization | {authorized} |")
         lines.append("")
@@ -227,7 +341,33 @@ class AuditReporter:
                     )
                 if plan["risks"]:
                     lines.append(f"- **Risks:** {', '.join(plan['risks'])}")
+                if plan["binary_targets"]:
+                    lines.append(f"- **Binary targets:** {', '.join(plan['binary_targets'])}")
+                if plan["binary_risks"]:
+                    lines.append(f"- **Binary risks:** {', '.join(plan['binary_risks'])}")
                 lines.append("")
+
+        binary_operations = [
+            operation
+            for patch in data["patches"]
+            for operation in patch.get("binary_operations", [])
+        ]
+        if binary_operations:
+            lines.extend(["## Binary Patches", ""])
+            for operation in binary_operations:
+                lines.append(
+                    f"- `{operation['operation']}` → `{operation['target']}`"
+                    + (f" ({operation['abi']})" if operation.get("abi") else "")
+                )
+                lines.append(
+                    f"  - Preimage: `{operation.get('whole_file_preimage_hash') or 'N/A'}`"
+                )
+                lines.append(
+                    f"  - Postimage: `{operation.get('whole_file_postimage_hash') or 'N/A'}`"
+                )
+                if operation.get("before_disassembly"):
+                    lines.append("  - Instruction diff recorded in the JSON audit report")
+            lines.append("")
 
         if data["manual_sessions"]:
             lines.extend(["## Manual Edits", ""])

@@ -6,7 +6,7 @@ export NEEDRESTART_MODE=a
 apt-get -o DPkg::Lock::Timeout=180 update
 apt-get -o DPkg::Lock::Timeout=180 install -y --no-install-recommends \
   python3.12-venv openjdk-21-jdk-headless curl unzip zip git ca-certificates \
-  gnupg debian-keyring debian-archive-keyring apt-transport-https
+  gnupg debian-keyring debian-archive-keyring apt-transport-https dotnet-sdk-8.0
 
 if ! id noir >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/noir --shell /usr/sbin/nologin noir
@@ -42,6 +42,8 @@ install -m 644 /home/ubuntu/noir-deploy/apktool_3.0.3.jar /opt/noir/tools/apktoo
 cd /home/ubuntu/noir-deploy
 sha256sum -c apktool.sha256
 tar -xzf backend.tar.gz -C /opt/noir
+dotnet build /opt/noir/tools/noir-cil-tool/noir-cil-tool.csproj \
+  --configuration Release
 python3.12 -m venv /opt/noir/venv
 /opt/noir/venv/bin/python -m pip install --disable-pip-version-check --upgrade pip
 /opt/noir/venv/bin/python -m pip install --disable-pip-version-check -e '/opt/noir/backend[dev]'

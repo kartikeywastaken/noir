@@ -49,6 +49,14 @@ class PatchOperationType(StrEnum):
     XML_RESOURCE_REMOVE = "xml_resource_remove"
     SMALI_REPLACE_METHOD = "smali_replace_method"
     SMALI_INSERT_AT_ANCHOR = "smali_insert_at_anchor"
+    CIL_REPLACE_METHOD_BODY = "cil_replace_method_body"
+    CIL_INSERT_METHOD = "cil_insert_method"
+    CIL_REPLACE_FIELD_INIT = "cil_replace_field_init"
+    IL2CPP_FORCE_RETURN = "il2cpp_force_return"
+    IL2CPP_NOP_RANGE = "il2cpp_nop_range"
+    NATIVE_BYTE_PATCH = "native_byte_patch"
+    NATIVE_NOP_RANGE = "native_nop_range"
+    NATIVE_BRANCH_REDIRECT = "native_branch_redirect"
 
 
 class Provenance(StrEnum):

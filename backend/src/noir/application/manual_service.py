@@ -26,7 +26,7 @@ from noir.infrastructure.database.repositories import (
     ManualSessionRepository,
     ProjectRepository,
 )
-from noir.infrastructure.filesystem.workspace import ProjectWorkspace
+from noir.infrastructure.filesystem.workspace import ProjectWorkspace, is_binary_file
 from noir.security.locking import locked_project
 
 
@@ -118,6 +118,27 @@ class ManualService:
                 "message": "No changes detected in workspace.",
             }
 
+        baseline_by_path = {entry.relative_path: entry for entry in baseline}
+        unsupported = []
+        for relative_path in detected:
+            current = workspace.safe_path(relative_path)
+            previous = baseline_by_path.get(relative_path)
+            is_binary = (
+                is_binary_file(current)
+                if current.is_file()
+                else bool(previous and previous.is_binary)
+            )
+            oversized = current.is_file() and current.stat().st_size > 1_000_000
+            if is_binary or oversized:
+                unsupported.append(relative_path)
+        if unsupported:
+            raise ManualEditError(
+                "Manual sessions cannot record binary or >1 MB file mutations. "
+                "Use an approved structured CIL, IL2CPP, or native patch for supported "
+                "code binaries. Unsupported paths: "
+                + ", ".join(unsupported[:10])
+            )
+
         # Advance workspace revision
         new_revision = project.workspace_revision + 1
         project.workspace_revision = new_revision
@@ -195,6 +216,16 @@ class ManualService:
             raise ManualEditError(f"Source file not found: {source_path}")
         if not source.is_file():
             raise ManualEditError(f"Source is not a regular file: {source_path}")
+        if source.stat().st_size > 1_000_000:
+            raise ManualEditError(
+                "Manual replacement retains the 1 MB text-file ceiling. "
+                "Supported assemblies and ELF libraries require an approved structured patch."
+            )
+        if is_binary_file(source) or (target.is_file() and is_binary_file(target)):
+            raise ManualEditError(
+                "Manual binary replacement is unsupported. Use an approved CIL, IL2CPP, "
+                "or native PatchOperation so hashes, validation, and audit evidence are enforced."
+            )
 
         # Copy file
         target.parent.mkdir(parents=True, exist_ok=True)

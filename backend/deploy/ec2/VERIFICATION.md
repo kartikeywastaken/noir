@@ -69,7 +69,7 @@ as failures. It cannot eliminate Gemini latency, model-format failures or Apktoo
   Server upgrade log: `/var/log/noir-private-upgrade.log`.
   Server test log: `/var/log/noir-private-tests.log`.
 - Private local evidence: `private-workspaces-verification.json` and the two signed
-  fixture APKs under `/Users/kartik/.noir/deployments/ec2-stockholm/`.
+  fixture APKs under `~/.noir/deployments/ec2-stockholm/`.
   `owner-invite.json` in that directory is a mode-0600, one-time invitation for the
   existing owner workspace; do not share it with other users.
 - The final service restart preserved the owner's identity, private History and
@@ -121,7 +121,7 @@ IP-based hostname must be updated if the EC2 public IP changes.
   `d44d527737f74cbf0ffd4150edb1c005b18f67664ed7de7275dcefceed63211c`
 - Signing certificate SHA-256:
   `9835cd012ddc9c7f1330294b9852b0333ff132fe657ad77f196ccc578b799275`
-- Local evidence directory: `/Users/kartik/.noir/deployments/ec2-stockholm/`.
+- Local evidence directory: `~/.noir/deployments/ec2-stockholm/`.
   Contains the private connection file, saved plan/diff, live workflow JSON, SSE event logs,
   audit report, signed APK and re-decoded verification output.
 - Server tests: `/var/log/noir-tests.log`.

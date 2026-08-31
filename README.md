@@ -6,6 +6,10 @@ Flutter Android/macOS client for the existing NOIR Python backend. The selected 
 
 The deployed EC2 backend runs FastAPI, AI planning/patching, Apktool, validation, rebuilds and signing. The phone runs the Flutter client. **This is not an on-device Python/Apktool port.** The normal workflow combines exact plan/patch approval and signing consent into one review action. Advanced tools retain their separate approval controls.
 
+The backend also supports bounded Mono CIL, IL2CPP, and native ELF operations. Their
+exact capabilities and refusal boundaries are documented in
+[`backend/docs/binary-support.md`](backend/docs/binary-support.md).
+
 ## Three-step workflow (0.4.0)
 
 1. **App:** on Android, choose a visible installed launcher app or an authorized APK file.
@@ -45,7 +49,7 @@ the public server URL, not a bearer token or Gemini key.
 The owner creates each invitation through SSH:
 
 ```sh
-ssh -o IdentitiesOnly=yes -i /Users/kartik/Desktop/noir-server.pem ubuntu@16.171.197.228 \
+ssh -o IdentitiesOnly=yes -i ~/.ssh/noir-server.pem ubuntu@16.171.197.228 \
   'sudo -u noir env NOIR_DATA_DIR=/var/lib/noir/data /opt/noir/venv/bin/noir users invite "Friend name" --code-only'
 ```
 
@@ -76,7 +80,7 @@ update the previously installed NOIR test app without erasing its saved session.
 not an app-store release; use a private production signing identity before wider distribution.
 
 ```sh
-adb -d install -r /Users/kartik/Documents/ChatGPT/noir/frontend/output/noir-private-beta.apk
+adb -d install -r frontend/output/noir-private-beta.apk
 ```
 
 No ADB reverse, laptop backend, or custom URL is required for cloud use. The current
@@ -88,7 +92,7 @@ Build-time origin override: `flutter build apk --release --dart-define=NOIR_BACK
 In terminal 1:
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir/backend
+cd noir/backend
 source .venv/bin/activate
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 export PATH="$JAVA_HOME/bin:$PATH"
@@ -100,7 +104,7 @@ If an older server is already running on 8787, stop it in its terminal first and
 Generate a NOIR bearer token once in another terminal:
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir/backend
+cd noir/backend
 source .venv/bin/activate
 noir api token
 ```
@@ -128,7 +132,7 @@ model, so provider failures are returned directly instead of switching models.
 Enable USB debugging and authorize the laptop on the phone. With one physical Android device attached:
 
 ```sh
-adb -d install -r /Users/kartik/Documents/ChatGPT/noir/frontend/output/noir-debug.apk
+adb -d install -r frontend/output/noir-debug.apk
 adb -d reverse tcp:8787 tcp:8787
 ```
 
@@ -139,7 +143,7 @@ Use `http://127.0.0.1:8787` in the app and tap **Save & test connection**. Keep 
 Build and launch from terminal 2:
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir/frontend
+cd noir/frontend
 export PATH="/opt/homebrew/share/flutter/bin:$PATH"
 flutter pub get
 flutter devices
@@ -149,7 +153,7 @@ flutter run -d YOUR_ANDROID_DEVICE_ID
 Or build an installable development APK:
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir/frontend
+cd noir/frontend
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 flutter build apk --debug
 adb -d install -r build/app/outputs/flutter-apk/app-debug.apk
@@ -166,7 +170,7 @@ The Android build uses the dependency lockfile. Secure storage 10.3.1 is selecte
 A full Xcode installation and its command-line tool selection are required. Install CocoaPods if Flutter's plugin build requests it. This machine currently has only an incomplete Xcode setup; use the terminal tests below until it is configured.
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir/frontend
+cd noir/frontend
 export PATH="/opt/homebrew/share/flutter/bin:$PATH"
 flutter doctor -v
 flutter run -d macos
@@ -211,7 +215,7 @@ or using a separate test device/profile, which also removes access to the origin
 ## Tests without a phone
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir/frontend
+cd noir/frontend
 export PATH="/opt/homebrew/share/flutter/bin:$PATH"
 flutter analyze
 flutter test
@@ -222,7 +226,7 @@ The unit/widget tests use explicit test-only HTTP doubles. There are no simulate
 Run the real Dart client against an isolated local backend and the owned small fixture APK:
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir
+cd noir
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 export PATH="$JAVA_HOME/bin:/opt/homebrew/share/flutter/bin:$PATH"
 backend/.venv/bin/python backend/scripts/flutter_smoke.py
@@ -233,7 +237,7 @@ This exercises real upload, Apktool decode, manual changes, revision checks, val
 Full backend tests, including real build/sign/verify/re-decode of the owned fixture:
 
 ```sh
-cd /Users/kartik/Documents/ChatGPT/noir/backend
+cd noir/backend
 NOIR_RUN_E2E=1 JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH=/opt/homebrew/opt/openjdk@21/bin:/opt/homebrew/bin:/usr/bin:/bin .venv/bin/pytest -q -p no:cacheprovider
 ```
 

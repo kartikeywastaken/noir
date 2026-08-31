@@ -159,6 +159,67 @@ def _check_adb(config: NoirConfig) -> ToolCheck:
     )
 
 
+def _check_cil_tool(config: NoirConfig) -> ToolCheck:
+    from noir.infrastructure.dotnet.adapter import _default_tool_path
+
+    dotnet_path = config.resolve_tool_path("dotnet")
+    dotnet = shutil.which(dotnet_path)
+    if not dotnet and Path(dotnet_path).is_file():
+        dotnet = dotnet_path
+    configured = Path(config.noir_cil_tool_path) if config.noir_cil_tool_path else None
+    tool = configured or _default_tool_path()
+    if not dotnet:
+        return ToolCheck(
+            name="Mono/CIL patching",
+            available=False,
+            required_for="optional_for_binary",
+            message=".NET 8 runtime not found; install dotnet-sdk-8.0.",
+        )
+    if not tool.is_file():
+        return ToolCheck(
+            name="Mono/CIL patching",
+            available=False,
+            path=str(tool),
+            required_for="optional_for_binary",
+            message="Bundled noir-cil-tool has not been built.",
+        )
+    return ToolCheck(
+        name="Mono/CIL patching",
+        available=True,
+        path=str(tool),
+        version=get_tool_version(dotnet) or "",
+        required_for="optional_for_binary",
+        message="dnlib companion ready",
+    )
+
+
+def _check_native_libraries() -> ToolCheck:
+    try:
+        import capstone  # type: ignore[import-untyped]
+        import lief
+
+        from noir.infrastructure.native.adapter import _keystone
+
+        assembler = type(_keystone("arm64-v8a")).__name__
+    except (ImportError, OSError, RuntimeError) as exc:
+        return ToolCheck(
+            name="IL2CPP/native patching",
+            available=False,
+            required_for="optional_for_binary",
+            message=f"Binary libraries unavailable: {exc}",
+        )
+    return ToolCheck(
+        name="IL2CPP/native patching",
+        available=True,
+        version=(
+            f"LIEF {lief.__version__}; Capstone "
+            f"{getattr(capstone, '__version__', 'unknown')}"
+        ),
+        required_for="optional_for_binary",
+        message=f"ELF/disassembly ready; assembler={assembler}",
+    )
+
+
 def _check_ai(config: NoirConfig) -> ToolCheck:
     if config.ai_provider == "none":
         return ToolCheck(
@@ -224,6 +285,8 @@ def run_doctor(config: NoirConfig) -> DoctorReport:
         _check_sdk_tool(config, "apksigner", "required_for_build"),
         _check_sdk_tool(config, "aapt2", "required_for_build"),
         _check_keytool(),
+        _check_cil_tool(config),
+        _check_native_libraries(),
         _check_adb(config),
         _check_ai(config),
     ]
@@ -236,6 +299,7 @@ def run_doctor(config: NoirConfig) -> DoctorReport:
     )
     ai_ok = any(c.available for c in checks if c.required_for == "optional_for_ai")
     device_ok = any(c.available for c in checks if c.required_for == "optional_for_device")
+    binary_checks = [c for c in checks if c.required_for == "optional_for_binary"]
 
     summary_parts = []
     if required_import:
@@ -248,6 +312,10 @@ def run_doctor(config: NoirConfig) -> DoctorReport:
         summary_parts.append("Rebuild/sign: MISSING TOOLS")
     summary_parts.append(f"AI: {'configured' if ai_ok else 'not configured'}")
     summary_parts.append(f"Device: {'available' if device_ok else 'not available'}")
+    summary_parts.append(
+        "Binary patching: "
+        + ("ready" if binary_checks and all(c.available for c in binary_checks) else "partial")
+    )
 
     return DoctorReport(
         checks=checks,

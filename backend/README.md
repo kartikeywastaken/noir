@@ -9,7 +9,7 @@ The virtual environment and Python dependencies are installed in this checkout.
 Homebrew Apktool and Android SDK build-tools 36.0.0 are detected.
 
 ```bash
-cd /Users/kartik/Documents/ChatGPT/noir/backend
+cd noir/backend
 source .venv/bin/activate
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 export PATH="$JAVA_HOME/bin:/opt/homebrew/bin:$PATH"
@@ -26,6 +26,10 @@ python -m pip install -e '.[dev]'
 ```
 
 The native runner requires macOS/Linux, a JDK, Apktool, zipalign, apksigner, and keytool.
+Scoped Mono patches additionally require .NET 8 and the bundled dnlib tool. IL2CPP/native
+patches use LIEF, Capstone, and Keystone installed with the backend. See
+[`docs/binary-support.md`](docs/binary-support.md) for exact capabilities and refusal
+boundaries.
 The fixture builder additionally needs javac, d8, aapt2, and an Android SDK platform.
 ADB is optional. Windows, containers, and running this backend natively inside Android are not implemented.
 
@@ -249,7 +253,7 @@ noir jobs cancel JOB_ID
 ```
 
 For a phone connected by USB with debugging enabled, run
-`/Users/kartik/Library/Android/sdk/platform-tools/adb reverse tcp:8787 tcp:8787`.
+`adb reverse tcp:8787 tcp:8787`.
 A future phone client can then use http://127.0.0.1:8787 with the local bearer token.
 This keeps Python/Java/Apktool on the laptop; it does not deploy this backend onto Android.
 

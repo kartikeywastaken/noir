@@ -130,6 +130,19 @@ class AnalysisService:
                 str(f.relative_to(assets_dir)) for f in assets_dir.rglob("*") if f.is_file()
             )[:1000]  # Limit
 
+            managed_root = assets_dir / "bin" / "Data" / "Managed"
+            if managed_root.exists():
+                result.managed_assemblies = sorted(
+                    path.relative_to(decoded).as_posix()
+                    for path in managed_root.glob("*.dll")
+                    if path.is_file()
+                )
+            result.il2cpp_metadata_files = sorted(
+                path.relative_to(decoded).as_posix()
+                for path in assets_dir.rglob("global-metadata.dat")
+                if path.is_file()
+            )
+
         # Native libraries
         lib_dir = decoded / "lib"
         if lib_dir.exists():
@@ -140,6 +153,18 @@ class AnalysisService:
                         result.native_libs.append(NativeLibInfo(abi=abi_dir.name, libraries=libs))
                         if abi_dir.name not in result.native_abis:
                             result.native_abis.append(abi_dir.name)
+
+        native_names = {
+            library.lower()
+            for abi in result.native_libs
+            for library in abi.libraries
+        }
+        if result.il2cpp_metadata_files and "libil2cpp.so" in native_names:
+            result.runtime = "il2cpp"
+        elif result.managed_assemblies or any(name.startswith("libmono") for name in native_names):
+            result.runtime = "mono"
+        elif result.native_libs and not result.smali_classes:
+            result.runtime = "native_only"
 
         # Input certificate info (from META-INF if available)
         meta_inf = decoded / "original" / "META-INF"

@@ -26,6 +26,10 @@ dependencies = [
     "defusedxml>=0.7.1,<1.0",
     "PyYAML>=6.0,<7.0",
     "keyring>=25,<26",
+    "lief>=0.17.0,<1.0",
+    "capstone>=5.0.3,<6.0",
+    "keystone-engine>=0.9.2,<1.0",
+    "setuptools>=75,<82",
 ]
 
 [project.optional-dependencies]

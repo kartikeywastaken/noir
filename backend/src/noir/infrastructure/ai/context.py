@@ -7,6 +7,7 @@ sign/install APKs, change policy, or execute decoded code.
 
 from __future__ import annotations
 
+import json
 import re
 import xml.etree.ElementTree as ET
 from contextlib import suppress
@@ -30,6 +31,8 @@ class AiContextTools:
     MAX_CONTEXT_BYTES = 45_000
     MAX_INVENTORY_BYTES = 45_000
     MAX_SEARCH_RESULTS = 50
+    MAX_DISASSEMBLY_BYTES = 256
+    MAX_BINARY_INSPECTION_BYTES = 20_000
 
     def __init__(self, workspace: ProjectWorkspace, analysis: AnalysisResult | None = None):
         self.workspace = workspace
@@ -174,6 +177,379 @@ class AiContextTools:
                     }
         return None
 
+    @staticmethod
+    def _binary_context_tokens(user_request: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-z_][a-z0-9_]{2,}", user_request.lower())
+            if token
+            not in {
+                "add",
+                "app",
+                "change",
+                "make",
+                "method",
+                "modify",
+                "native",
+                "please",
+                "return",
+                "the",
+                "this",
+            }
+        }
+
+    def _compact_assembly_inspection(
+        self,
+        inspection: dict[str, Any],
+        user_request: str = "",
+        *,
+        max_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        """Keep selectors and hashes useful while enforcing the shared context budget."""
+        tokens = self._binary_context_tokens(user_request)
+        ceiling = min(
+            max_bytes or self.MAX_BINARY_INSPECTION_BYTES,
+            self.MAX_BINARY_INSPECTION_BYTES,
+        )
+        result = {
+            key: value
+            for key, value in inspection.items()
+            if key not in {"types"}
+        }
+        result["types"] = []
+        result["truncated"] = False
+
+        def relevance(type_info: dict[str, Any]) -> tuple[int, str]:
+            searchable = " ".join(
+                [str(type_info.get("full_name", ""))]
+                + [str(item.get("name", "")) for item in type_info.get("fields", [])]
+                + [str(item.get("signature", "")) for item in type_info.get("methods", [])]
+            ).lower()
+            return (-sum(token in searchable for token in tokens), searchable)
+
+        for type_info in sorted(inspection.get("types", []), key=relevance):
+            compact_type = {
+                "full_name": type_info.get("full_name"),
+                "fields": [],
+                "methods": [],
+            }
+            members = [
+                ("fields", member)
+                for member in type_info.get("fields", [])
+            ] + [
+                ("methods", member)
+                for member in type_info.get("methods", [])
+            ]
+            members.sort(
+                key=lambda item: (
+                    -sum(
+                        token in json.dumps(item[1], default=str).lower()
+                        for token in tokens
+                    ),
+                    json.dumps(item[1], sort_keys=True, default=str),
+                )
+            )
+            for collection, member in members:
+                compact_type[collection].append(member)
+                candidate = {**result, "types": [*result["types"], compact_type]}
+                if (
+                    len(json.dumps(candidate, default=str).encode())
+                    > ceiling
+                ):
+                    compact_type[collection].pop()
+                    result["truncated"] = True
+                    break
+            if compact_type["fields"] or compact_type["methods"]:
+                result["types"].append(compact_type)
+            if result["truncated"]:
+                break
+        result["included_type_count"] = len(result["types"])
+        result["total_type_count"] = len(inspection.get("types", []))
+        return result
+
+    def _full_assembly_inspection(self, relative_path: str) -> dict[str, Any]:
+        from noir.infrastructure.dotnet.adapter import inspect_assembly
+
+        path = self.workspace.safe_path(relative_path)
+        if path.suffix.lower() != ".dll":
+            raise ValueError("Managed assembly inspection requires a .dll path")
+        return inspect_assembly(self.workspace.config, path)
+
+    def inspect_assembly(
+        self, relative_path: str, *, user_request: str = ""
+    ) -> dict[str, Any]:
+        """Inspect one bounded managed assembly without exposing its raw bytes."""
+        return self._compact_assembly_inspection(
+            self._full_assembly_inspection(relative_path), user_request
+        )
+
+    def read_method_il(
+        self, relative_path: str, type_name: str, method_sig: str
+    ) -> str:
+        """Read one selected method while retaining the normal context ceiling."""
+        from noir.infrastructure.dotnet.adapter import read_method_il
+
+        result = read_method_il(
+            self.workspace.config,
+            self.workspace.safe_path(relative_path),
+            type_name,
+            method_sig,
+        )
+        source = str(result.get("il_source", ""))
+        if len(source.encode()) > self.MAX_CONTEXT_BYTES:
+            raise ValueError("Selected CIL method exceeds the AI context ceiling")
+        return source
+
+    def inspect_il2cpp_method(self, type_name: str, method_sig: str) -> dict[str, Any]:
+        """Correlate one symbol-rich IL2CPP method without guessing offsets."""
+        from noir.infrastructure.il2cpp.metadata import (
+            Il2CppMetadata,
+            Il2CppMetadataError,
+        )
+
+        metadata = sorted(self.workspace.decoded_dir.rglob("global-metadata.dat"))
+        binaries = sorted(self.workspace.decoded_dir.glob("lib/*/libil2cpp.so"))
+        if len(metadata) != 1 or not binaries:
+            raise ValueError("IL2CPP method inspection requires one metadata file and an ABI")
+        if metadata[0].stat().st_size > self.workspace.config.max_il2cpp_metadata_size:
+            raise ValueError("IL2CPP metadata exceeds the configured inspection ceiling")
+        results = []
+        for binary in binaries:
+            relative_path = binary.relative_to(self.workspace.decoded_dir).as_posix()
+            try:
+                if binary.stat().st_size > self.workspace.config.max_native_library_size:
+                    raise Il2CppMetadataError(
+                        "IL2CPP binary exceeds the configured inspection ceiling"
+                    )
+                results.append(
+                    {
+                        "relative_path": relative_path,
+                        **Il2CppMetadata(metadata[0], binary).inspect_method(
+                            type_name, method_sig
+                        ),
+                    }
+                )
+            except Il2CppMetadataError as exc:
+                results.append(
+                    {"relative_path": relative_path, "unsupported_reason": str(exc)}
+                )
+        return {
+            "metadata_path": metadata[0]
+            .relative_to(self.workspace.decoded_dir)
+            .as_posix(),
+            "abi_results": results,
+        }
+
+    def disassemble_native(
+        self, relative_path: str, offset: int, length: int
+    ) -> list[dict]:
+        """Return a tightly bounded instruction window for human/AI review."""
+        from noir.infrastructure.native.adapter import disassemble_range
+
+        if length > self.MAX_DISASSEMBLY_BYTES:
+            raise ValueError("Native disassembly request exceeds the 256-byte context ceiling")
+        return disassemble_range(self.workspace.safe_path(relative_path), offset, length)
+
+    def _inspect_binary_path(
+        self, relative_path: str, *, user_request: str = ""
+    ) -> dict[str, Any]:
+        path = self.workspace.safe_path(relative_path)
+        if path.suffix.lower() == ".dll":
+            from noir.infrastructure.dotnet.adapter import CilToolError
+
+            inspection = {
+                "format": "cil",
+                **self._compact_assembly_inspection(
+                    self._full_assembly_inspection(relative_path),
+                    user_request,
+                    max_bytes=14_000,
+                ),
+            }
+            tokens = self._binary_context_tokens(user_request)
+            candidates = [
+                (type_info.get("full_name", ""), method.get("signature", ""))
+                for type_info in inspection.get("types", [])
+                for method in type_info.get("methods", [])
+                if method.get("has_body")
+                if not tokens
+                or any(
+                    token
+                    in (
+                        f"{type_info.get('full_name', '')} "
+                        f"{method.get('signature', '')}"
+                    ).lower()
+                    for token in tokens
+                )
+            ][:3]
+            inspection["selected_method_il"] = []
+            for type_name, method_signature in candidates:
+                try:
+                    source = self.read_method_il(
+                        relative_path, type_name, method_signature
+                    )
+                except (ValueError, CilToolError):
+                    continue
+                entry = {
+                    "type_full_name": type_name,
+                    "method_signature": method_signature,
+                    "il_source": source,
+                }
+                candidate = {
+                    **inspection,
+                    "selected_method_il": [
+                        *inspection["selected_method_il"],
+                        entry,
+                    ],
+                }
+                if (
+                    len(json.dumps(candidate, default=str).encode())
+                    > self.MAX_BINARY_INSPECTION_BYTES
+                ):
+                    break
+                inspection["selected_method_il"].append(entry)
+            return inspection
+        if path.suffix.lower() == ".so":
+            from noir.infrastructure.native.adapter import (
+                NativePatchError,
+                disassemble_range,
+                inspect_elf,
+            )
+
+            if path.stat().st_size > self.workspace.config.max_native_library_size:
+                raise ValueError("ELF exceeds the configured binary inspection ceiling")
+            inspection = inspect_elf(path)
+            tokens = self._binary_context_tokens(user_request)
+
+            def rank(value: Any) -> tuple[int, str]:
+                rendered = json.dumps(value, sort_keys=True, default=str).lower()
+                return (-sum(token in rendered for token in tokens), rendered)
+
+            bounded = {
+                key: value
+                for key, value in inspection.items()
+                if key not in {"exports", "imports", "symbol_details", "sections"}
+            }
+            for key, limit in (
+                ("symbol_details", 128),
+                ("exports", 256),
+                ("imports", 128),
+                ("sections", 128),
+            ):
+                bounded[key] = sorted(inspection.get(key, []), key=rank)[:limit]
+            bounded["truncated"] = any(
+                len(bounded[key]) < len(inspection.get(key, []))
+                for key in ("symbol_details", "exports", "imports", "sections")
+            )
+            while (
+                len(json.dumps(bounded, default=str).encode())
+                > self.MAX_BINARY_INSPECTION_BYTES
+            ):
+                largest = max(
+                    (key for key in ("exports", "imports", "symbol_details", "sections")),
+                    key=lambda key: len(json.dumps(bounded[key], default=str)),
+                )
+                if not bounded[largest]:
+                    raise ValueError("ELF inspection metadata exceeds the context ceiling")
+                bounded[largest].pop()
+                bounded["truncated"] = True
+            bounded["selected_disassembly"] = []
+            for symbol in sorted(inspection.get("symbol_details", []), key=rank):
+                length = int(symbol.get("size", 0))
+                if length <= 0 or length > self.MAX_DISASSEMBLY_BYTES:
+                    continue
+                try:
+                    instructions = disassemble_range(
+                        path,
+                        int(symbol["file_offset"]),
+                        length,
+                        abi=inspection["abi"],
+                    )
+                except (KeyError, NativePatchError, TypeError, ValueError):
+                    continue
+                entry = {
+                    "name": symbol.get("name"),
+                    "file_offset": symbol.get("file_offset"),
+                    "size": length,
+                    "sha256": symbol.get("sha256"),
+                    "instructions": instructions,
+                }
+                candidate = {
+                    **bounded,
+                    "selected_disassembly": [
+                        *bounded["selected_disassembly"],
+                        entry,
+                    ],
+                }
+                if (
+                    len(json.dumps(candidate, default=str).encode())
+                    > self.MAX_BINARY_INSPECTION_BYTES
+                ):
+                    break
+                bounded["selected_disassembly"].append(entry)
+                if len(bounded["selected_disassembly"]) >= 3:
+                    break
+            if path.name == "libil2cpp.so":
+                from noir.infrastructure.il2cpp.metadata import (
+                    Il2CppMetadata,
+                    Il2CppMetadataError,
+                )
+
+                metadata = sorted(self.workspace.decoded_dir.rglob("global-metadata.dat"))
+                try:
+                    if len(metadata) != 1:
+                        raise Il2CppMetadataError(
+                            f"Expected one global-metadata.dat, found {len(metadata)}"
+                        )
+                    if (
+                        metadata[0].stat().st_size
+                        > self.workspace.config.max_il2cpp_metadata_size
+                    ):
+                        raise Il2CppMetadataError(
+                            "IL2CPP metadata exceeds the configured inspection ceiling"
+                        )
+                    summary = Il2CppMetadata(metadata[0], path).search_strings(
+                        user_request
+                    )
+                    candidate = {**bounded, "il2cpp_metadata": summary}
+                    if (
+                        len(json.dumps(candidate, default=str).encode())
+                        <= self.MAX_BINARY_INSPECTION_BYTES
+                    ):
+                        bounded["il2cpp_metadata"] = summary
+                except (OSError, Il2CppMetadataError) as exc:
+                    bounded["il2cpp_metadata_error"] = str(exc)
+            result = {"format": "elf", **bounded}
+            while (
+                len(json.dumps(result, default=str).encode())
+                > self.MAX_BINARY_INSPECTION_BYTES
+            ):
+                trimmed = False
+                for key in (
+                    "selected_disassembly",
+                    "symbol_details",
+                    "exports",
+                    "imports",
+                    "sections",
+                ):
+                    if result.get(key):
+                        result[key].pop()
+                        result["truncated"] = True
+                        trimmed = True
+                        break
+                if trimmed:
+                    continue
+                if "il2cpp_metadata" in result:
+                    result.pop("il2cpp_metadata")
+                    result["truncated"] = True
+                    continue
+                if "il2cpp_metadata_error" in result:
+                    result.pop("il2cpp_metadata_error")
+                    result["truncated"] = True
+                    continue
+                raise ValueError("ELF inspection metadata exceeds the context ceiling")
+            return result
+        raise ValueError("Unsupported binary context type")
+
     def _label_evidence(self) -> tuple[list[str], dict[str, str]]:
         """Find actual application/launcher labels and exact referenced string elements."""
         namespace = "{http://schemas.android.com/apk/res/android}"
@@ -235,6 +611,8 @@ class AiContextTools:
             "manifest": self.inspect_manifest(),
             "omitted_files": [],
             "files": self.list_project_files(user_request=user_request),
+            "runtime": self.analysis.runtime if self.analysis else "dalvik",
+            "binary_inspection": {},
         }
 
         label_task = bool(
@@ -264,10 +642,45 @@ class AiContextTools:
                     paths.append(f)
                     if len(paths) >= self.MAX_FILES:
                         break
+            if self.analysis and self.analysis.runtime in {"mono", "il2cpp", "native_only"}:
+                binary_paths = [
+                    *self.analysis.managed_assemblies,
+                    *[
+                        f"lib/{entry.abi}/{library}"
+                        for entry in self.analysis.native_libs
+                        for library in entry.libraries
+                    ],
+                ]
+                request_tokens = self._binary_context_tokens(user_request)
+                binary_paths.sort(
+                    key=lambda path: (
+                        -sum(token in path.lower() for token in request_tokens),
+                        path.rsplit("/", 1)[-1]
+                        not in {"libil2cpp.so", "libmain.so"},
+                        path.lower(),
+                    )
+                )
+                for path in binary_paths:
+                    if path not in paths and len(paths) < self.MAX_FILES:
+                        paths.append(path)
 
         used = 0
         for path in dict.fromkeys(paths[: self.MAX_FILES]):
             try:
+                target = self.workspace.safe_path(path)
+                if target.suffix.lower() in {".dll", ".so"}:
+                    inspection = self._inspect_binary_path(
+                        path, user_request=user_request
+                    )
+                    encoded = json.dumps(inspection, separators=(",", ":")).encode()
+                    if used + len(encoded) > self.MAX_CONTEXT_BYTES:
+                        context["omitted_files"].append(path)
+                        continue
+                    used += len(encoded)
+                    context["binary_inspection"][path] = inspection
+                    context["file_hashes"][path] = compute_file_hash(target)
+                    context["file_coverage"][path] = "structured_binary_inspection"
+                    continue
                 coverage = "full"
                 try:
                     if file_paths is None or path in excerpts:

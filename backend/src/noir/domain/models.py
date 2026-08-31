@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -105,6 +105,9 @@ class AnalysisResult(BaseModel):
     assets: list[str] = Field(default_factory=list)
     native_libs: list[NativeLibInfo] = Field(default_factory=list)
     native_abis: list[str] = Field(default_factory=list)
+    runtime: Literal["dalvik", "mono", "il2cpp", "native_only"] = "dalvik"
+    managed_assemblies: list[str] = Field(default_factory=list)
+    il2cpp_metadata_files: list[str] = Field(default_factory=list)
     apktool_metadata: dict[str, Any] = Field(default_factory=dict)
     input_cert_info: dict[str, Any] = Field(default_factory=dict)
     obfuscation_indicators: list[str] = Field(default_factory=list)
@@ -163,6 +166,9 @@ class ChangePlan(BaseModel):
     validation_steps: list[str] = Field(default_factory=list)
     expected_test_results: list[str] = Field(default_factory=list)
     unsupported_aspects: list[str] = Field(default_factory=list)
+    native_runtime: str | None = None
+    binary_targets: list[str] = Field(default_factory=list)
+    binary_risks: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
 
     def compute_hash(self) -> str:
@@ -189,6 +195,23 @@ class PatchOperation(BaseModel):
     xml_element: str | None = None
     xml_attributes: dict[str, str] = Field(default_factory=dict)
     xml_namespace: str | None = None
+    assembly_name: str | None = None
+    type_full_name: str | None = None
+    new_il_source: str | None = None
+    expected_method_il_hash: str | None = None
+    field_name: str | None = None
+    il2cpp_type_full_name: str | None = None
+    il2cpp_method_signature: str | None = None
+    il2cpp_return_constant: int | None = None
+    expected_function_bytes_hash: str | None = None
+    native_offset: int | None = None
+    native_length: int | None = None
+    native_new_bytes_hex: str | None = None
+    native_redirect_target_offset: int | None = None
+    native_abi: str | None = None
+    expected_native_bytes_hash: str | None = None
+    native_skipped_abis: list[str] = Field(default_factory=list)
+    native_skip_reason: str | None = None
     affected_scope: str = ""
 
 

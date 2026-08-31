@@ -6,6 +6,9 @@ backend/.local-test/
 **/.ruff_cache/
 **/.mypy_cache/
 **/.coverage
+**/bin/
+**/obj/
 **/*.jks
 **/*.pass
 backend/tests/fixtures/*.apk
+/output/
