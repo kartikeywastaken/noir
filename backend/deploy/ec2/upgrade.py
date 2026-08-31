@@ -123,6 +123,9 @@ def main() -> None:
             "NOIR_AI_FALLBACK_MODEL",
             "NOIR_DOTNET_TOOL_PATH",
             "NOIR_CIL_TOOL_PATH",
+            "NOIR_UPLOAD_CHUNK_SIZE",
+            "NOIR_MAX_UPLOAD_CHUNK_SIZE",
+            "NOIR_UPLOAD_SESSION_TTL",
         ):
             current_environment[name] = desired_environment[name]
         Path("/etc/noir/backend.env").write_text(

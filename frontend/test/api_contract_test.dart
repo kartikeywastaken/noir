@@ -198,28 +198,60 @@ void main() {
     },
   );
 
-  test('multipart upload streams file bytes with an idempotency key', () async {
-    final api = apiWith((request) async {
-      expect(request.headers['idempotency-key'], 'upload-key');
-      expect(request.url.queryParameters['authorized'], 'true');
-      expect(request.body, contains('fixture.apk'));
-      expect(request.body, contains('test-apk-bytes'));
-      return jsonResponse({
-        'job_id': 'j',
-        'project_id': 'p',
-        'state': 'queued',
+  test(
+    'resumable upload sends offset chunks and finalizes idempotently',
+    () async {
+      final source = utf8.encode('test-apk-bytes');
+      var serverOffset = 0;
+      final acknowledged = <int>[];
+      final api = apiWith((request) async {
+        if (request.url.path == '/v1/uploads' && request.method == 'POST') {
+          expect(request.headers['idempotency-key'], 'upload-key');
+          expect(jsonDecode(request.body), {
+            'filename': 'fixture.apk',
+            'size': source.length,
+          });
+          return jsonResponse({
+            'upload_id': 'upload',
+            'size': source.length,
+            'offset': serverOffset,
+            'chunk_size': 5,
+          }, 201);
+        }
+        if (request.url.path == '/v1/uploads/upload' &&
+            request.method == 'PATCH') {
+          expect(request.headers['content-type'], 'application/octet-stream');
+          expect(int.parse(request.headers['upload-offset']!), serverOffset);
+          serverOffset += request.bodyBytes.length;
+          acknowledged.add(serverOffset);
+          return jsonResponse({
+            'upload_id': 'upload',
+            'size': source.length,
+            'offset': serverOffset,
+            'chunk_size': 5,
+          });
+        }
+        expect(request.url.path, '/v1/uploads/upload/complete');
+        expect(request.url.queryParameters['authorized'], 'true');
+        expect(request.headers['idempotency-key'], 'upload-key');
+        return jsonResponse({
+          'job_id': 'j',
+          'project_id': 'p',
+          'state': 'queued',
+        }, 202);
       });
-    });
-    final job = await api.importApkStream(
-      'fixture.apk',
-      14,
-      Stream.value(utf8.encode('test-apk-bytes')),
-      idempotencyKey: 'upload-key',
-    );
-    expect(job.projectId, 'p');
-    expect(job.isTerminal, false);
-    api.dispose();
-  });
+      final job = await api.importApkResumable(
+        'fixture.apk',
+        source.length,
+        (start, end) => Stream.value(source.sublist(start, end)),
+        idempotencyKey: 'upload-key',
+      );
+      expect(job.projectId, 'p');
+      expect(job.isTerminal, false);
+      expect(acknowledged, [5, 10, 14]);
+      api.dispose();
+    },
+  );
 
   test('manual stale revision preserves the unsaved buffer', () async {
     final api = apiWith((request) async {

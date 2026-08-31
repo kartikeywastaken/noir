@@ -34,10 +34,48 @@ void main() {
       'stage': 'complete',
       'result_data': {'operation': 'import', 'result': <String, Object>{}},
     };
+    var offset = 0;
     final api = NoirApiClient(
       token: 'test',
       client: StreamClient((request) async {
-        if (request.method == 'POST') {
+        if (request.url.path == '/v1/uploads' && request.method == 'POST') {
+          await request.finalize().drain<void>();
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'upload_id': 'upload',
+                  'size': 4,
+                  'offset': offset,
+                  'chunk_size': 2,
+                }),
+              ),
+            ),
+            201,
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload' &&
+            request.method == 'PATCH') {
+          final body = await request.finalize().fold<List<int>>(
+            [],
+            (all, chunk) => all..addAll(chunk),
+          );
+          offset += body.length;
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'upload_id': 'upload',
+                  'size': 4,
+                  'offset': offset,
+                  'chunk_size': 2,
+                }),
+              ),
+            ),
+            200,
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload/complete') {
           await request.finalize().drain<void>();
           return http.StreamedResponse(
             Stream.value(utf8.encode(jsonEncode(job))),
@@ -72,11 +110,76 @@ void main() {
   });
 
   test(
-    'upload counts file bytes, not invented percentages or multipart framing',
+    'upload progress advances only from server offsets and resumes a lost response',
     () async {
       final progress = <TransferProgress>[];
+      final source = [1, 2, 3, 4, 5, 6];
+      final patchOffsets = <int>[];
+      var serverOffset = 0;
+      var loseSecondResponse = true;
       final client = StreamClient((request) async {
         expect(request.followRedirects, false);
+        if (request.url.path == '/v1/uploads' && request.method == 'POST') {
+          await request.finalize().drain<void>();
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'upload_id': 'upload',
+                  'size': 6,
+                  'offset': serverOffset,
+                  'chunk_size': 2,
+                }),
+              ),
+            ),
+            201,
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload' &&
+            request.method == 'GET') {
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'upload_id': 'upload',
+                  'size': 6,
+                  'offset': serverOffset,
+                  'chunk_size': 2,
+                }),
+              ),
+            ),
+            200,
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload' &&
+            request.method == 'PATCH') {
+          final requestOffset = int.parse(request.headers['upload-offset']!);
+          patchOffsets.add(requestOffset);
+          final body = await request.finalize().fold<List<int>>(
+            [],
+            (all, chunk) => all..addAll(chunk),
+          );
+          expect(requestOffset, serverOffset);
+          serverOffset += body.length;
+          if (requestOffset == 2 && loseSecondResponse) {
+            loseSecondResponse = false;
+            throw http.ClientException('response lost after durable write');
+          }
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'upload_id': 'upload',
+                  'size': 6,
+                  'offset': serverOffset,
+                  'chunk_size': 2,
+                }),
+              ),
+            ),
+            200,
+          );
+        }
+        expect(request.url.path, '/v1/uploads/upload/complete');
         await request.finalize().drain<void>();
         return http.StreamedResponse(
           Stream.value(
@@ -92,21 +195,22 @@ void main() {
           202,
         );
       });
-      final api = NoirApiClient(token: 'test', client: client);
-      await api.importApkStream(
+      final api = NoirApiClient(
+        token: 'test',
+        client: client,
+        retryDelay: (_) async {},
+      );
+      await api.importApkResumable(
         'app.apk',
         6,
-        Stream.fromIterable([
-          [1, 2],
-          [3, 4],
-          [5, 6],
-        ]),
+        (start, end) => Stream.value(source.sublist(start, end)),
         idempotencyKey: 'test',
         onProgress: progress.add,
       );
       expect(progress.map((p) => p.bytes), [0, 2, 4, 6]);
       expect(progress.every((p) => p.total == 6), true);
       expect(progress.last.fraction, 1);
+      expect(patchOffsets, [0, 2, 4]);
       api.dispose();
     },
   );

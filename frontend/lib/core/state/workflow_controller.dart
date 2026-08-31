@@ -63,7 +63,7 @@ class WorkflowController extends SafeNotifier {
     await _importApk(
       filename: file.name,
       length: await file.length(),
-      bytes: file.readAsByteStream(),
+      reader: (start, end) => file.xFile.openRead(start, end),
     );
   }
 
@@ -86,7 +86,7 @@ class WorkflowController extends SafeNotifier {
       await _importApk(
         filename: filename,
         length: actualLength,
-        bytes: file.openRead(),
+        reader: (start, end) => file.openRead(start, end),
       );
     } finally {
       if (deleteAfter) {
@@ -103,7 +103,7 @@ class WorkflowController extends SafeNotifier {
   Future<void> _importApk({
     required String filename,
     required int length,
-    required Stream<List<int>> bytes,
+    required UploadChunkReader reader,
   }) async {
     if (working) return;
     reset();
@@ -111,10 +111,10 @@ class WorkflowController extends SafeNotifier {
     this.filename = filename;
     notifyListeners();
     try {
-      job = await api.importApkStream(
+      job = await api.importApkResumable(
         filename,
         length,
-        bytes,
+        reader,
         idempotencyKey: const Uuid().v4(),
         onProgress: (value) {
           upload = value;

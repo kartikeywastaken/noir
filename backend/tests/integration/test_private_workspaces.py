@@ -360,6 +360,98 @@ def project_for(config, owner):
     return project, workspace
 
 
+def test_resumable_upload_is_owner_scoped_offset_checked_and_idempotent(isolated):
+    app, config, users = isolated
+    alice, alice_id, *_ = users[0]
+    bob = users[1][0]
+    headers = {"Idempotency-Key": "resumable-fixture"}
+
+    started = alice.post(
+        "/v1/uploads",
+        headers=headers,
+        json={"filename": "fixture.apk", "size": 6},
+    )
+    assert started.status_code == 201, started.text
+    upload = started.json()
+    upload_id = upload["upload_id"]
+    assert upload["offset"] == 0
+    assert upload["chunk_size"] == config.upload_chunk_size
+    assert bob.get(f"/v1/uploads/{upload_id}").status_code == 404
+
+    first = alice.patch(
+        f"/v1/uploads/{upload_id}",
+        headers={"Upload-Offset": "0", "Content-Type": "application/octet-stream"},
+        content=b"abc",
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["offset"] == 3
+    assert first.headers["upload-offset"] == "3"
+
+    stale = alice.patch(
+        f"/v1/uploads/{upload_id}",
+        headers={"Upload-Offset": "0", "Content-Type": "application/octet-stream"},
+        content=b"abc",
+    )
+    assert stale.status_code == 409
+    assert "expected 3" in stale.json()["detail"]
+
+    resumed = alice.post(
+        "/v1/uploads",
+        headers=headers,
+        json={"filename": "fixture.apk", "size": 6},
+    )
+    assert resumed.status_code == 201
+    assert resumed.json()["upload_id"] == upload_id
+    assert resumed.json()["offset"] == 3
+
+    final_chunk = alice.patch(
+        f"/v1/uploads/{upload_id}",
+        headers={"Upload-Offset": "3", "Content-Type": "application/octet-stream"},
+        content=b"def",
+    )
+    assert final_chunk.json()["offset"] == 6
+    completed = alice.post(f"/v1/uploads/{upload_id}/complete?authorized=true")
+    assert completed.status_code == 202, completed.text
+    job = completed.json()
+    assert AccessService().owns_project(alice_id, job["project_id"])
+    assert not AccessService().owns_project(users[1][1], job["project_id"])
+
+    duplicate = alice.post(f"/v1/uploads/{upload_id}/complete?authorized=true")
+    assert duplicate.status_code == 202
+    assert duplicate.json()["job_id"] == job["job_id"]
+    payload = JobRepository().get(job["job_id"]).result_data["payload"]
+    assert payload["size"] == 6
+    assert payload["sha256"] == hashlib.sha256(b"abcdef").hexdigest()
+
+
+def test_resumable_upload_rejects_declared_and_chunk_size_limits(isolated):
+    _, config, users = isolated
+    client = users[0][0]
+    config.max_upload_size = 5
+    response = client.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "too-large"},
+        json={"filename": "large.apk", "size": 6},
+    )
+    assert response.status_code == 413
+
+    config.max_upload_size = 100
+    config.max_upload_chunk_size = 2
+    started = client.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "large-chunk"},
+        json={"filename": "large.apk", "size": 3},
+    )
+    upload_id = started.json()["upload_id"]
+    response = client.patch(
+        f"/v1/uploads/{upload_id}",
+        headers={"Upload-Offset": "0"},
+        content=b"abc",
+    )
+    assert response.status_code == 413
+    assert client.get(f"/v1/uploads/{upload_id}").json()["offset"] == 0
+
+
 def test_every_project_route_is_guarded_before_read_or_mutation(isolated):
     app, config, users = isolated
     alice, owner, *_ = users[0]

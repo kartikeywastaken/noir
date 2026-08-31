@@ -108,6 +108,9 @@ class NoirConfig(BaseSettings):
     max_expanded_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
     max_compression_ratio: float = 100.0
     max_upload_size: int = 500 * 1024 * 1024  # 500 MB
+    upload_chunk_size: int = 2 * 1024 * 1024  # 2 MiB, acknowledged per request
+    max_upload_chunk_size: int = 4 * 1024 * 1024  # hard server-side request cap
+    upload_session_ttl: int = 24 * 60 * 60
 
     @field_validator("android_sdk_dir", mode="before")
     @classmethod

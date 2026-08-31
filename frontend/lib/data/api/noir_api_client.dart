@@ -4,11 +4,33 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
 import 'api_exceptions.dart';
 import 'transfer_progress.dart';
+
+typedef UploadChunkReader = Stream<List<int>> Function(int start, int end);
+
+class _UploadSession {
+  const _UploadSession({
+    required this.id,
+    required this.size,
+    required this.offset,
+    required this.chunkSize,
+  });
+  factory _UploadSession.fromJson(Map<String, dynamic> json) => _UploadSession(
+    id: '${json['upload_id'] ?? ''}',
+    size: json['size'] as int? ?? -1,
+    offset: json['offset'] as int? ?? -1,
+    chunkSize: json['chunk_size'] as int? ?? -1,
+  );
+  final String id;
+  final int size;
+  final int offset;
+  final int chunkSize;
+}
 
 class NoirApiClient {
   static const cloudBaseUrl = String.fromEnvironment(
@@ -16,10 +38,16 @@ class NoirApiClient {
     defaultValue: 'https://noir-16-171-197-228.sslip.io',
   );
 
-  NoirApiClient({String? baseUrl, String? token, http.Client? client})
-    : _baseUrl = normalizeBaseUrl(baseUrl ?? cloudBaseUrl),
-      _token = token,
-      _client = client ?? http.Client();
+  NoirApiClient({
+    String? baseUrl,
+    String? token,
+    http.Client? client,
+    Future<void> Function(Duration)? retryDelay,
+  }) : _baseUrl = normalizeBaseUrl(baseUrl ?? cloudBaseUrl),
+       _token = token,
+       _client = client ?? http.Client(),
+       _retryDelay =
+           retryDelay ?? ((duration) => Future<void>.delayed(duration));
   String _baseUrl;
   String? _token;
   int _credentialRevision = 0;
@@ -39,6 +67,7 @@ class NoirApiClient {
   }
 
   final http.Client _client;
+  final Future<void> Function(Duration) _retryDelay;
   final Set<String> _inFlight = {};
 
   static String normalizeBaseUrl(String value) {
@@ -244,52 +273,189 @@ class NoirApiClient {
     TransferCallback? onProgress,
   }) async {
     final file = File(filePath);
-    return importApkStream(
+    return importApkResumable(
       file.uri.pathSegments.last,
       await file.length(),
-      file.openRead(),
+      (start, end) => file.openRead(start, end),
       idempotencyKey: idempotencyKey,
       onProgress: onProgress,
     );
   }
 
-  Future<JobInfo> importApkStream(
+  Future<_UploadSession> _beginUpload(
     String filename,
     int length,
-    Stream<List<int>> bytes, {
+    String idempotencyKey,
+  ) async => _UploadSession.fromJson(
+    await _request(
+      'POST',
+      '/v1/uploads',
+      body: {'filename': filename, 'size': length},
+      idempotencyKey: idempotencyKey,
+    ),
+  );
+
+  Future<_UploadSession> _uploadStatus(String uploadId) async =>
+      _UploadSession.fromJson(await _request('GET', '/v1/uploads/$uploadId'));
+
+  Future<_UploadSession> _sendUploadChunk(
+    String uploadId,
+    int offset,
+    Uint8List bytes,
+  ) async {
+    final request = http.Request('PATCH', _uri('/v1/uploads/$uploadId'));
+    request.headers['Authorization'] = 'Bearer $token';
+    request.headers['Content-Type'] = 'application/octet-stream';
+    request.headers['Upload-Offset'] = '$offset';
+    request.bodyBytes = bytes;
+    return _UploadSession.fromJson(
+      _response(
+        await _send(
+          request,
+          timeout: const Duration(minutes: 2),
+          mutation: true,
+        ),
+      ),
+    );
+  }
+
+  Future<Uint8List> _readUploadChunk(
+    UploadChunkReader reader,
+    int start,
+    int end,
+  ) async {
+    final expected = end - start;
+    final output = BytesBuilder(copy: false);
+    await for (final chunk in reader(start, end)) {
+      output.add(chunk);
+      if (output.length > expected) {
+        throw ApiException('Selected APK returned more bytes than requested.');
+      }
+    }
+    final bytes = output.takeBytes();
+    if (bytes.length != expected) {
+      throw ApiException(
+        'Selected APK changed or became unavailable during upload.',
+      );
+    }
+    return bytes;
+  }
+
+  Future<T> _retryUploadRequest<T>(Future<T> Function() request) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        return await request();
+      } catch (error) {
+        if (!_retryableUploadError(error)) rethrow;
+        lastError = error;
+        if (attempt == 3) rethrow;
+        await _retryDelay(Duration(seconds: math.min(1 << attempt, 8)));
+      }
+    }
+    throw lastError!;
+  }
+
+  bool _retryableUploadError(Object error, {bool includeConflict = false}) {
+    if (error is ConnectionException) return true;
+    if (error is! ApiException || error.statusCode == null) return false;
+    return <int>{
+      408,
+      429,
+      500,
+      502,
+      503,
+      504,
+      if (includeConflict) 409,
+    }.contains(error.statusCode);
+  }
+
+  void _validateUploadSession(
+    _UploadSession session,
+    int expectedSize, {
+    String? expectedId,
+  }) {
+    if (session.id.isEmpty ||
+        session.size != expectedSize ||
+        session.offset < 0 ||
+        session.offset > expectedSize ||
+        session.chunkSize <= 0 ||
+        (expectedId != null && session.id != expectedId)) {
+      throw ApiException('Backend returned invalid upload-session state.');
+    }
+  }
+
+  /// Uploads repeatable file ranges and advances progress only after EC2 has
+  /// durably acknowledged the corresponding offset.
+  Future<JobInfo> importApkResumable(
+    String filename,
+    int length,
+    UploadChunkReader reader, {
     required String idempotencyKey,
     TransferCallback? onProgress,
   }) async {
     if (token?.isNotEmpty != true) throw UnauthorizedException();
-    final request = http.MultipartRequest(
-      'POST',
-      _uri('/v1/import', {'authorized': 'true'}),
-    );
-    request.headers['Authorization'] = 'Bearer $token';
-    request.headers['Idempotency-Key'] = idempotencyKey;
+    if (length <= 0) throw ApiException('Selected APK is empty.');
     final revision = credentialRevision;
-    Stream<List<int>> counted() async* {
-      var sent = 0;
-      onProgress?.call(TransferProgress(0, length));
-      await for (final chunk in bytes) {
-        if (revision != credentialRevision) {
-          throw ApiException('Workspace changed. Upload stopped.');
-        }
-        sent += chunk.length;
-        onProgress?.call(TransferProgress(sent, length));
-        yield chunk;
+    void ensureWorkspace() {
+      if (revision != credentialRevision) {
+        throw ApiException('Workspace changed. Upload stopped.');
       }
     }
 
-    request.files.add(
-      http.MultipartFile('file', counted(), length, filename: filename),
+    var session = await _retryUploadRequest(
+      () => _beginUpload(filename, length, idempotencyKey),
     );
-    return JobInfo.fromJson(
-      _response(
-        await _send(
-          request,
-          timeout: const Duration(minutes: 10),
-          mutation: true,
+    _validateUploadSession(session, length);
+    final uploadId = session.id;
+    var offset = session.offset;
+    onProgress?.call(TransferProgress(offset, length));
+    while (offset < length) {
+      ensureWorkspace();
+      final end = math.min(offset + session.chunkSize, length);
+      final bytes = await _readUploadChunk(reader, offset, end);
+      var acknowledged = false;
+      for (var attempt = 0; attempt < 4 && !acknowledged; attempt++) {
+        try {
+          session = await _sendUploadChunk(session.id, offset, bytes);
+          _validateUploadSession(session, length, expectedId: uploadId);
+          if (session.offset != end) {
+            throw ApiException(
+              'Backend acknowledged an unexpected upload offset.',
+            );
+          }
+          acknowledged = true;
+        } catch (error) {
+          if (!_retryableUploadError(error, includeConflict: true)) rethrow;
+          if (attempt == 3) rethrow;
+          await _retryDelay(Duration(seconds: math.min(1 << attempt, 8)));
+          ensureWorkspace();
+          final recovered = await _retryUploadRequest(
+            () => _uploadStatus(uploadId),
+          );
+          _validateUploadSession(recovered, length, expectedId: uploadId);
+          if (recovered.offset == end) {
+            session = recovered;
+            acknowledged = true;
+          } else if (recovered.offset != offset) {
+            throw ApiException(
+              'Backend returned an unsafe partial-chunk offset.',
+            );
+          }
+        }
+      }
+      if (!acknowledged) throw ConnectionException();
+      offset = session.offset;
+      onProgress?.call(TransferProgress(offset, length));
+    }
+    ensureWorkspace();
+    return _retryUploadRequest(
+      () async => JobInfo.fromJson(
+        await _request(
+          'POST',
+          '/v1/uploads/$uploadId/complete',
+          query: {'authorized': 'true'},
+          idempotencyKey: idempotencyKey,
         ),
       ),
     );

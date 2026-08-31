@@ -67,6 +67,11 @@ class ImportRequest(BaseModel):
     authorized: bool = False
 
 
+class UploadCreateRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    size: int = Field(gt=0)
+
+
 class InviteRedeemRequest(BaseModel):
     code: str = Field(min_length=1, max_length=4096)
 
@@ -160,6 +165,11 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     # Store config in app state
     app.state.config = cfg
     app.state.queue = queue
+
+    from noir.application.upload_service import ResumableUploadService
+
+    uploads = ResumableUploadService(cfg, queue)
+    app.state.uploads = uploads
 
     def get_cfg() -> NoirConfig:
         return cfg
@@ -260,7 +270,87 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             raise HTTPException(404, "Project not found")
         return project.model_dump(mode="json")
 
-    # ── Import ────────────────────────────────────────────────────
+    # ── Resumable upload / import ─────────────────────────────────
+
+    def upload_failure(exc):
+        from noir.application.upload_service import UploadError
+
+        if isinstance(exc, UploadError):
+            raise HTTPException(exc.status_code, str(exc)) from exc
+        raise exc
+
+    @app.post("/v1/uploads", status_code=201, dependencies=[Depends(_verify_token)])
+    def begin_upload(
+        req: UploadCreateRequest,
+        principal: Principal,
+        idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    ):
+        try:
+            return uploads.begin(
+                user_id=principal.user_id,
+                idempotency_key=idempotency_key or "",
+                filename=req.filename,
+                size=req.size,
+            ).public()
+        except Exception as exc:
+            upload_failure(exc)
+
+    @app.get("/v1/uploads/{upload_id}", dependencies=[Depends(_verify_token)])
+    def upload_status(upload_id: str, principal: Principal):
+        try:
+            return uploads.status(upload_id=upload_id, user_id=principal.user_id).public()
+        except Exception as exc:
+            upload_failure(exc)
+
+    @app.patch("/v1/uploads/{upload_id}", dependencies=[Depends(_verify_token)])
+    async def append_upload(
+        upload_id: str,
+        request: Request,
+        principal: Principal,
+        upload_offset: int = Header(..., alias="Upload-Offset", ge=0),
+    ):
+        content_length = request.headers.get("content-length")
+        if not content_length:
+            raise HTTPException(411, "Content-Length is required for upload chunks")
+        try:
+            if int(content_length) > cfg.max_upload_chunk_size:
+                raise HTTPException(413, "Upload chunk exceeds server limit")
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid Content-Length") from exc
+        chunk = await request.body()
+        try:
+            session = uploads.append(
+                upload_id=upload_id,
+                user_id=principal.user_id,
+                offset=upload_offset,
+                chunk=chunk,
+            )
+            return JSONResponse(
+                session.public(), headers={"Upload-Offset": str(session.offset)}
+            )
+        except Exception as exc:
+            upload_failure(exc)
+
+    @app.post(
+        "/v1/uploads/{upload_id}/complete",
+        status_code=202,
+        dependencies=[Depends(_verify_token)],
+    )
+    def complete_upload(
+        upload_id: str,
+        principal: Principal,
+        authorized: bool = Query(False),
+    ):
+        if not authorized:
+            raise HTTPException(400, "Authorization required")
+        try:
+            return uploads.complete(
+                upload_id=upload_id, user_id=principal.user_id
+            ).model_dump(mode="json")
+        except Exception as exc:
+            upload_failure(exc)
+
+    # ── Legacy one-request import ─────────────────────────────────
 
     @app.post("/v1/import", status_code=202, dependencies=[Depends(_verify_token)])
     async def import_apk(

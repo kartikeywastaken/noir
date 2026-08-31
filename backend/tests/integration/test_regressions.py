@@ -548,7 +548,7 @@ def test_api_queue_cancellation_sse_and_upload_limit(workspace):
     assert "event: done\ndata: " in events
     response = client.post("/v1/import?authorized=true", files={"file": ("large.apk", b"x" * 20)})
     assert response.status_code == 413
-    assert not list((cfg.projects_dir.parent / "uploads").iterdir())
+    assert not any(path.is_file() for path in (cfg.projects_dir.parent / "uploads").rglob("*"))
 
 
 @pytest.mark.e2e
