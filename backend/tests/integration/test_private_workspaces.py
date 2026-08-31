@@ -221,7 +221,7 @@ def test_queued_preview_is_not_approval_and_finish_is_hash_bound(isolated, monke
             )
 
     monkeypatch.setattr("noir.application.ai_service.GeminiProvider", Provider)
-    body = {"user_request": "rename", "revision": 0, "allow_ai_upload": True}
+    body = {"user_request": "edit private text", "revision": 0, "allow_ai_upload": True}
     path = f"/v1/projects/{project.id}/workflow/prepare"
     response = alice.post(path, json=body, headers={"Idempotency-Key": "same"})
     assert response.status_code == 202
@@ -274,6 +274,53 @@ def test_queued_preview_is_not_approval_and_finish_is_hash_bound(isolated, monke
     app.state.queue.execute(queued)
     assert JobRepository().get(queued.job_id).state == "cancelled"
     assert (workspace.decoded_dir / "label.txt").read_text() == "private\n"
+
+
+def test_unsupported_prepare_stops_before_patch_generation(isolated, monkeypatch):
+    from noir.infrastructure.database.repositories import PatchRepository, PlanRepository
+
+    app, config, users = isolated
+    alice, owner, *_ = users[0]
+    project, _ = project_for(config, owner)
+
+    class Provider:
+        def __init__(self, **kwargs):
+            pass
+
+        def generate_plan(self, request, analysis, context, *, project_id):
+            return ChangePlan(
+                project_id=project_id,
+                workspace_revision=0,
+                user_request=request,
+                intended_outcome="No safe implementation point was identified",
+                file_changes=[],
+                unsupported_aspects=["The requested behavior is not present in supplied context"],
+            )
+
+        def generate_patch(self, plan, context):
+            pytest.fail("Unsupported plan reached patch generation")
+
+    monkeypatch.setattr("noir.application.ai_service.GeminiProvider", Provider)
+    response = alice.post(
+        f"/v1/projects/{project.id}/workflow/prepare",
+        json={
+            "user_request": "change unsupported engine rules",
+            "revision": 0,
+            "allow_ai_upload": True,
+        },
+        headers={"Idempotency-Key": "unsupported"},
+    )
+    assert response.status_code == 202
+    queued = JobRepository().get(response.json()["job_id"])
+    app.state.queue.execute(queued)
+    completed = JobRepository().get(queued.job_id)
+
+    assert completed.state == "succeeded", completed.error_message
+    result = completed.result_data["result"]
+    assert result["unsupported"] is True
+    assert "patch_id" not in result
+    assert PlanRepository().get(result["plan_id"]).file_changes == []
+    assert PatchRepository().list_by_project(project.id) == []
 
 
 @pytest.fixture

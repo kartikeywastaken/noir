@@ -31,6 +31,30 @@ from noir.infrastructure.ai.provider import AiProvider
 logger = logging.getLogger(__name__)
 
 
+def _is_retryable_availability_error(exc: Exception) -> bool:
+    """Limit fallback to transient provider/network availability failures."""
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status in {429, 500, 502, 503, 504}:
+        return True
+    detail = str(exc).upper()
+    return any(
+        marker in detail
+        for marker in (
+            "429",
+            "500 INTERNAL",
+            "502 BAD_GATEWAY",
+            "503 UNAVAILABLE",
+            "504 DEADLINE_EXCEEDED",
+            "RESOURCE_EXHAUSTED",
+            "HIGH DEMAND",
+            "TIMED OUT",
+            "TIMEOUT",
+        )
+    )
+
+
 def _schema_size(schema: dict[str, Any] | None) -> int:
     return (
         len(json.dumps(schema, ensure_ascii=False, separators=(",", ":")).encode()) if schema else 0
@@ -90,6 +114,51 @@ def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
     }
 
 
+_PLAN_LIST_FIELDS = (
+    "manifest_changes",
+    "permission_changes",
+    "component_changes",
+    "smali_integration_points",
+    "behavioral_changes",
+    "network_destinations",
+    "data_categories",
+    "runtime_triggers",
+    "background_behavior",
+    "compatibility_concerns",
+    "risks",
+    "validation_steps",
+    "expected_test_results",
+    "unsupported_aspects",
+)
+
+_PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "intended_outcome": {"type": "string"},
+        "file_changes": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "relative_path": {"type": "string"},
+                    "operation": {
+                        "type": "string",
+                        "enum": [operation.value for operation in PatchOperationType],
+                    },
+                    "description": {"type": "string"},
+                },
+                "required": ["relative_path", "operation", "description"],
+                "additionalProperties": False,
+            },
+        },
+        **{name: {"type": "array", "items": {"type": "string"}} for name in _PLAN_LIST_FIELDS},
+    },
+    "required": ["intended_outcome", "file_changes", *_PLAN_LIST_FIELDS],
+    "additionalProperties": False,
+}
+
+
 class GeminiProviderError(Exception):
     """Raised when Gemini API operations fail."""
 
@@ -98,6 +167,8 @@ class GeminiProviderError(Exception):
 
 class GeminiProvider(AiProvider):
     """Google Gemini AI provider implementation."""
+
+    provider_name = "gemini"
 
     def __init__(
         self,
@@ -108,9 +179,9 @@ class GeminiProvider(AiProvider):
         config: NoirConfig | None = None,
     ):
         self.config = config or get_config()
-        if self.config.ai_provider != "gemini":
-            raise GeminiProviderError("Only the configured Gemini provider is supported")
         self.model_name = model or self.config.ai_model
+        self.fallback_model_name = self.config.ai_fallback_model.strip()
+        self.last_model_name = self.model_name
         self.api_key = api_key or self.config.gemini_api_key.get_secret_value()
         self.timeout = self.config.ai_timeout if timeout == 120 else timeout
         self.max_output_tokens = (
@@ -132,13 +203,22 @@ class GeminiProvider(AiProvider):
                 from google import genai
                 from google.genai import types
 
+                # With an explicit fallback, hidden SDK retries delay failover by
+                # up to several full request timeouts. Try the primary once and
+                # let _call_model immediately route retryable capacity failures
+                # to the configured fallback. Without a fallback, retain the
+                # configured SDK retry policy.
+                sdk_attempts = (
+                    1
+                    if self.fallback_model_name
+                    and self.fallback_model_name != self.model_name
+                    else self.config.ai_retry_limit + 1
+                )
                 self._client = genai.Client(
                     api_key=self.api_key,
                     http_options=types.HttpOptions(
                         timeout=self.timeout * 1000,
-                        retry_options=types.HttpRetryOptions(
-                            attempts=self.config.ai_retry_limit + 1
-                        ),
+                        retry_options=types.HttpRetryOptions(attempts=sdk_attempts),
                     ),
                 )
             except ImportError:
@@ -173,21 +253,37 @@ class GeminiProvider(AiProvider):
         token_budget = self.max_output_tokens
         for attempt in range(1, attempts + 1):
             config = types.GenerateContentConfig(
-                temperature=0.2,
                 max_output_tokens=token_budget,
                 system_instruction=system_instruction or None,
                 response_mime_type="application/json" if json_output else "text/plain",
                 response_json_schema=response_schema,
             )
-            try:
-                response = client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=config,
-                )
-            except Exception as e:
-                detail = str(e).replace(self.api_key, "[REDACTED]")
-                raise GeminiProviderError(f"Gemini API call failed: {detail}") from None
+            response = None
+            models = [self.model_name]
+            if self.fallback_model_name and self.fallback_model_name != self.model_name:
+                models.append(self.fallback_model_name)
+            for model_index, model_name in enumerate(models):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=config,
+                    )
+                    self.last_model_name = model_name
+                    break
+                except Exception as exc:
+                    can_fallback = model_index == 0 and len(models) > 1
+                    if can_fallback and _is_retryable_availability_error(exc):
+                        logger.warning(
+                            "Gemini model %s is temporarily unavailable; retrying with %s",
+                            self.model_name,
+                            self.fallback_model_name,
+                        )
+                        continue
+                    detail = str(exc).replace(self.api_key, "[REDACTED]")
+                    raise GeminiProviderError(f"Gemini API call failed: {detail}") from None
+            if response is None:
+                raise GeminiProviderError("Gemini returned no response")
 
             # Never retry a safety rejection or accept a partial candidate, even if its
             # text happens to be valid JSON. Do not expose raw provider feedback or content.
@@ -325,6 +421,7 @@ class GeminiProvider(AiProvider):
             "omitted_files": context.get("omitted_files", []),
             "file_coverage": context.get("file_coverage", {}),
             "task_focus": context.get("task_focus", "general"),
+            "planning_feedback": context.get("planning_feedback", ""),
         }
 
         def render(context_str: str) -> str:
@@ -338,6 +435,12 @@ APK ANALYSIS:
 File coverage marked exact_label_elements_only contains verbatim XML excerpts, not full files.
 Use targeted replace_block operations for these excerpts; never replace the whole resource file.
 Missing inventory or snippets are omitted context, not proof that a file or behavior is absent.
+Every non-create file_changes.relative_path MUST exactly match one entry in the supplied files
+inventory. Never invent a conventional source path. If the evidence is insufficient, put the
+limitation in unsupported_aspects instead of guessing. When no safe, evidence-backed edit can
+implement the request, return an empty file_changes array and explain why in unsupported_aspects.
+Never add a placeholder, no-op, unrelated manifest edit, or validation-only file change merely
+to make the plan appear actionable.
 For label-only tasks, consider changing application and launcher android:label attributes
 instead of editing every localized resource. Keep the plan minimal and within 20 files.
 
@@ -368,22 +471,37 @@ Output a JSON object with this exact schema:
   "compatibility_concerns": ["compatibility issues"],
   "risks": ["risks of this modification"],
   "validation_steps": ["how to verify the modification works"],
+  "expected_test_results": ["what successful validation should show"],
   "unsupported_aspects": ["what cannot be done"]
 }}"""
 
-        prompt = self._prepare_prompt(render, context_data, system, ["AndroidManifest.xml"])
-        response_text = self._call_model(prompt, system)
+        prompt = self._prepare_prompt(
+            render,
+            context_data,
+            system,
+            ["AndroidManifest.xml"],
+            response_schema=_PLAN_RESPONSE_SCHEMA,
+        )
+        response_text = self._call_model(
+            prompt,
+            system,
+            response_schema=_PLAN_RESPONSE_SCHEMA,
+        )
         data = self._parse_json_response(response_text)
 
-        if not data.get("intended_outcome") or not data.get("file_changes"):
-            raise GeminiProviderError("AI did not return an actionable plan; no changes were made")
+        if not data.get("intended_outcome"):
+            raise GeminiProviderError("AI plan is missing an intended outcome")
+        if not data.get("file_changes") and not data.get("unsupported_aspects"):
+            raise GeminiProviderError(
+                "AI returned neither actionable file changes nor an unsupported explanation"
+            )
 
         plan = ChangePlan(
             project_id=project_id,
             workspace_revision=0,  # Set by service
             user_request=user_request,
-            provider="gemini",
-            model=self.model_name,
+            provider=self.provider_name,
+            model=self.last_model_name,
             intended_outcome=data.get("intended_outcome", ""),
             file_changes=[
                 PlanFileChange(
@@ -405,6 +523,7 @@ Output a JSON object with this exact schema:
             compatibility_concerns=data.get("compatibility_concerns", []),
             risks=data.get("risks", []),
             validation_steps=data.get("validation_steps", []),
+            expected_test_results=data.get("expected_test_results", []),
             unsupported_aspects=data.get("unsupported_aspects", []),
         )
 
@@ -452,6 +571,10 @@ For non-XML operations, omit xml_attributes or use an empty object, not null.
 affected_scope is an optional description: omit it or use an empty string when not applicable.
 manifest_update requires a nonempty xml_attributes object. replace_block requires exact
 match_content and new_content (an empty new_content string is valid when deleting a block).
+For manifest_update or manifest_remove on a repeatable element such as activity, activity-alias,
+service, receiver, provider, uses-permission or meta-data, include its existing android:name in
+xml_attributes so the selector identifies exactly one element. Do not use manifest_update for
+an element that cannot be uniquely identified; use an exact replace_block instead.
 Use the shortest exact match_content that occurs exactly once in that file, with just enough
 surrounding text to identify the target. Use separate, non-overlapping replace_block operations
 for separate edits in the same file. Never copy an entire manifest or application subtree
@@ -549,6 +672,27 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
             raise GeminiProviderError(
                 f"{prefix}: manifest_update requires xml_element and nonempty xml_attributes"
             )
+        if operation.operation in (
+            PatchOperationType.MANIFEST_UPDATE,
+            PatchOperationType.MANIFEST_REMOVE,
+        ):
+            repeatable = {
+                "activity",
+                "activity-alias",
+                "service",
+                "receiver",
+                "provider",
+                "uses-permission",
+                "permission",
+                "meta-data",
+            }
+            if operation.xml_element in repeatable and not (
+                operation.xml_attributes.get("android:name") or operation.xml_attributes.get("name")
+            ):
+                raise GeminiProviderError(
+                    f"{prefix}: {operation.xml_element} requires its existing android:name "
+                    "to select exactly one manifest element"
+                )
         if operation.operation == PatchOperationType.REPLACE_BLOCK and (
             not operation.match_content or operation.new_content is None
         ):

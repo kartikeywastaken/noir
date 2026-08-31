@@ -167,9 +167,14 @@ def _check_ai(config: NoirConfig) -> ToolCheck:
             required_for="optional_for_ai",
             message="AI provider disabled.",
         )
-    # Check if API key is configured
-    api_key = config.gemini_api_key.get_secret_value()
-    if not api_key:
+    if config.ai_provider.strip().lower() != "gemini":
+        return ToolCheck(
+            name="AI Provider",
+            available=False,
+            required_for="optional_for_ai",
+            message=f"Unsupported AI provider: {config.ai_provider}",
+        )
+    if not config.gemini_api_key.get_secret_value():
         return ToolCheck(
             name="AI Provider",
             available=False,

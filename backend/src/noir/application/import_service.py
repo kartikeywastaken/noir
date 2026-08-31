@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,10 +22,7 @@ from noir.infrastructure.database.repositories import (
     JobRepository,
     ProjectRepository,
 )
-from noir.infrastructure.filesystem.workspace import (
-    ProjectWorkspace,
-    compute_file_hash,
-)
+from noir.infrastructure.filesystem.workspace import ProjectWorkspace
 from noir.validation.apk_validator import ApkValidationError, validate_apk
 
 
@@ -78,6 +76,10 @@ class ImportService:
         authorized: bool = False,
         project_id: str | None = None,
         original_filename: str | None = None,
+        job: JobInfo | None = None,
+        input_sha256: str | None = None,
+        input_size: int | None = None,
+        move_input: bool = False,
     ) -> dict:
         """Import and decode an APK.
 
@@ -116,14 +118,19 @@ class ImportService:
         workspace = ProjectWorkspace(project.id, self.config)
         workspace.create()
 
-        # Create job
-        job = JobInfo(
-            project_id=project.id,
-            stage=WorkflowStage.VALIDATING_INPUT,
-            state=JobState.RUNNING,
-            started_at=datetime.now(UTC),
-        )
-        self.job_repo.create(job)
+        # API/queue workflows supply their canonical job. Standalone CLI imports
+        # still receive a persisted job owned by this service.
+        owns_job = job is None
+        if job is None:
+            job = JobInfo(
+                project_id=project.id,
+                stage=WorkflowStage.VALIDATING_INPUT,
+                state=JobState.RUNNING,
+                started_at=datetime.now(UTC),
+            )
+            self.job_repo.create(job)
+        elif job.project_id != project.id:
+            raise ApkImportError("Import job does not belong to this project", "invalid_job")
 
         try:
             # Step 1: Validate
@@ -136,7 +143,8 @@ class ImportService:
             )
 
             validation = validate_apk(apk_path, self.config)
-            for warn in validation.get("warnings", []):
+            warnings = validation.get("warnings", [])
+            for warn in warnings[:10]:
                 self._emit_event(
                     project.id,
                     job.job_id,
@@ -144,11 +152,24 @@ class ImportService:
                     EventSeverity.WARNING,
                     warn,
                 )
+            if len(warnings) > 10:
+                self._emit_event(
+                    project.id,
+                    job.job_id,
+                    WorkflowStage.VALIDATING_INPUT,
+                    EventSeverity.WARNING,
+                    f"{len(warnings) - 10} additional validation warnings omitted from live events",
+                    warning_count=len(warnings),
+                )
 
             # Step 2: Store input APK
-            stored_apk = workspace.store_input_apk(apk_path)
-            sha256 = compute_file_hash(stored_apk)
-            file_size = stored_apk.stat().st_size
+            stored_apk, sha256, file_size = workspace.store_input_apk(
+                apk_path,
+                filename=original_filename,
+                move=move_input,
+                expected_hash=input_sha256,
+                expected_size=input_size,
+            )
 
             project.original_size = file_size
             project.original_sha256 = sha256
@@ -181,7 +202,8 @@ class ImportService:
             framework_dir = workspace.root / "metadata" / "framework-cache"
             from noir.application.jobs import job_runtime
 
-            with job_runtime(job.job_id):
+            runtime = nullcontext() if not owns_job else job_runtime(job.job_id)
+            with runtime:
                 decode_result = self.apktool.decode(
                     stored_apk,
                     workspace.decoded_dir,
@@ -223,16 +245,17 @@ class ImportService:
             project.status = ProjectStatus.ANALYZED
             self.project_repo.update(project)
 
-            # Complete job
-            job.state = JobState.SUCCEEDED
-            job.finished_at = datetime.now(UTC)
-            job.result_data = {
-                "project_id": project.id,
-                "package_name": analysis.package_name,
-                "sha256": sha256,
-                "file_count": len(manifest),
-            }
-            self.job_repo.update(job)
+            # The queue owns terminal state/result data for queued workflows.
+            if owns_job:
+                job.state = JobState.SUCCEEDED
+                job.finished_at = datetime.now(UTC)
+                job.result_data = {
+                    "project_id": project.id,
+                    "package_name": analysis.package_name,
+                    "sha256": sha256,
+                    "file_count": len(manifest),
+                }
+                self.job_repo.update(job)
 
             self._emit_event(
                 project.id,
@@ -256,17 +279,25 @@ class ImportService:
             }
 
         except ApkValidationError as e:
-            return self._fail_job(project, job, str(e), "validation_error")
+            return self._fail_job(project, job, str(e), "validation_error", owns_job)
         except ApkToolError as e:
-            return self._fail_job(project, job, str(e), "decode_error")
+            return self._fail_job(project, job, str(e), "decode_error", owns_job)
         except Exception as e:
-            return self._fail_job(project, job, str(e), "internal_error")
+            return self._fail_job(project, job, str(e), "internal_error", owns_job)
 
-    def _fail_job(self, project: ProjectInfo, job: JobInfo, error: str, code: str) -> dict:
-        job.state = JobState.FAILED
-        job.error_message = error
-        job.finished_at = datetime.now(UTC)
-        self.job_repo.update(job)
+    def _fail_job(
+        self,
+        project: ProjectInfo,
+        job: JobInfo,
+        error: str,
+        code: str,
+        owns_job: bool,
+    ) -> dict:
+        if owns_job:
+            job.state = JobState.FAILED
+            job.error_message = error
+            job.finished_at = datetime.now(UTC)
+            self.job_repo.update(job)
 
         project.status = ProjectStatus.FAILED
         self.project_repo.update(project)

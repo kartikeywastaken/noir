@@ -7,6 +7,8 @@ import secrets
 import sys
 import threading
 import time
+import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -49,6 +51,53 @@ def patch_for(ws, *ops):
     return PatchSet(
         project_id=ws.project_id, plan_id="testplan", workspace_revision=0, operations=list(ops)
     )
+
+
+def test_plan_generation_regrounds_an_invented_path_before_saving(workspace, monkeypatch):
+    from noir.application.ai_service import generate_plan
+    from noir.domain.models import AnalysisResult, ChangePlan, PlanFileChange
+    from noir.infrastructure.database.repositories import PlanRepository
+
+    cfg, ws = workspace
+
+    class Provider:
+        calls = 0
+
+        def __init__(self, **kwargs):
+            pass
+
+        def generate_plan(self, request, analysis, context, *, project_id):
+            self.__class__.calls += 1
+            if self.calls == 1:
+                path = "assets/public/js/app.js"
+                assert not context.get("planning_feedback")
+            else:
+                path = "sample.txt"
+                assert "assets/public/js/app.js" in context["planning_feedback"]
+            return ChangePlan(
+                project_id=project_id,
+                workspace_revision=0,
+                user_request=request,
+                file_changes=[
+                    PlanFileChange(
+                        relative_path=path,
+                        operation=PatchOperationType.REPLACE_BLOCK,
+                    )
+                ],
+                intended_outcome="Use a real decoded path",
+            )
+
+    monkeypatch.setattr("noir.application.ai_service.GeminiProvider", Provider)
+    monkeypatch.setattr(
+        "noir.application.ai_service.AnalysisService.analyze",
+        lambda *args, **kwargs: AnalysisResult(project_id=ws.project_id),
+    )
+
+    plan = generate_plan(cfg, ws.project_id, "make a small change", True)
+
+    assert Provider.calls == 2
+    assert plan.file_changes[0].relative_path == "sample.txt"
+    assert len(PlanRepository().list_by_project(ws.project_id)) == 1
 
 
 def test_sibling_prefix_symlink_rejected(workspace):
@@ -364,6 +413,92 @@ def test_real_process_cancellation_and_streaming(workspace):
     )
 
 
+def test_process_output_is_batched_into_bounded_events(workspace):
+    from noir.application.jobs import job_runtime
+    from noir.infrastructure.database.repositories import EventRepository
+    from noir.infrastructure.processes.runner import run_tool
+
+    _, ws = workspace
+    job = JobInfo(project_id=ws.project_id, stage=WorkflowStage.DECODING, state=JobState.RUNNING)
+    JobRepository().create(job)
+    with job_runtime(job.job_id):
+        result = run_tool(
+            [sys.executable, "-u", "-c", "[print(f'line-{i}') for i in range(100)]"]
+        )
+    assert result.exit_code == 0
+    events = EventRepository().list_by_job(job.job_id)
+    assert len(events) <= 10
+    output = "\n".join(event.message for event in events)
+    assert "line-0" in output and "line-99" in output
+
+
+def test_queue_passes_one_canonical_job_to_import(workspace, monkeypatch, tmp_path):
+    from noir.application.import_service import ImportService
+    from noir.application.jobs import TaskQueue
+
+    cfg, ws = workspace
+    upload = tmp_path / "queued.apk"
+    upload.write_bytes(b"queued")
+    seen = []
+
+    def fake_import(_service, _path, **kwargs):
+        seen.append(kwargs["job"].job_id)
+        return {"project_id": ws.project_id}
+
+    monkeypatch.setattr(ImportService, "import_apk", fake_import)
+    queue = TaskQueue(cfg)
+    job = queue.submit("import", ws.project_id, {"path": str(upload)})
+    queue.execute(job)
+    assert seen == [job.job_id]
+    assert [item.job_id for item in JobRepository().list_by_project(ws.project_id)] == [job.job_id]
+
+
+def test_build_uses_decoded_workspace_and_cleans_generated_files(workspace, monkeypatch):
+    from noir.application.build_service import BuildService
+    from noir.infrastructure.database.repositories import FileManifestRepository
+
+    cfg, ws = workspace
+    (ws.decoded_dir / "AndroidManifest.xml").write_text(
+        '<manifest package="com.noir.performance"><application /></manifest>'
+    )
+    FileManifestRepository().save(ws.project_id, 1, ws.build_file_manifest())
+    project = ProjectRepository().get(ws.project_id)
+    project.workspace_revision = 1
+    ProjectRepository().update(project)
+    service = BuildService(cfg)
+
+    def fake_build(decoded_dir, output_apk, **_kwargs):
+        assert decoded_dir == ws.decoded_dir
+        (decoded_dir / "build" / "apk").mkdir(parents=True)
+        (decoded_dir / "build" / "apk" / "temporary").write_text("generated")
+        with zipfile.ZipFile(output_apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", "manifest")
+        return SimpleNamespace(
+            tool_version="test", duration_seconds=0.01, stdout="built", stderr=""
+        )
+
+    monkeypatch.setattr(service.apktool, "build", fake_build)
+    result = service.build(ws.project_id)
+    assert result.success
+    assert not (ws.decoded_dir / "build").exists()
+    assert not (ws.builds_dir / result.build_id / "workspace").exists()
+
+
+def test_job_event_cursor_reads_only_new_events(workspace):
+    from noir.domain.models import AuditEvent
+    from noir.infrastructure.database.repositories import EventRepository
+
+    _, ws = workspace
+    job = JobInfo(project_id=ws.project_id, stage=WorkflowStage.PLANNING)
+    JobRepository().create(job)
+    repo = EventRepository()
+    first = repo.create(AuditEvent(project_id=ws.project_id, job_id=job.job_id, message="first"))
+    repo.create(AuditEvent(project_id=ws.project_id, job_id=job.job_id, message="second"))
+    assert [event.message for event in repo.list_by_job(job.job_id, after_id=first.event_id)] == [
+        "second"
+    ]
+
+
 def test_process_credentials_are_not_inherited_or_logged(monkeypatch):
     from noir.infrastructure.processes.runner import run_tool
 
@@ -592,7 +727,13 @@ def test_failed_ai_response_preserves_approval_and_can_retry(workspace, monkeypa
     from noir.infrastructure.database.repositories import ApprovalRepository, PatchRepository
 
     cfg, ws = workspace
-    cfg = cfg.model_copy(update={"gemini_api_key": SecretStr("boundary-test-only")})
+    cfg = cfg.model_copy(
+        update={
+            "ai_provider": "gemini",
+            "ai_model": "gemini-3.7-flash",
+            "gemini_api_key": SecretStr("boundary-test-only"),
+        }
+    )
     plan_service = PlanService(cfg)
     plan = plan_service.create_plan(
         ChangePlan(

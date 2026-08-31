@@ -92,6 +92,34 @@ def run_tool(
 
     def drain(pipe, index):
         pending = ""
+        pending_lines: list[str] = []
+        pending_size = 0
+        last_emit = time.monotonic()
+
+        def flush(*, force: bool = False) -> None:
+            nonlocal pending_lines, pending_size, last_emit
+            if not sink or not pending_lines:
+                return
+            now = time.monotonic()
+            if (
+                not force
+                and len(pending_lines) < 20
+                and pending_size < 32_768
+                and now - last_emit < 0.25
+            ):
+                return
+            sink(redact("\n".join(pending_lines)))
+            pending_lines = []
+            pending_size = 0
+            last_emit = now
+
+        def queue_line(line: str) -> None:
+            nonlocal pending_size
+            line = line[:8192]
+            pending_lines.append(line)
+            pending_size += len(line.encode("utf-8", errors="replace"))
+            flush()
+
         try:
             while chunk := pipe.read1(4096):
                 buffers[index].extend(chunk)
@@ -100,14 +128,13 @@ def run_tool(
                 pending += chunk.decode("utf-8", errors="replace")
                 while "\n" in pending:
                     line, pending = pending.split("\n", 1)
-                    if sink:
-                        sink(redact(line[:8192]))
+                    queue_line(line)
                 if len(pending) > 8192:
-                    if sink:
-                        sink(redact(pending[:8192]))
+                    queue_line(pending)
                     pending = ""
-            if pending and sink:
-                sink(redact(pending))
+            if pending:
+                queue_line(pending)
+            flush(force=True)
         except Exception as exc:
             reader_errors.append(exc)
         finally:

@@ -16,7 +16,7 @@ def main() -> None:
     gemini = (credentials / "gemini-api-key").read_text().strip()
     password = (credentials / "signing-password").read_text().strip()
     token = (credentials / "api-token").read_text().strip()
-    if not password or not token:
+    if not gemini or not password or not token:
         raise RuntimeError("Missing service credentials")
     os.environ["GEMINI_API_KEY"] = gemini
     os.environ["NOIR_KEYSTORE_PASSWORD"] = password

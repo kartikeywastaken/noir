@@ -20,7 +20,7 @@ def main() -> None:
     config = NoirConfig()
     gemini = config.gemini_api_key.get_secret_value()
     if not gemini:
-        raise SystemExit("The existing local Gemini key is missing; nothing was provisioned.")
+        raise SystemExit("GEMINI_API_KEY is required for deployment.")
     directory = Path.home() / ".noir/deployments/ec2-stockholm"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     token = secrets.token_urlsafe(48)
@@ -33,6 +33,7 @@ def main() -> None:
             "settings": {
                 "NOIR_AI_PROVIDER": config.ai_provider,
                 "NOIR_AI_MODEL": config.ai_model,
+                "NOIR_AI_FALLBACK_MODEL": config.ai_fallback_model,
                 "NOIR_AI_TIMEOUT": config.ai_timeout,
                 "NOIR_AI_RETRY_LIMIT": config.ai_retry_limit,
                 "NOIR_AI_RESPONSE_RETRY_LIMIT": config.ai_response_retry_limit,

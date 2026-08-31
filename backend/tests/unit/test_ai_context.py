@@ -133,8 +133,9 @@ def test_large_inventory_fits_actual_planning_prompt(ws, monkeypatch):
     provider = GeminiProvider(config=ws.config)
     provider.config.ai_max_request_size = 8000
 
-    def inspect(prompt, system):
+    def inspect(prompt, system, *, response_schema):
         assert len(prompt.encode()) + len(system.encode()) <= 8000
+        assert response_schema["properties"]["runtime_triggers"]["type"] == "array"
         assert "@string/app_name" in prompt
         assert "unrelated.smali" not in prompt
         return json.dumps(
@@ -150,6 +151,18 @@ def test_large_inventory_fits_actual_planning_prompt(ws, monkeypatch):
     provider.generate_plan(
         "Rename app", AnalysisResult(project_id=ws.project_id), context, project_id=ws.project_id
     )
+
+
+def test_inventory_ranks_real_public_entrypoints_ahead_of_localization_noise(ws, monkeypatch):
+    noise = [f"assets/public/i18n/locale-{index}.json" for index in range(1200)]
+    files = [*noise, "assets/public/main.js", "assets/public/variant.js", "lib/arm64/lib.so"]
+    monkeypatch.setattr(ws, "list_files", lambda subdir="": sorted(files))
+
+    inventory = AiContextTools(ws).list_project_files(user_request="swap chess king and queen")
+
+    assert "assets/public/main.js" in inventory
+    assert "assets/public/variant.js" in inventory
+    assert inventory.index("assets/public/main.js") < inventory.index(noise[0])
 
 
 def test_patch_budget_preserves_required_files(ws, monkeypatch):

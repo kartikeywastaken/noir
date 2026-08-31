@@ -28,16 +28,101 @@ class AiContextTools:
     MAX_PATCH_FILE_BYTES = 1_000_000  # Same bounded-text ceiling as the patch engine.
     MAX_FILES = 20
     MAX_CONTEXT_BYTES = 45_000
+    MAX_INVENTORY_BYTES = 45_000
     MAX_SEARCH_RESULTS = 50
 
     def __init__(self, workspace: ProjectWorkspace, analysis: AnalysisResult | None = None):
         self.workspace = workspace
         self.analysis = analysis
+        self._indexed_paths: list[str] | None = None
 
-    def list_project_files(self, subdir: str = "") -> list[str]:
-        """List files in the decoded workspace."""
-        files = self.workspace.list_files(subdir)
-        return files[:500]  # Bounded
+    def _workspace_paths(self, subdir: str = "") -> list[str]:
+        """Reuse the revision manifest instead of walking the decoded tree again."""
+        if self._indexed_paths is None:
+            from noir.infrastructure.database.repositories import (
+                FileManifestRepository,
+                ProjectRepository,
+            )
+
+            try:
+                project = ProjectRepository().get(self.workspace.project_id)
+                manifest = (
+                    FileManifestRepository().get_by_revision(
+                        self.workspace.project_id, project.workspace_revision
+                    )
+                    if project
+                    else None
+                )
+            except RuntimeError:
+                # Context tools are also usable in isolated unit tests and
+                # offline callers before a repository has been initialized.
+                manifest = None
+            self._indexed_paths = (
+                [entry.relative_path for entry in manifest]
+                if manifest is not None
+                else self.workspace.list_files()
+            )
+        if not subdir:
+            return list(self._indexed_paths)
+        prefix = subdir.replace("\\", "/").strip("/") + "/"
+        return [path for path in self._indexed_paths if path.startswith(prefix)]
+
+    def list_project_files(self, subdir: str = "", *, user_request: str = "") -> list[str]:
+        """Return a bounded, request-ranked inventory of real decoded paths."""
+        files = self._workspace_paths(subdir)
+        stop_words = {
+            "add",
+            "and",
+            "app",
+            "change",
+            "from",
+            "have",
+            "into",
+            "make",
+            "modify",
+            "please",
+            "that",
+            "the",
+            "this",
+            "with",
+        }
+        tokens = {
+            token
+            for token in re.findall(r"[a-z0-9_]{3,}", user_request.lower())
+            if token not in stop_words
+        }
+
+        def priority(path: str) -> tuple[int, int, str]:
+            lower = path.lower()
+            if lower in {"androidmanifest.xml", "apktool.yml"}:
+                rank = 0
+            elif any(token in lower for token in tokens):
+                rank = 1
+            elif lower.startswith("assets/public/") and lower.count("/") <= 2:
+                rank = 2
+            elif lower.startswith("lib/") and lower.endswith(".so"):
+                rank = 3
+            elif lower.startswith("res/values") and lower.endswith(("strings.xml", "arrays.xml")):
+                rank = 4
+            elif lower.startswith("assets/") and lower.count("/") <= 2:
+                rank = 5
+            elif "/i18n/" in lower or "/fonts/" in lower:
+                rank = 9
+            elif lower.endswith(".smali"):
+                rank = 8
+            else:
+                rank = 6
+            return rank, lower.count("/"), lower
+
+        result: list[str] = []
+        used = 2
+        for path in sorted(files, key=priority):
+            encoded_size = len(path.encode("utf-8")) + 4
+            if used + encoded_size > self.MAX_INVENTORY_BYTES:
+                break
+            result.append(path)
+            used += encoded_size
+        return result
 
     def read_file_range(self, relative_path: str, max_chars: int | None = None) -> str:
         """Read bounded content from a project file."""
@@ -149,7 +234,7 @@ class AiContextTools:
             "file_coverage": {},
             "manifest": self.inspect_manifest(),
             "omitted_files": [],
-            "files": self.list_project_files(),
+            "files": self.list_project_files(user_request=user_request),
         }
 
         label_task = bool(
@@ -173,7 +258,7 @@ class AiContextTools:
         if not paths:
             # Include key files by default
             paths = ["AndroidManifest.xml"]
-            all_files = label_paths if label_task else self.workspace.list_files()
+            all_files = label_paths if label_task else context["files"]
             for f in all_files:
                 if f.endswith(".smali") or f.endswith(".xml"):
                     paths.append(f)

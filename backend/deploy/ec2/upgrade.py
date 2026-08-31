@@ -40,18 +40,66 @@ def main() -> None:
             "/opt/noir/backend", backup / "backend", ignore=shutil.ignore_patterns("__pycache__")
         )
         shutil.copy2("/opt/noir/deployment/service.py", backup / "service.py")
+        shutil.copy2("/etc/noir/backend.env", backup / "backend.env")
+        shutil.copy2("/etc/systemd/system/noir.service", backup / "noir.service")
         with tarfile.open(source, "r:gz") as archive:
             # Only extract this application; refuse symlinks and path traversal.
             for member in archive.getmembers():
                 if (
-                    not member.name.startswith("backend/")
+                    (member.name != "backend" and not member.name.startswith("backend/"))
                     or ".." in Path(member.name).parts
                     or member.issym()
                     or member.islnk()
                 ):
                     raise RuntimeError("Unexpected deployment archive member")
             archive.extractall("/opt/noir", filter="data")
+        for retired in (
+            "src/noir/infrastructure/ai/errors.py",
+            "src/noir/infrastructure/ai/openai.py",
+            "src/noir/infrastructure/ai/routing.py",
+            "tests/unit/test_openai_routing.py",
+        ):
+            (Path("/opt/noir/backend") / retired).unlink(missing_ok=True)
+        subprocess.run(
+            [
+                "/opt/noir/venv/bin/python",
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "-e",
+                "/opt/noir/backend",
+            ],
+            check=True,
+        )
         shutil.copy2("/opt/noir/backend/deploy/ec2/service.py", "/opt/noir/deployment/service.py")
+        shutil.copy2(
+            "/opt/noir/backend/deploy/ec2/noir.service", "/etc/systemd/system/noir.service"
+        )
+        current_environment = dict(
+            line.split("=", 1)
+            for line in Path("/etc/noir/backend.env").read_text().splitlines()
+            if line and not line.startswith("#")
+        )
+        desired_environment = dict(
+            line.split("=", 1)
+            for line in Path("/opt/noir/backend/deploy/ec2/backend.env").read_text().splitlines()
+            if line and not line.startswith("#")
+        )
+        for name in (
+            "NOIR_AI_PROVIDER",
+            "NOIR_AI_MODEL",
+            "NOIR_AI_FALLBACK_MODEL",
+        ):
+            current_environment[name] = desired_environment[name]
+        Path("/etc/noir/backend.env").write_text(
+            "".join(f"{key}={value}\n" for key, value in current_environment.items())
+        )
+        Path("/etc/noir/backend.env").chmod(0o600)
+        subprocess.run(
+            ["systemd-analyze", "verify", "/etc/systemd/system/noir.service"], check=True
+        )
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
         subprocess.run(["systemctl", "start", "noir"], check=True)
         for _ in range(30):
             try:

@@ -448,7 +448,13 @@ class PatchEngine:
             or elem.get("name") == target_name
         ]
         if len(matches) != 1:
-            raise PatchError("Manifest selector must match exactly one element")
+            selector = f"{op.xml_element or '<missing>'}"
+            if target_name:
+                selector += f" android:name={target_name!r}"
+            raise PatchError(
+                f"Manifest selector {selector} matched {len(matches)} elements; "
+                "exactly one is required"
+            )
         return matches[0]
 
     def _apply_smali_replace_method(self, op: PatchOperation, target: Path) -> None:

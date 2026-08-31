@@ -37,15 +37,13 @@ Edit **backend/.env** (already created, ignored by Git, owner-readable only):
 GEMINI_API_KEY=your_actual_key_here
 NOIR_AI_PROVIDER=gemini
 NOIR_AI_MODEL=gemini-3.6-flash
+NOIR_AI_FALLBACK_MODEL=
 ```
-
-The model above is the project's configured default; your Google account must have access to it.
-Change NOIR_AI_MODEL if your account needs another supported Gemini model.
 
 Restart a running API server after editing. Every new CLI invocation reloads configuration.
 The file loads automatically; no sourcing or copying the key into Python files is necessary.
-An exported GEMINI_API_KEY takes precedence over the file. If an old export is overriding
-your edit, run `unset GEMINI_API_KEY NOIR_GEMINI_API_KEY` in that terminal.
+An exported key takes precedence over the file. If an old export is overriding your edit, run
+`unset GEMINI_API_KEY NOIR_GEMINI_API_KEY` in that terminal.
 
 Check the real API connection:
 
@@ -55,9 +53,15 @@ noir ai check
 
 This makes one small billable/quota-consuming Gemini request, without APK contents.
 Missing/invalid credentials, unavailable models, quota failures, and malformed responses fail
-explicitly. There is no fake provider or offline response fallback.
-Only Gemini needs an external API key. Apktool, building, signing, and manual edits do not.
+explicitly. There is no fake or offline response.
+Gemini 3.6 Flash is currently the only configured model. Provider errors fail explicitly;
+invalid model output is never hidden by switching models.
+Apktool, building, signing, and manual edits do not need the AI key.
 The HTTP bearer token is generated locally and is separate from the Gemini key.
+
+Users continue to enter one short plain-English request. Planning receives a request-ranked
+inventory of paths that actually exist in the decoded APK. If a model still invents a path, NOIR
+performs one automatic grounded replan and refuses to save a second invalid plan.
 
 ## Real toolchain test — no AI key needed
 

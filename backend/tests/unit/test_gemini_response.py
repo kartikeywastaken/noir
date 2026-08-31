@@ -12,7 +12,13 @@ from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
 @pytest.fixture
 def provider():
     return GeminiProvider(
-        config=NoirConfig(_env_file=None, gemini_api_key="unit-test-only", ai_provider="gemini")
+        config=NoirConfig(
+            _env_file=None,
+            gemini_api_key="unit-test-only",
+            ai_provider="gemini",
+            ai_model="gemini-3.7-flash",
+            ai_fallback_model="gemini-3.6-flash",
+        )
     )
 
 
@@ -38,6 +44,141 @@ def test_valid_response_preserved(monkeypatch, provider):
     text = '{"status":"ok"}'
     inject_response(monkeypatch, provider, text)
     assert provider._call_model("test") == text
+
+
+def test_gemini_37_uses_supported_generation_parameters(monkeypatch, provider):
+    captured = {}
+
+    def generate_content(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            text='{"status":"ok"}',
+            prompt_feedback=None,
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+        )
+
+    monkeypatch.setattr(
+        provider,
+        "_get_client",
+        lambda: SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+    )
+
+    provider._call_model("test")
+
+    assert provider.model_name == "gemini-3.7-flash"
+    assert captured["config"].temperature is None
+
+
+def test_gemini_37_capacity_failure_uses_gemini_36_fallback(monkeypatch, provider):
+    calls = []
+
+    class UnavailableError(Exception):
+        status_code = 503
+
+    def generate_content(**kwargs):
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "gemini-3.7-flash":
+            raise UnavailableError("503 UNAVAILABLE: high demand")
+        return SimpleNamespace(
+            text='{"status":"ok"}',
+            prompt_feedback=None,
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+        )
+
+    monkeypatch.setattr(
+        provider,
+        "_get_client",
+        lambda: SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+    )
+
+    assert provider._call_model("test") == '{"status":"ok"}'
+    assert calls == ["gemini-3.7-flash", "gemini-3.6-flash"]
+    assert provider.last_model_name == "gemini-3.6-flash"
+
+
+def test_configured_fallback_disables_slow_hidden_sdk_retries(monkeypatch, provider):
+    from google import genai
+
+    captured = {}
+
+    def client(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(genai, "Client", client)
+    provider._get_client()
+    assert captured["http_options"].retry_options.attempts == 1
+
+
+def test_invalid_request_does_not_use_fallback(monkeypatch, provider):
+    calls = []
+
+    class InvalidRequestError(Exception):
+        status_code = 400
+
+    def generate_content(**kwargs):
+        calls.append(kwargs["model"])
+        raise InvalidRequestError("400 INVALID_ARGUMENT")
+
+    monkeypatch.setattr(
+        provider,
+        "_get_client",
+        lambda: SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+    )
+
+    with pytest.raises(GeminiProviderError, match="INVALID_ARGUMENT"):
+        provider._call_model("test")
+    assert calls == ["gemini-3.7-flash"]
+
+
+def test_unsupported_plan_can_return_zero_file_changes(monkeypatch, provider):
+    from noir.domain.models import AnalysisResult
+
+    inject_response(
+        monkeypatch,
+        provider,
+        json.dumps(
+            {
+                "intended_outcome": "The requested behavior cannot be changed safely",
+                "file_changes": [],
+                "unsupported_aspects": ["No evidence-backed implementation point was found"],
+            }
+        ),
+    )
+
+    plan = provider.generate_plan(
+        "change internal behavior",
+        AnalysisResult(project_id="unsupported"),
+        {"files": [], "file_snippets": {}},
+        project_id="unsupported",
+    )
+
+    assert plan.file_changes == []
+    assert plan.unsupported_aspects
+
+
+def test_empty_plan_without_unsupported_reason_is_rejected(monkeypatch, provider):
+    from noir.domain.models import AnalysisResult
+
+    inject_response(
+        monkeypatch,
+        provider,
+        json.dumps(
+            {
+                "intended_outcome": "No changes",
+                "file_changes": [],
+                "unsupported_aspects": [],
+            }
+        ),
+    )
+
+    with pytest.raises(GeminiProviderError, match="neither actionable"):
+        provider.generate_plan(
+            "change internal behavior",
+            AnalysisResult(project_id="invalid-empty"),
+            {"files": [], "file_snippets": {}},
+            project_id="invalid-empty",
+        )
 
 
 def test_oversized_response_rejected(monkeypatch, provider):
@@ -122,6 +263,19 @@ def test_manifest_update_still_requires_attributes(provider):
                 "operation": "manifest_update",
                 "xml_element": "application",
                 "xml_attributes": None,
+            },
+            0,
+        )
+
+
+def test_repeatable_manifest_element_requires_unique_name(provider):
+    with pytest.raises(GeminiProviderError, match="select exactly one"):
+        provider._parse_patch_operation(
+            {
+                "relative_path": "AndroidManifest.xml",
+                "operation": "manifest_update",
+                "xml_element": "activity",
+                "xml_attributes": {"android:label": "New label"},
             },
             0,
         )

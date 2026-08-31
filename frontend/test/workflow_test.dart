@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -21,6 +22,55 @@ http.Response jsonResponse(Object data, [int status = 200]) =>
     http.Response(jsonEncode(data), status);
 
 void main() {
+  test('installed-app cache copy is removed after its upload', () async {
+    final directory = await Directory.systemTemp.createTemp('noir-app-test-');
+    addTearDown(() => directory.delete(recursive: true));
+    final copiedApk = File('${directory.path}/example.chess.apk');
+    await copiedApk.writeAsBytes([1, 2, 3, 4]);
+    final job = {
+      'job_id': 'import-job',
+      'project_id': 'project',
+      'state': 'succeeded',
+      'stage': 'complete',
+      'result_data': {'operation': 'import', 'result': <String, Object>{}},
+    };
+    final api = NoirApiClient(
+      token: 'test',
+      client: StreamClient((request) async {
+        if (request.method == 'POST') {
+          await request.finalize().drain<void>();
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(job))),
+            202,
+          );
+        }
+        final body = request.url.path == '/v1/jobs/import-job'
+            ? job
+            : {
+                'id': 'project',
+                'original_filename': 'example.chess.apk',
+                'workspace_revision': 0,
+              };
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(body))),
+          200,
+        );
+      }),
+    );
+    final flow = WorkflowController(api);
+    await flow.importLocalApk(
+      path: copiedApk.path,
+      filename: 'example.chess.apk',
+      length: 4,
+      deleteAfter: true,
+    );
+    expect(await copiedApk.exists(), false);
+    expect(flow.project?.id, 'project');
+    expect(flow.error, isNull);
+    flow.dispose();
+    api.dispose();
+  });
+
   test(
     'upload counts file bytes, not invented percentages or multipart framing',
     () async {
@@ -221,6 +271,72 @@ void main() {
       ]);
       expect(flow.step, 2);
       expect(flow.build!.signedApkHash, 'c' * 64);
+      flow.dispose();
+      api.dispose();
+    },
+  );
+
+  test(
+    'unsupported preparation shows the plan without requesting a patch',
+    () async {
+      var patchRequested = false;
+      final api = NoirApiClient(
+        token: 'test',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (request.method == 'POST') {
+            return jsonResponse({
+              'job_id': 'prepare',
+              'project_id': 'p',
+              'state': 'queued',
+              'stage': 'planning',
+              'result_data': {'operation': 'workflow_prepare'},
+            }, 202);
+          }
+          if (path == '/v1/jobs/prepare') {
+            return jsonResponse({
+              'job_id': 'prepare',
+              'project_id': 'p',
+              'state': 'succeeded',
+              'stage': 'planning',
+              'result_data': {
+                'operation': 'workflow_prepare',
+                'result': {'plan_id': 'unsupported-plan', 'unsupported': true},
+              },
+            });
+          }
+          if (path.endsWith('/plans/unsupported-plan')) {
+            return jsonResponse({
+              'plan_id': 'unsupported-plan',
+              'project_id': 'p',
+              'workspace_revision': 0,
+              'user_request': 'change engine rules',
+              'intended_outcome': 'No safe implementation was identified',
+              'file_changes': [],
+              'unsupported_aspects': ['No evidence-backed edit was found'],
+            });
+          }
+          if (path.contains('/patches/')) {
+            patchRequested = true;
+            return jsonResponse({'error': 'must not be requested'}, 500);
+          }
+          return jsonResponse({
+            'id': 'p',
+            'workspace_revision': 0,
+            'original_filename': 'Chess.apk',
+          });
+        }),
+      );
+      final flow = WorkflowController(api)
+        ..project = ProjectInfo.fromJson({'id': 'p'});
+
+      await flow.prepare('change engine rules');
+
+      expect(flow.unsupportedPlan, true);
+      expect(flow.previewReady, false);
+      expect(flow.error, isNull);
+      expect(flow.patch, isNull);
+      expect(patchRequested, false);
       flow.dispose();
       api.dispose();
     },

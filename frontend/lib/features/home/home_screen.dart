@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -11,19 +12,24 @@ import '../../core/widgets/noir_button.dart';
 import '../../core/widgets/review_layout.dart';
 import '../../core/widgets/transfer_bar.dart';
 import '../../data/api/transfer_progress.dart';
+import '../../data/device/installed_apps_service.dart';
+import 'installed_app_picker.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.projectId});
+  const HomeScreen({super.key, this.projectId, this.installedAppsService});
   final String? projectId;
+  final InstalledAppsService? installedAppsService;
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   final _request = TextEditingController();
-  bool _consent = false, _downloading = false;
+  bool _consent = false, _downloading = false, _preparingInstalledApp = false;
   TransferProgress? _download;
-  String? _saveMessage;
+  String? _saveMessage, _selectionError;
+  InstalledAppsService get _installedApps =>
+      widget.installedAppsService ?? const InstalledAppsService();
   @override
   void initState() {
     super.initState();
@@ -53,11 +59,45 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (!mounted || files.isEmpty) return;
       _saveMessage = null;
+      _selectionError = null;
       _download = null;
       _request.clear();
       await context.read<WorkflowController>().importFile(files.single);
     } catch (e) {
       if (mounted) setState(() => _saveMessage = '$e');
+    }
+  }
+
+  Future<void> _selectInstalledApp() async {
+    final app = await showInstalledAppPicker(context, _installedApps);
+    if (app == null || !mounted) return;
+    setState(() {
+      _preparingInstalledApp = true;
+      _selectionError = null;
+      _saveMessage = null;
+      _download = null;
+      _request.clear();
+    });
+    try {
+      final extracted = await _installedApps.extract(app);
+      if (!mounted) {
+        try {
+          await File(extracted.path).delete();
+        } catch (_) {
+          // Android cache cleanup will remove this copy on the next extraction.
+        }
+        return;
+      }
+      await context.read<WorkflowController>().importLocalApk(
+        path: extracted.path,
+        filename: extracted.filename,
+        length: extracted.length,
+        deleteAfter: true,
+      );
+    } catch (error) {
+      if (mounted) setState(() => _selectionError = '$error');
+    } finally {
+      if (mounted) setState(() => _preparingInstalledApp = false);
     }
   }
 
@@ -115,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'YOUR APK. YOUR CHANGES.',
+            'YOUR APP. YOUR CHANGES.',
             style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
@@ -134,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     child: Text(
-                      '${i + 1}  ${['APK', 'CHANGES', 'DOWNLOAD'][i]}',
+                      '${i + 1}  ${['APP', 'CHANGES', 'DOWNLOAD'][i]}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 11),
                     ),
@@ -168,25 +208,60 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           if (flow.step == 0)
             Section(
-              title: '1 / CHOOSE YOUR APK',
+              title: '1 / CHOOSE YOUR APP',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Select an APK you own or have permission to modify. NOIR uploads and decodes it automatically.',
+                    'Choose an installed Android app or an APK file you own or have permission to modify. NOIR uploads and decodes its public APK automatically.',
                   ),
                   const SizedBox(height: 18),
-                  NoirPrimaryButton(
-                    label: 'Select APK',
-                    icon: Icons.upload_file,
-                    onPressed: connection.isConnected && !flow.working
-                        ? _select
-                        : null,
-                  ),
+                  if (_installedApps.isSupported) ...[
+                    NoirPrimaryButton(
+                      label: 'Choose installed app',
+                      icon: Icons.apps,
+                      loading: _preparingInstalledApp,
+                      onPressed:
+                          connection.isConnected &&
+                              !flow.working &&
+                              !_preparingInstalledApp
+                          ? _selectInstalledApp
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                    NoirGhostButton(
+                      label: 'Choose APK file',
+                      icon: Icons.upload_file,
+                      expand: true,
+                      onPressed:
+                          connection.isConnected &&
+                              !flow.working &&
+                              !_preparingInstalledApp
+                          ? _select
+                          : null,
+                    ),
+                  ] else
+                    NoirPrimaryButton(
+                      label: 'Choose APK file',
+                      icon: Icons.upload_file,
+                      onPressed: connection.isConnected && !flow.working
+                          ? _select
+                          : null,
+                    ),
                   const SizedBox(height: 10),
                   const Text(
-                    'By choosing a file, you confirm you are authorized to process it.',
+                    'By choosing an app or file, you confirm you are authorized to process it. NOIR cannot change remote accounts, server balances, online entitlements or any other server-owned data.',
                   ),
+                  if (_preparingInstalledApp)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: Text('Copying the public APK from Android…'),
+                    ),
+                  if (_selectionError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: SelectableText(_selectionError!),
+                    ),
                   if (flow.filename.isNotEmpty) Text(flow.filename),
                   if (flow.upload != null)
                     TransferBar(
@@ -205,7 +280,29 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(flow.filename),
-                  if (!flow.previewReady) ...[
+                  if (flow.unsupportedPlan) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      flow.plan!.intendedOutcome,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final limitation in flow.plan!.unsupportedAspects)
+                      Text('Not supported: $limitation'),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'NOIR did not generate or apply a patch because it could not identify a safe, evidence-backed edit. Try a narrower request.',
+                    ),
+                    TextButton(
+                      onPressed: flow.working
+                          ? null
+                          : () {
+                              _request.text = flow.request;
+                              flow.editRequest();
+                            },
+                      child: const Text('Edit request'),
+                    ),
+                  ] else if (!flow.previewReady) ...[
                     const SizedBox(height: 14),
                     TextField(
                       controller: _request,

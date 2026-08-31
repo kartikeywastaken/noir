@@ -7,6 +7,7 @@ workspace revisions, and hash computation.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 from pathlib import Path
@@ -60,7 +61,7 @@ def compute_file_hash(file_path: Path, algorithm: str = "sha256") -> str:
     """Compute hash of a file."""
     h = hashlib.new(algorithm)
     with open(file_path, "rb") as f:
-        while chunk := f.read(8192):
+        while chunk := f.read(1024 * 1024):
             h.update(chunk)
     return h.hexdigest()
 
@@ -141,11 +142,62 @@ class ProjectWorkspace:
         """Resolve a relative path safely within the decoded workspace."""
         return safe_resolve(self.decoded_dir, relative)
 
-    def store_input_apk(self, source_path: Path) -> Path:
-        """Copy the source APK into the project input directory."""
-        dest = self.input_dir / source_path.name
-        shutil.copy2(source_path, dest)
-        return dest
+    def store_input_apk(
+        self,
+        source_path: Path,
+        *,
+        filename: str | None = None,
+        move: bool = False,
+        expected_hash: str | None = None,
+        expected_size: int | None = None,
+    ) -> tuple[Path, str, int]:
+        """Store an APK once while preserving its already-streamed upload digest.
+
+        API uploads live beside the project directory, so they can be atomically
+        moved without another full disk pass. CLI imports are copied and hashed
+        in the same streaming pass. The destination must be new.
+        """
+        source_path = source_path.resolve()
+        safe_name = Path(filename or source_path.name).name
+        if safe_name in {"", ".", ".."}:
+            raise WorkspaceError("Invalid input APK filename")
+        dest = self.input_dir / safe_name
+        if dest.exists():
+            raise WorkspaceError(f"Input APK already exists: {safe_name}")
+
+        if move:
+            size = source_path.stat().st_size
+            if expected_size is not None and size != expected_size:
+                raise WorkspaceError("Uploaded APK size changed before import")
+            if not expected_hash:
+                raise WorkspaceError("Atomic upload import requires the streaming digest")
+            try:
+                os.replace(source_path, dest)
+            except OSError:
+                # Cross-device moves cannot be atomic. Fall back to the same
+                # copy-and-hash path used by local CLI imports.
+                move = False
+            else:
+                return dest, expected_hash, size
+
+        digest = hashlib.sha256()
+        size = 0
+        with source_path.open("rb") as source, dest.open("xb") as target:
+            while chunk := source.read(1024 * 1024):
+                target.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+        shutil.copystat(source_path, dest)
+        actual_hash = digest.hexdigest()
+        if expected_size is not None and size != expected_size:
+            dest.unlink(missing_ok=True)
+            raise WorkspaceError("Uploaded APK size changed before import")
+        if expected_hash is not None and actual_hash != expected_hash:
+            dest.unlink(missing_ok=True)
+            raise WorkspaceError("Uploaded APK hash changed before import")
+        if move:
+            source_path.unlink(missing_ok=True)
+        return dest, actual_hash, size
 
     def build_file_manifest(self) -> list[FileManifestEntry]:
         """Build a manifest of all files in the decoded workspace."""
@@ -158,13 +210,21 @@ class ProjectWorkspace:
             if file_path.is_file() and not file_path.is_symlink():
                 try:
                     rel = str(file_path.relative_to(decoded))
-                    sha = compute_file_hash(file_path)
-                    size = file_path.stat().st_size
-                    binary = is_binary_file(file_path)
+                    digest = hashlib.sha256()
+                    size = 0
+                    binary = False
+                    with file_path.open("rb") as handle:
+                        first = True
+                        while chunk := handle.read(1024 * 1024):
+                            if first:
+                                binary = b"\x00" in chunk[:8192]
+                                first = False
+                            digest.update(chunk)
+                            size += len(chunk)
                     entries.append(
                         FileManifestEntry(
                             relative_path=rel,
-                            sha256=sha,
+                            sha256=digest.hexdigest(),
                             size=size,
                             is_binary=binary,
                         )

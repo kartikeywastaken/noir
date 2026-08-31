@@ -48,6 +48,7 @@ def main() -> None:
     allowed = {
         "NOIR_AI_PROVIDER",
         "NOIR_AI_MODEL",
+        "NOIR_AI_FALLBACK_MODEL",
         "NOIR_AI_TIMEOUT",
         "NOIR_AI_RETRY_LIMIT",
         "NOIR_AI_RESPONSE_RETRY_LIMIT",

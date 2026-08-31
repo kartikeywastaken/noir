@@ -276,7 +276,6 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         from uuid import uuid4
 
         from noir.infrastructure.database.repositories import JobRepository
-        from noir.infrastructure.filesystem.workspace import compute_file_hash
 
         uploads = Path(cfg.data_dir) / "uploads"
         uploads.mkdir(parents=True, exist_ok=True)
@@ -284,20 +283,24 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         tmp = Path(name)
         try:
             size = 0
+            hasher = hashlib.sha256()
             with os.fdopen(fd, "wb") as handle:
                 while chunk := await file.read(1024 * 1024):
                     size += len(chunk)
                     if size > cfg.max_upload_size:
                         raise HTTPException(413, "APK exceeds upload limit")
                     handle.write(chunk)
-            digest = compute_file_hash(tmp)
+                    hasher.update(chunk)
+            digest = hasher.hexdigest()
             if idempotency_key:
-                for existing in JobRepository().list_all(user_id=principal.user_id):
-                    if existing.result_data.get("idempotency_key") == idempotency_key:
-                        if existing.result_data.get("payload", {}).get("sha256") != digest:
-                            raise HTTPException(409, "Idempotency key has different content")
-                        tmp.unlink()
-                        return existing.model_dump(mode="json")
+                existing = JobRepository().find_by_idempotency(
+                    idempotency_key, user_id=principal.user_id
+                )
+                if existing:
+                    if existing.result_data.get("payload", {}).get("sha256") != digest:
+                        raise HTTPException(409, "Idempotency key has different content")
+                    tmp.unlink()
+                    return existing.model_dump(mode="json")
             project_id = uuid4().hex[:16]
             AccessService().claim_project(principal.user_id, project_id)
             job = queue.submit(
@@ -306,6 +309,8 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
                 {
                     "path": str(tmp),
                     "sha256": digest,
+                    "size": size,
+                    "move_input": True,
                     "original_filename": Path(
                         (file.filename or "uploaded.apk").replace("\\", "/")
                     ).name,
@@ -764,9 +769,7 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
 
     @app.post("/v1/jobs/{job_id}/cancel", dependencies=[Depends(_verify_token)])
     def cancel_job(job_id: str):
-        from noir.infrastructure.database.repositories import JobRepository
-
-        return JobRepository().request_cancel(job_id).model_dump(mode="json")
+        return queue.cancel(job_id).model_dump(mode="json")
 
     @app.get("/v1/jobs/{job_id}/events", dependencies=[Depends(_verify_token)])
     async def stream_job_events(job_id: str, after: str | None = None):
@@ -777,25 +780,25 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             raise HTTPException(404, "Job not found")
 
         async def events():
-            seen = set()
+            cursor = after
             if after is not None:
-                historical = EventRepository().list_by_job(job_id)
-                ids = [event.event_id for event in historical]
-                if after not in ids:
+                event = EventRepository().get(after)
+                if event is None or event.job_id != job_id:
                     yield 'event: error\ndata: {"error":"Unknown event cursor"}\n\n'
                     return
-                seen.update(ids[: ids.index(after) + 1])
             while True:
-                for event in EventRepository().list_by_job(job_id):
-                    if event.event_id not in seen:
-                        seen.add(event.event_id)
-                        yield f"id: {event.event_id}\ndata: {event.model_dump_json()}\n\n"
+                batch = EventRepository().list_by_job(job_id, after_id=cursor, limit=100)
+                for event in batch:
+                    cursor = event.event_id
+                    yield f"id: {event.event_id}\ndata: {event.model_dump_json()}\n\n"
+                if len(batch) == 100:
+                    continue
                 job = JobRepository().get(job_id)
                 if not job or job.state in TERMINAL:
                     data = job.model_dump_json() if job else "{}"
                     yield f"event: done\ndata: {data}\n\n"
                     return
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
 
         return StreamingResponse(events(), media_type="text/event-stream")
 

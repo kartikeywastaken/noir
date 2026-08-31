@@ -99,6 +99,9 @@ def prepare(config, job):
             payload["allow_ai_upload"],
             analysis=analysis,
         )
+        if not plan.file_changes:
+            _checkpoint(job, "planning", plan_id=plan.plan_id, unsupported=True)
+            return {"plan_id": plan.plan_id, "unsupported": True}
         _checkpoint(job, "generating_patch", plan_id=plan.plan_id)
         patch = generate_patch(config, project_id, plan.plan_id, preview=True, analysis=analysis)
         _checkpoint(job, "generating_patch", patch_id=patch.patch_id)
@@ -145,7 +148,7 @@ def finish(config, job):
                     build = candidate
                     break
         if build is None:
-            build = BuildService(config).build(project_id)
+            build = BuildService(config).build(project_id, job=job)
             if not build.success:
                 raise ValueError(build.error_message or "APK rebuild failed")
         _checkpoint(job, "signing", build_id=build.build_id)

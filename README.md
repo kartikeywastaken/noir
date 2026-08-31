@@ -4,12 +4,14 @@ Flutter Android/macOS client for the existing NOIR Python backend. The selected 
 
 ## What runs where
 
-The deployed EC2 backend runs FastAPI, Gemini calls, Apktool, validation, rebuilds and signing. The phone runs the Flutter client. **This is not an on-device Python/Apktool port.** The normal workflow combines exact plan/patch approval and signing consent into one review action. Advanced tools retain their separate approval controls.
+The deployed EC2 backend runs FastAPI, AI planning/patching, Apktool, validation, rebuilds and signing. The phone runs the Flutter client. **This is not an on-device Python/Apktool port.** The normal workflow combines exact plan/patch approval and signing consent into one review action. Advanced tools retain their separate approval controls.
 
-## Three-step workflow (0.3.0)
+## Three-step workflow (0.4.0)
 
-1. **APK:** choose an authorized APK. Upload shows measured bytes, percentage and bytes
-   remaining; decoding follows automatically. Upload completion is separate from processing.
+1. **App:** on Android, choose a visible installed launcher app or an authorized APK file.
+   NOIR copies only the installed app's public standalone APK into its private cache and then
+   uses the same upload path. Upload shows measured bytes, percentage and bytes remaining;
+   decoding follows automatically. Upload completion is separate from processing.
 2. **Changes:** describe the change, consent to Gemini context upload and select Preview
    changes. NOIR prepares an **unapproved, unapplied** plan/patch preview in a persistent job.
    Review the outcome, risks, permissions and file diffs, then select **Approve & make APK**.
@@ -68,7 +70,7 @@ Active operations remain visible and cancellable. Plan/patch history remains ava
 inside each project for approval recovery after an AI timeout. The old `/jobs` app route
 redirects to History; the underlying job API is retained for real progress and cancellation.
 
-The ready-to-install private-beta APK is `frontend/output/noir-private-beta.apk` (version 0.3.0+3).
+The ready-to-install private-beta APK is `frontend/output/noir-private-beta.apk` (version 0.4.0+4).
 It is a release-mode build using the existing development signing identity so it can
 update the previously installed NOIR test app without erasing its saved session. It is
 not an app-store release; use a private production signing identity before wider distribution.
@@ -111,9 +113,15 @@ The Gemini key stays in the ignored file `backend/.env`:
 GEMINI_API_KEY=your-gemini-key
 NOIR_AI_PROVIDER=gemini
 NOIR_AI_MODEL=gemini-3.6-flash
+NOIR_AI_FALLBACK_MODEL=
 ```
 
 Preserve your other settings. Restart the backend after editing the file. `noir ai check` performs a real provider check; the app's “AI configured” status only checks configuration. Do not put the Gemini key in Flutter, Dart defines, Git, or the mobile token field.
+
+The user still writes one short plain-English request. NOIR ranks the decoded APK's real paths,
+rejects invented paths, and automatically asks for one grounded correction before showing a plan.
+Invalid plans and patches fail visibly. Gemini 3.6 Flash is currently the only configured
+model, so provider failures are returned directly instead of switching models.
 
 ## Android phone over USB
 
@@ -186,7 +194,19 @@ Existing profiles are listed only in their owning workspace; their secrets never
 
 Project-specific plan/patch history reloads persisted approval/revision state. After an AI timeout, refresh that history before retrying: a synchronous backend request may have finished even if its response was lost. Global History shows builds and running operations. The client never automatically replays a mutation.
 
-Installed-application extraction remains a backend CLI/device feature. This client imports APK files through the native picker; it does not request broad installed-package visibility. Split APK installation is not added.
+On Android, **Choose installed app** lists launcher applications through a scoped launcher-intent
+query; NOIR does not request `QUERY_ALL_PACKAGES`. Selecting an app copies its public base APK to
+NOIR's private cache, uploads it through the existing authenticated import pipeline, then removes
+the temporary copy. It never reads that app's accounts, databases, saved games or private files.
+Apps installed as split APKs are shown but disabled until a complete split-aware export/rebuild
+pipeline exists. System apps without a launcher entry are not listed.
+
+The extracted APK is the same client code/resources that an uploaded APK would provide; this does
+not grant authority over the app's remote backend. NOIR may alter locally executed UI or behavior,
+but cannot create real bank balances, server-side entitlements, online purchases, remote records or
+any other state enforced by a service. Rebuilt APKs are signed with the user's NOIR profile, so they
+cannot update the publisher-signed installation; testing normally requires uninstalling the original
+or using a separate test device/profile, which also removes access to the original app's private data.
 
 ## Tests without a phone
 

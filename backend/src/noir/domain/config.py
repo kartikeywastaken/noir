@@ -61,6 +61,7 @@ class NoirConfig(BaseSettings):
     # ── AI ────────────────────────────────────────────────────────────
     ai_provider: str = "gemini"
     ai_model: str = "gemini-3.6-flash"
+    ai_fallback_model: str = ""
     ai_timeout: int = 120
     ai_retry_limit: int = 2
     ai_response_retry_limit: int = Field(default=1, ge=0, le=2)

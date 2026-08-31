@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../data/api/noir_api_client.dart';
@@ -24,6 +25,10 @@ class WorkflowController extends SafeNotifier {
   Timer? _timer;
   String get operation => '${job?.resultData['operation'] ?? ''}';
   bool get working => busy || uploading || (job != null && !job!.isTerminal);
+  bool get unsupportedPlan =>
+      plan != null &&
+      plan!.fileChanges.isEmpty &&
+      plan!.unsupportedAspects.isNotEmpty;
   int get step => build != null || operation == 'workflow_finish'
       ? 2
       : project != null
@@ -55,16 +60,61 @@ class WorkflowController extends SafeNotifier {
   }
 
   Future<void> importFile(PlatformFile file) async {
+    await _importApk(
+      filename: file.name,
+      length: await file.length(),
+      bytes: file.readAsByteStream(),
+    );
+  }
+
+  /// Uploads an APK copied from an installed Android application.
+  ///
+  /// [deleteAfter] should be true for files created in NOIR's private cache so
+  /// the temporary copy is removed after the request succeeds or fails.
+  Future<void> importLocalApk({
+    required String path,
+    required String filename,
+    required int length,
+    bool deleteAfter = false,
+  }) async {
+    final file = File(path);
+    try {
+      final actualLength = await file.length();
+      if (length <= 0 || actualLength != length) {
+        throw StateError('The copied APK is incomplete. Select the app again.');
+      }
+      await _importApk(
+        filename: filename,
+        length: actualLength,
+        bytes: file.openRead(),
+      );
+    } finally {
+      if (deleteAfter) {
+        try {
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // A stale private-cache copy is harmless and will be replaced by the
+          // next extraction. Cleanup failure must not hide the upload result.
+        }
+      }
+    }
+  }
+
+  Future<void> _importApk({
+    required String filename,
+    required int length,
+    required Stream<List<int>> bytes,
+  }) async {
     if (working) return;
     reset();
     uploading = true;
-    filename = file.name;
+    this.filename = filename;
     notifyListeners();
     try {
       job = await api.importApkStream(
-        file.name,
-        await file.length(),
-        file.readAsByteStream(),
+        filename,
+        length,
+        bytes,
         idempotencyKey: const Uuid().v4(),
         onProgress: (value) {
           upload = value;
@@ -210,9 +260,19 @@ class WorkflowController extends SafeNotifier {
         filename = project!.originalFilename;
         if (operation == 'workflow_prepare') {
           plan = await api.getPlan(project!.id, '${result['plan_id']}');
-          patch = await api.getPatch(project!.id, '${result['patch_id']}');
-          diff = await api.getPatchDiff(project!.id, patch!.patchId);
           request = plan!.userRequest;
+          final patchId = '${result['patch_id'] ?? ''}';
+          if (patchId.isEmpty && unsupportedPlan) {
+            patch = null;
+            diff = [];
+            previewReady = false;
+            return;
+          }
+          if (patchId.isEmpty) {
+            throw StateError('The server returned a plan without a patch.');
+          }
+          patch = await api.getPatch(project!.id, patchId);
+          diff = await api.getPatchDiff(project!.id, patch!.patchId);
           previewReady = diff.isNotEmpty && !plan!.stale && !patch!.stale;
           if (!previewReady) {
             throw StateError(

@@ -266,6 +266,17 @@ def init_db(database_url: str) -> None:
         # Additive, transactional migration. Existing CLI projects/tokens belong
         # only to the local owner; never expose them to newly invited users.
         with _engine.begin() as connection:
+            for statement in (
+                "CREATE INDEX IF NOT EXISTS ix_jobs_state_created "
+                "ON jobs (state, created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_jobs_project_state "
+                "ON jobs (project_id, state)",
+                "CREATE INDEX IF NOT EXISTS ix_events_job_time "
+                "ON events (job_id, timestamp, event_id)",
+                "CREATE INDEX IF NOT EXISTS ix_builds_project_revision "
+                "ON builds (project_id, workspace_revision)",
+            ):
+                connection.execute(text(statement))
             connection.execute(
                 text(
                     "INSERT OR IGNORE INTO workspace_users (user_id, name, disabled, created_at) "

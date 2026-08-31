@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from sqlalchemy import and_, or_
+
 from noir.domain.enums import ApprovalScope, ApprovalStatus, JobState
 from noir.domain.models import (
     AnalysisResult,
@@ -193,6 +195,79 @@ class JobRepository:
             session.commit()
             return self._to_model(row)
 
+    def find_by_idempotency(
+        self, idempotency_key: str, *, user_id: str | None = None
+    ) -> JobInfo | None:
+        """Find an exact queued-operation idempotency key without loading all jobs."""
+        with get_session() as session:
+            query = session.query(JobRow).filter(
+                JobRow.result_data["idempotency_key"].as_string() == idempotency_key
+            )
+            if user_id is not None:
+                query = query.join(
+                    ProjectAccessRow, JobRow.project_id == ProjectAccessRow.project_id
+                ).filter(ProjectAccessRow.user_id == user_id)
+            row = query.order_by(JobRow.created_at.desc()).first()
+            return self._to_model(row) if row else None
+
+    def find_active_operation(self, project_id: str) -> JobInfo | None:
+        with get_session() as session:
+            row = (
+                session.query(JobRow)
+                .filter(
+                    JobRow.project_id == project_id,
+                    JobRow.state.in_((JobState.QUEUED.value, JobState.RUNNING.value)),
+                    JobRow.result_data["operation"].as_string().is_not(None),
+                )
+                .order_by(JobRow.created_at.asc())
+                .first()
+            )
+            return self._to_model(row) if row else None
+
+    def count_queued_operations(self) -> int:
+        with get_session() as session:
+            return int(
+                session.query(JobRow)
+                .filter(
+                    JobRow.state == JobState.QUEUED.value,
+                    JobRow.result_data["operation"].as_string().is_not(None),
+                )
+                .count()
+            )
+
+    def claim_next_queued(self) -> JobInfo | None:
+        """Claim the oldest queued operation for the single API worker process."""
+        with get_session() as session:
+            row = (
+                session.query(JobRow)
+                .filter(
+                    JobRow.state == JobState.QUEUED.value,
+                    JobRow.result_data["operation"].as_string().is_not(None),
+                )
+                .order_by(JobRow.created_at.asc())
+                .first()
+            )
+            if row is None:
+                return None
+            row.state = JobState.RUNNING.value
+            row.started_at = datetime.now(UTC)
+            row.updated_at = datetime.now(UTC)
+            session.commit()
+            return self._to_model(row)
+
+    def list_running_operations(self) -> list[JobInfo]:
+        with get_session() as session:
+            rows = (
+                session.query(JobRow)
+                .filter(
+                    JobRow.state == JobState.RUNNING.value,
+                    JobRow.result_data["operation"].as_string().is_not(None),
+                )
+                .order_by(JobRow.created_at.asc())
+                .all()
+            )
+            return [self._to_model(row) for row in rows]
+
     def list_by_project(self, project_id: str) -> list[JobInfo]:
         with get_session() as session:
             rows = (
@@ -263,14 +338,33 @@ class EventRepository:
             rows = query.order_by(EventRow.timestamp.asc()).limit(limit).all()
             return [self._to_model(r) for r in rows]
 
-    def list_by_job(self, job_id: str) -> list[AuditEvent]:
+    def get(self, event_id: str) -> AuditEvent | None:
         with get_session() as session:
-            rows = (
-                session.query(EventRow)
-                .filter(EventRow.job_id == job_id)
-                .order_by(EventRow.timestamp.asc())
-                .all()
-            )
+            row = session.get(EventRow, event_id)
+            return self._to_model(row) if row else None
+
+    def list_by_job(
+        self, job_id: str, after_id: str | None = None, limit: int | None = None
+    ) -> list[AuditEvent]:
+        with get_session() as session:
+            query = session.query(EventRow).filter(EventRow.job_id == job_id)
+            if after_id:
+                ref = session.get(EventRow, after_id)
+                if ref is None or ref.job_id != job_id:
+                    return []
+                query = query.filter(
+                    or_(
+                        EventRow.timestamp > ref.timestamp,
+                        and_(
+                            EventRow.timestamp == ref.timestamp,
+                            EventRow.event_id > ref.event_id,
+                        ),
+                    )
+                )
+            query = query.order_by(EventRow.timestamp.asc(), EventRow.event_id.asc())
+            if limit is not None:
+                query = query.limit(limit)
+            rows = query.all()
             return [self._to_model(r) for r in rows]
 
     def _to_model(self, row: EventRow) -> AuditEvent:

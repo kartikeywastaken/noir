@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import zipfile
+from contextlib import nullcontext
 from datetime import UTC, datetime
 
 from noir.domain.config import NoirConfig, get_config
@@ -36,7 +37,7 @@ class BuildService:
         self.apktool = ApkToolAdapter(self.config)
 
     @locked_project
-    def build(self, project_id: str) -> BuildResult:
+    def build(self, project_id: str, *, job: JobInfo | None = None) -> BuildResult:
         """Build an APK from the decoded workspace.
 
         Returns BuildResult with paths to unsigned APK.
@@ -62,14 +63,19 @@ class BuildService:
             workspace_revision=project.workspace_revision,
         )
 
-        # Create job
-        job = JobInfo(
-            project_id=project_id,
-            stage=WorkflowStage.REBUILDING,
-            state=JobState.RUNNING,
-            started_at=datetime.now(UTC),
-        )
-        self.job_repo.create(job)
+        # Queue workflows provide the canonical job. Direct CLI builds retain
+        # their own persisted job for backward compatibility.
+        owns_job = job is None
+        if job is None:
+            job = JobInfo(
+                project_id=project_id,
+                stage=WorkflowStage.REBUILDING,
+                state=JobState.RUNNING,
+                started_at=datetime.now(UTC),
+            )
+            self.job_repo.create(job)
+        elif job.project_id != project_id:
+            raise BuildServiceError("Build job does not belong to this project")
 
         try:
             # Build directory
@@ -89,18 +95,49 @@ class BuildService:
                 )
             )
 
-            # Build tools may write caches; keep them out of the editable workspace.
-            build_workspace = build_dir / "workspace"
-            shutil.copytree(workspace.decoded_dir, build_workspace, symlinks=False)
+            # Apktool reads decoded sources but creates root-level build/dist
+            # intermediates. Avoid copying tens of thousands of source files
+            # when those generated paths did not exist before the build. A
+            # pre-existing path gets the conservative isolated-copy fallback.
+            generated_paths = [
+                workspace.decoded_dir / "build",
+                workspace.decoded_dir / "dist",
+            ]
+            direct_build = not any(path.exists() or path.is_symlink() for path in generated_paths)
+            if direct_build:
+                build_workspace = workspace.decoded_dir
+            else:
+                build_workspace = build_dir / "workspace"
+                shutil.copytree(workspace.decoded_dir, build_workspace, symlinks=False)
             # Run APKTool build
             from noir.application.jobs import job_runtime
 
-            with job_runtime(job.job_id):
-                result = self.apktool.build(
-                    build_workspace,
-                    output_apk,
-                    framework_dir=framework_dir,
-                )
+            runtime = nullcontext() if not owns_job else job_runtime(job.job_id)
+            try:
+                with runtime:
+                    result = self.apktool.build(
+                        build_workspace,
+                        output_apk,
+                        framework_dir=framework_dir,
+                    )
+            finally:
+                if direct_build:
+                    decoded_root = workspace.decoded_dir.resolve()
+                    for path in generated_paths:
+                        if not path.exists() and not path.is_symlink():
+                            continue
+                        if path.is_symlink() or path.parent.resolve() != decoded_root:
+                            raise BuildServiceError(
+                                "Apktool generated an unsafe build-artifact path; cleanup blocked"
+                            )
+                        shutil.rmtree(path)
+                elif build_workspace.exists() or build_workspace.is_symlink():
+                    if (
+                        build_workspace.is_symlink()
+                        or build_workspace.parent.resolve() != build_dir.resolve()
+                    ):
+                        raise BuildServiceError("Unsafe temporary build workspace; cleanup blocked")
+                    shutil.rmtree(build_workspace)
 
             # Validate output
             if not output_apk.exists() or output_apk.stat().st_size == 0:
@@ -124,14 +161,14 @@ class BuildService:
             project.status = ProjectStatus.BUILT
             self.project_repo.update(project)
 
-            # Complete job
-            job.state = JobState.SUCCEEDED
-            job.finished_at = datetime.now(UTC)
-            job.result_data = {
-                "build_id": build.build_id,
-                "unsigned_apk_hash": build.unsigned_apk_hash,
-            }
-            self.job_repo.update(job)
+            if owns_job:
+                job.state = JobState.SUCCEEDED
+                job.finished_at = datetime.now(UTC)
+                job.result_data = {
+                    "build_id": build.build_id,
+                    "unsigned_apk_hash": build.unsigned_apk_hash,
+                }
+                self.job_repo.update(job)
 
             self.event_repo.create(
                 AuditEvent(
@@ -157,10 +194,11 @@ class BuildService:
                 build.tool_logs = e.result.stdout + "\n" + e.result.stderr
             self.build_repo.create(build)
 
-            job.state = JobState.FAILED
-            job.error_message = str(e)
-            job.finished_at = datetime.now(UTC)
-            self.job_repo.update(job)
+            if owns_job:
+                job.state = JobState.FAILED
+                job.error_message = str(e)
+                job.finished_at = datetime.now(UTC)
+                self.job_repo.update(job)
 
             self.event_repo.create(
                 AuditEvent(

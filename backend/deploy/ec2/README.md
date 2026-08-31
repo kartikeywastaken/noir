@@ -15,9 +15,13 @@ with the APK. The following advanced settings are for the existing owner workspa
 - Signing profile: `cloud-test`.
 - Tap **Save & Test Connection**. No laptop server, ADB reverse, or tunnel is needed.
 
-The Gemini key is already configured on the server. Do not enter it as the app's bearer token.
+The Gemini key is configured on the server. Do not enter it as the app's bearer token.
 The cloud test signer is independent of the laptop's keys. APKs signed with different
 certificates normally cannot update one another; use a clean test install when necessary.
+
+The EC2 profile currently uses Gemini 3.6 Flash as its only model because repeated live probes
+on 2026-08-31 found Gemini 3.7 Flash unavailable/slow. There is no automatic model fallback;
+Gemini 3.7 can be reconsidered after a successful live probe.
 
 ## What runs on the instance
 
@@ -107,13 +111,13 @@ curl --fail https://noir-16-171-197-228.sslip.io/v1/health
 ## Configuration and Gemini key replacement
 
 Non-secret server settings are in `/etc/noir/backend.env` (root-only). The initial
-deployment preserves the laptop's effective Gemini model, timeout and context limits.
-The production Gemini key is encrypted in
-`/etc/credstore.encrypted/noir-gemini-api-key`. Runtime credentials are read from
+deployment preserves the laptop's effective Gemini model and context limits.
+The production key is encrypted in `/etc/credstore.encrypted/noir-gemini-api-key`.
+Runtime credentials are read from
 systemd's private credentials directory. The bearer token's database record is a SHA-256
 hash; an encrypted copy lets this deployment preserve it across restarts.
 
-To replace only the Gemini key, use this in the Ubuntu SSH shell. It prompts without echo
+To replace the Gemini key, use this in the Ubuntu SSH shell. It prompts without echo
 and does not put the key in shell history. Do this while no AI request is active.
 
 ```bash

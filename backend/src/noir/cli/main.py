@@ -1231,10 +1231,20 @@ def ai_check():
 
     try:
         provider = GeminiProvider(config=get_config())
-        result = provider._parse_json_response(provider._call_model('Return JSON: {"status":"ok"}'))
+        result = provider._parse_json_response(
+            provider._call_model('{"status":"ok"}', "Return only valid JSON.")
+        )
         if result.get("status") != "ok":
             raise GeminiProviderError("Unexpected Gemini connectivity response")
-        output({"provider": "gemini", "model": provider.model_name, "connected": True})
+        output(
+            {
+                "provider": "gemini",
+                "model": provider.last_model_name,
+                "primary_model": provider.model_name,
+                "fallback_used": provider.last_model_name != provider.model_name,
+                "connected": True,
+            }
+        )
     except GeminiProviderError as exc:
         error(str(exc))
         raise typer.Exit(code=2) from exc
