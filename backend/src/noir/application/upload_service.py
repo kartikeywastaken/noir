@@ -1,8 +1,8 @@
 """Persistent, owner-scoped resumable APK uploads.
 
-Each chunk is written and fsynced before its new offset is acknowledged. A lost
-response is therefore recoverable by reading the session offset and continuing
-without replaying the whole APK.
+Each aligned range is written and fsynced before it is acknowledged. Ranges may
+arrive out of order so clients can use several independent HTTP connections; a
+lost response is recoverable from the persisted set of acknowledged offsets.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import os
 import re
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
@@ -42,6 +42,22 @@ class UploadSession:
     updated_at: float
     job_id: str | None = None
     sha256: str | None = None
+    received_chunks: dict[str, dict[str, int | str]] = field(default_factory=dict)
+
+    @property
+    def received_bytes(self) -> int:
+        return sum(int(chunk["length"]) for chunk in self.received_chunks.values())
+
+    def refresh_contiguous_offset(self) -> None:
+        cursor = 0
+        for raw_offset, chunk in sorted(
+            self.received_chunks.items(), key=lambda item: int(item[0])
+        ):
+            offset = int(raw_offset)
+            if offset != cursor:
+                break
+            cursor += int(chunk["length"])
+        self.offset = cursor
 
     def public(self) -> dict:
         return {
@@ -52,6 +68,8 @@ class UploadSession:
             "chunk_size": self.chunk_size,
             "complete": self.offset == self.size,
             "job_id": self.job_id,
+            "received_bytes": self.received_bytes,
+            "received_offsets": sorted(int(value) for value in self.received_chunks),
         }
 
 
@@ -105,10 +123,23 @@ class ResumableUploadService:
                 raise UploadError("Upload data is missing; start again", 410) from exc
             if actual > session.size:
                 raise UploadError("Upload data exceeds declared size", 409)
-            # Recover a fully fsynced append if the service stopped before the
-            # corresponding metadata replacement.
-            if actual != session.offset:
-                session.offset = actual
+            # Upgrade an in-progress session created by the earlier sequential
+            # protocol. New range writes are recovered by safely overwriting a
+            # chunk when its fsync completed before metadata replacement.
+            if not session.received_chunks and session.offset > 0:
+                legacy_offset = session.offset
+                with part.open("rb") as handle:
+                    for offset in range(0, legacy_offset, session.chunk_size):
+                        length = min(session.chunk_size, legacy_offset - offset)
+                        handle.seek(offset)
+                        chunk = handle.read(length)
+                        if len(chunk) != length:
+                            raise UploadError("Upload data is incomplete", 409)
+                        session.received_chunks[str(offset)] = {
+                            "length": length,
+                            "sha256": hashlib.sha256(chunk).hexdigest(),
+                        }
+                session.refresh_contiguous_offset()
                 session.updated_at = time.time()
                 self._save(session)
         return session
@@ -191,16 +222,30 @@ class ResumableUploadService:
             session = self._load(upload_id, user_id)
             if session.job_id is not None:
                 raise UploadError("Upload is already finalized", 409)
-            if offset != session.offset:
-                raise UploadError(f"Upload offset mismatch; expected {session.offset}", 409)
-            if offset + len(chunk) > session.size:
-                raise UploadError("Upload chunk exceeds declared APK size", 409)
+            if offset < 0 or offset >= session.size or offset % session.chunk_size != 0:
+                raise UploadError("Upload offset is not chunk-aligned", 409)
+            expected_length = min(session.chunk_size, session.size - offset)
+            if len(chunk) != expected_length:
+                raise UploadError(
+                    f"Upload chunk length mismatch; expected {expected_length}", 409
+                )
+            digest = hashlib.sha256(chunk).hexdigest()
+            existing = session.received_chunks.get(str(offset))
+            if existing:
+                if int(existing["length"]) != len(chunk) or existing["sha256"] != digest:
+                    raise UploadError("Upload chunk differs from acknowledged content", 409)
+                return session
             _, part = self._paths(upload_id)
-            with part.open("ab") as handle:
+            with part.open("r+b") as handle:
+                handle.seek(offset)
                 handle.write(chunk)
                 handle.flush()
                 os.fsync(handle.fileno())
-            session.offset += len(chunk)
+            session.received_chunks[str(offset)] = {
+                "length": len(chunk),
+                "sha256": digest,
+            }
+            session.refresh_contiguous_offset()
             session.updated_at = time.time()
             self._save(session)
             return session
@@ -219,9 +264,11 @@ class ResumableUploadService:
                 session.updated_at = time.time()
                 self._save(session)
                 return existing
-            if session.offset != session.size:
+            if session.offset != session.size or session.received_bytes != session.size:
                 raise UploadError(
-                    f"Upload is incomplete; expected {session.size}, received {session.offset}", 409
+                    f"Upload is incomplete; expected {session.size}, "
+                    f"received {session.received_bytes}",
+                    409,
                 )
             _, part = self._paths(upload_id)
             hasher = hashlib.sha256()

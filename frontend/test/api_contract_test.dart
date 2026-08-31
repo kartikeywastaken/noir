@@ -18,8 +18,14 @@ http.Response jsonResponse(Object data, [int status = 200]) => http.Response(
   status,
   headers: {'content-type': 'application/json'},
 );
-NoirApiClient apiWith(Future<http.Response> Function(http.Request) handler) =>
-    NoirApiClient(token: 'test-only-token', client: MockClient(handler));
+NoirApiClient apiWith(
+  Future<http.Response> Function(http.Request) handler, {
+  int uploadParallelism = 4,
+}) => NoirApiClient(
+  token: 'test-only-token',
+  client: MockClient(handler),
+  uploadParallelism: uploadParallelism,
+);
 
 class FragmentedSseClient extends http.BaseClient {
   FragmentedSseClient(this.text);
@@ -239,7 +245,7 @@ void main() {
           'project_id': 'p',
           'state': 'queued',
         }, 202);
-      });
+      }, uploadParallelism: 1);
       final job = await api.importApkResumable(
         'fixture.apk',
         source.length,

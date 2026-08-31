@@ -35,8 +35,8 @@ Gemini 3.7 can be reconsidered after a successful live probe.
 - The API listens only on `127.0.0.1:8787`; Caddy exposes ports 80/443.
 - Service credentials use systemd host-key encryption at rest, not a plaintext `.env`.
 - Projects, SQLite database, APKs, and signing keys persist in `/var/lib/noir/data`.
-- Incomplete uploads persist as private, offset-checked 2 MiB chunks for 24 hours;
-  reconnecting clients resume from the last fsynced server offset.
+- Incomplete uploads persist as private, independently acknowledged 256 KiB ranges for
+  24 hours; clients use four concurrent connections and retry only missing ranges.
 - The service restarts on failure and is enabled at boot. No active SSH session is required.
 - Each Apktool JVM is capped at 2 GiB; the API service has a 3.4 GB memory ceiling.
 

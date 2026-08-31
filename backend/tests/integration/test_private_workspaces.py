@@ -362,6 +362,7 @@ def project_for(config, owner):
 
 def test_resumable_upload_is_owner_scoped_offset_checked_and_idempotent(isolated):
     app, config, users = isolated
+    config.upload_chunk_size = 3
     alice, alice_id, *_ = users[0]
     bob = users[1][0]
     headers = {"Idempotency-Key": "resumable-fixture"}
@@ -378,22 +379,26 @@ def test_resumable_upload_is_owner_scoped_offset_checked_and_idempotent(isolated
     assert upload["chunk_size"] == config.upload_chunk_size
     assert bob.get(f"/v1/uploads/{upload_id}").status_code == 404
 
-    first = alice.patch(
+    # A later range may finish first: its bytes are durable, but the legacy
+    # contiguous offset remains zero until the opening range arrives.
+    later = alice.patch(
         f"/v1/uploads/{upload_id}",
-        headers={"Upload-Offset": "0", "Content-Type": "application/octet-stream"},
-        content=b"abc",
+        headers={"Upload-Offset": "3", "Content-Type": "application/octet-stream"},
+        content=b"def",
     )
-    assert first.status_code == 200, first.text
-    assert first.json()["offset"] == 3
-    assert first.headers["upload-offset"] == "3"
+    assert later.status_code == 200, later.text
+    assert later.json()["offset"] == 0
+    assert later.json()["received_bytes"] == 3
+    assert later.json()["received_offsets"] == [3]
+    assert later.headers["upload-offset"] == "0"
 
     stale = alice.patch(
         f"/v1/uploads/{upload_id}",
-        headers={"Upload-Offset": "0", "Content-Type": "application/octet-stream"},
-        content=b"abc",
+        headers={"Upload-Offset": "3", "Content-Type": "application/octet-stream"},
+        content=b"deg",
     )
     assert stale.status_code == 409
-    assert "expected 3" in stale.json()["detail"]
+    assert "differs" in stale.json()["detail"]
 
     resumed = alice.post(
         "/v1/uploads",
@@ -402,14 +407,17 @@ def test_resumable_upload_is_owner_scoped_offset_checked_and_idempotent(isolated
     )
     assert resumed.status_code == 201
     assert resumed.json()["upload_id"] == upload_id
-    assert resumed.json()["offset"] == 3
+    assert resumed.json()["offset"] == 0
+    assert resumed.json()["received_offsets"] == [3]
 
-    final_chunk = alice.patch(
+    opening_chunk = alice.patch(
         f"/v1/uploads/{upload_id}",
-        headers={"Upload-Offset": "3", "Content-Type": "application/octet-stream"},
-        content=b"def",
+        headers={"Upload-Offset": "0", "Content-Type": "application/octet-stream"},
+        content=b"abc",
     )
-    assert final_chunk.json()["offset"] == 6
+    assert opening_chunk.json()["offset"] == 6
+    assert opening_chunk.json()["received_bytes"] == 6
+    assert opening_chunk.json()["received_offsets"] == [0, 3]
     completed = alice.post(f"/v1/uploads/{upload_id}/complete?authorized=true")
     assert completed.status_code == 202, completed.text
     job = completed.json()
@@ -436,6 +444,7 @@ def test_resumable_upload_rejects_declared_and_chunk_size_limits(isolated):
     assert response.status_code == 413
 
     config.max_upload_size = 100
+    config.upload_chunk_size = 2
     config.max_upload_chunk_size = 2
     started = client.post(
         "/v1/uploads",

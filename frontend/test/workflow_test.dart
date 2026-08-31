@@ -37,6 +37,7 @@ void main() {
     var offset = 0;
     final api = NoirApiClient(
       token: 'test',
+      uploadParallelism: 1,
       client: StreamClient((request) async {
         if (request.url.path == '/v1/uploads' && request.method == 'POST') {
           await request.finalize().drain<void>();
@@ -199,6 +200,7 @@ void main() {
         token: 'test',
         client: client,
         retryDelay: (_) async {},
+        uploadParallelism: 1,
       );
       await api.importApkResumable(
         'app.apk',
@@ -211,6 +213,93 @@ void main() {
       expect(progress.every((p) => p.total == 6), true);
       expect(progress.last.fraction, 1);
       expect(patchOffsets, [0, 2, 4]);
+      api.dispose();
+    },
+  );
+
+  test(
+    'upload runs four independently acknowledged ranges in parallel',
+    () async {
+      final source = List<int>.generate(8, (index) => index);
+      final received = <int>{};
+      final progress = <TransferProgress>[];
+      var inFlight = 0;
+      var maximumInFlight = 0;
+
+      Map<String, Object> session() {
+        var contiguous = 0;
+        while (received.contains(contiguous)) {
+          contiguous += 2;
+        }
+        return {
+          'upload_id': 'parallel',
+          'size': 8,
+          'offset': contiguous,
+          'chunk_size': 2,
+          'received_bytes': received.length * 2,
+          'received_offsets': received.toList(),
+        };
+      }
+
+      final api = NoirApiClient(
+        token: 'test',
+        retryDelay: (_) async {},
+        uploadParallelism: 4,
+        client: StreamClient((request) async {
+          if (request.url.path == '/v1/uploads' && request.method == 'POST') {
+            await request.finalize().drain<void>();
+            return http.StreamedResponse(
+              Stream.value(utf8.encode(jsonEncode(session()))),
+              201,
+            );
+          }
+          if (request.url.path == '/v1/uploads/parallel' &&
+              request.method == 'PATCH') {
+            final offset = int.parse(request.headers['upload-offset']!);
+            final body = await request.finalize().fold<List<int>>(
+              [],
+              (all, chunk) => all..addAll(chunk),
+            );
+            expect(body, source.sublist(offset, offset + 2));
+            inFlight++;
+            maximumInFlight = inFlight > maximumInFlight
+                ? inFlight
+                : maximumInFlight;
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+            received.add(offset);
+            inFlight--;
+            return http.StreamedResponse(
+              Stream.value(utf8.encode(jsonEncode(session()))),
+              200,
+            );
+          }
+          expect(request.url.path, '/v1/uploads/parallel/complete');
+          await request.finalize().drain<void>();
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'job_id': 'j',
+                  'project_id': 'p',
+                  'state': 'queued',
+                }),
+              ),
+            ),
+            202,
+          );
+        }),
+      );
+
+      await api.importApkResumable(
+        'parallel.apk',
+        source.length,
+        (start, end) => Stream.value(source.sublist(start, end)),
+        idempotencyKey: 'parallel',
+        onProgress: progress.add,
+      );
+      expect(maximumInFlight, 4);
+      expect(received, {0, 2, 4, 6});
+      expect(progress.last.bytes, 8);
       api.dispose();
     },
   );

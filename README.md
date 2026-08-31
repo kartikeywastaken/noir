@@ -10,13 +10,14 @@ The backend also supports bounded Mono CIL, IL2CPP, and native ELF operations. T
 exact capabilities and refusal boundaries are documented in
 [`backend/docs/binary-support.md`](backend/docs/binary-support.md).
 
-## Three-step workflow (0.4.1)
+## Three-step workflow (0.4.2)
 
 1. **App:** on Android, choose a visible installed launcher app or an authorized APK file.
    NOIR copies only the installed app's public standalone APK into its private cache and then
-   uses the same resumable upload path. The APK is sent in 2 MiB chunks and the progress
-   bar advances only after EC2 durably acknowledges each offset. A lost connection retries
-   the current chunk instead of restarting the APK; decoding follows automatically.
+   uses the same resumable upload path. The APK is sent over four concurrent 256 KiB ranges
+   and the progress bar advances only after EC2 durably acknowledges each range. A lost
+   connection retries only its missing range instead of restarting the APK; decoding follows
+   automatically.
 2. **Changes:** describe the change, consent to Gemini context upload and select Preview
    changes. NOIR prepares an **unapproved, unapplied** plan/patch preview in a persistent job.
    Review the outcome, risks, permissions and file diffs, then select **Approve & make APK**.
@@ -76,7 +77,7 @@ Active operations remain visible and cancellable. Plan/patch history remains ava
 inside each project for approval recovery after an AI timeout. The old `/jobs` app route
 redirects to History; the underlying job API is retained for real progress and cancellation.
 
-The ready-to-install private-beta APK is `frontend/output/noir-private-beta.apk` (version 0.4.1+5).
+The ready-to-install private-beta APK is `frontend/output/noir-private-beta.apk` (version 0.4.2+6).
 It is a release-mode build using the existing development signing identity so it can
 update the previously installed NOIR test app without erasing its saved session. It is
 not an app-store release; use a private production signing identity before wider distribution.

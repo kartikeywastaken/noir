@@ -19,17 +19,34 @@ class _UploadSession {
     required this.size,
     required this.offset,
     required this.chunkSize,
+    required this.receivedBytes,
+    required this.receivedOffsets,
   });
-  factory _UploadSession.fromJson(Map<String, dynamic> json) => _UploadSession(
-    id: '${json['upload_id'] ?? ''}',
-    size: json['size'] as int? ?? -1,
-    offset: json['offset'] as int? ?? -1,
-    chunkSize: json['chunk_size'] as int? ?? -1,
-  );
+  factory _UploadSession.fromJson(Map<String, dynamic> json) {
+    final offset = json['offset'] as int? ?? -1;
+    final chunkSize = json['chunk_size'] as int? ?? -1;
+    final explicit = json['received_offsets'];
+    final receivedOffsets = explicit is List
+        ? explicit.whereType<int>().toSet()
+        : <int>{
+            if (offset > 0 && chunkSize > 0)
+              for (var value = 0; value < offset; value += chunkSize) value,
+          };
+    return _UploadSession(
+      id: '${json['upload_id'] ?? ''}',
+      size: json['size'] as int? ?? -1,
+      offset: offset,
+      chunkSize: chunkSize,
+      receivedBytes: json['received_bytes'] as int? ?? offset,
+      receivedOffsets: receivedOffsets,
+    );
+  }
   final String id;
   final int size;
   final int offset;
   final int chunkSize;
+  final int receivedBytes;
+  final Set<int> receivedOffsets;
 }
 
 class NoirApiClient {
@@ -43,11 +60,13 @@ class NoirApiClient {
     String? token,
     http.Client? client,
     Future<void> Function(Duration)? retryDelay,
+    int uploadParallelism = 4,
   }) : _baseUrl = normalizeBaseUrl(baseUrl ?? cloudBaseUrl),
        _token = token,
        _client = client ?? http.Client(),
        _retryDelay =
-           retryDelay ?? ((duration) => Future<void>.delayed(duration));
+           retryDelay ?? ((duration) => Future<void>.delayed(duration)),
+       _uploadParallelism = math.max(1, math.min(uploadParallelism, 8));
   String _baseUrl;
   String? _token;
   int _credentialRevision = 0;
@@ -68,6 +87,7 @@ class NoirApiClient {
 
   final http.Client _client;
   final Future<void> Function(Duration) _retryDelay;
+  final int _uploadParallelism;
   final Set<String> _inFlight = {};
 
   static String normalizeBaseUrl(String value) {
@@ -312,7 +332,7 @@ class NoirApiClient {
       _response(
         await _send(
           request,
-          timeout: const Duration(minutes: 2),
+          timeout: const Duration(seconds: 45),
           mutation: true,
         ),
       ),
@@ -375,11 +395,29 @@ class NoirApiClient {
     int expectedSize, {
     String? expectedId,
   }) {
+    final invalidOffset =
+        session.chunkSize <= 0 ||
+        session.receivedOffsets.any(
+          (offset) =>
+              offset < 0 ||
+              offset >= expectedSize ||
+              offset % session.chunkSize != 0,
+        );
+    final computedReceived = invalidOffset
+        ? -1
+        : session.receivedOffsets.fold<int>(
+            0,
+            (total, offset) =>
+                total + math.min(session.chunkSize, expectedSize - offset),
+          );
     if (session.id.isEmpty ||
         session.size != expectedSize ||
         session.offset < 0 ||
         session.offset > expectedSize ||
         session.chunkSize <= 0 ||
+        session.receivedBytes < 0 ||
+        session.receivedBytes > expectedSize ||
+        session.receivedBytes != computedReceived ||
         (expectedId != null && session.id != expectedId)) {
       throw ApiException('Backend returned invalid upload-session state.');
     }
@@ -408,23 +446,34 @@ class NoirApiClient {
     );
     _validateUploadSession(session, length);
     final uploadId = session.id;
-    var offset = session.offset;
-    onProgress?.call(TransferProgress(offset, length));
-    while (offset < length) {
+    final chunkSize = session.chunkSize;
+    final acknowledged = <int>{...session.receivedOffsets};
+    int acknowledgedBytes() => acknowledged.fold(
+      0,
+      (total, offset) => total + math.min(chunkSize, length - offset),
+    );
+    onProgress?.call(TransferProgress(acknowledgedBytes(), length));
+    final pending = <int>[
+      for (var offset = 0; offset < length; offset += chunkSize)
+        if (!acknowledged.contains(offset)) offset,
+    ];
+    var next = 0;
+
+    Future<void> uploadRange(int offset) async {
       ensureWorkspace();
-      final end = math.min(offset + session.chunkSize, length);
+      final end = math.min(offset + chunkSize, length);
       final bytes = await _readUploadChunk(reader, offset, end);
-      var acknowledged = false;
-      for (var attempt = 0; attempt < 4 && !acknowledged; attempt++) {
+      var wasAcknowledged = false;
+      for (var attempt = 0; attempt < 4 && !wasAcknowledged; attempt++) {
         try {
-          session = await _sendUploadChunk(session.id, offset, bytes);
-          _validateUploadSession(session, length, expectedId: uploadId);
-          if (session.offset != end) {
+          final response = await _sendUploadChunk(uploadId, offset, bytes);
+          _validateUploadSession(response, length, expectedId: uploadId);
+          if (!response.receivedOffsets.contains(offset)) {
             throw ApiException(
-              'Backend acknowledged an unexpected upload offset.',
+              'Backend did not acknowledge the uploaded range.',
             );
           }
-          acknowledged = true;
+          wasAcknowledged = true;
         } catch (error) {
           if (!_retryableUploadError(error, includeConflict: true)) rethrow;
           if (attempt == 3) rethrow;
@@ -434,20 +483,29 @@ class NoirApiClient {
             () => _uploadStatus(uploadId),
           );
           _validateUploadSession(recovered, length, expectedId: uploadId);
-          if (recovered.offset == end) {
-            session = recovered;
-            acknowledged = true;
-          } else if (recovered.offset != offset) {
-            throw ApiException(
-              'Backend returned an unsafe partial-chunk offset.',
-            );
-          }
+          wasAcknowledged = recovered.receivedOffsets.contains(offset);
         }
       }
-      if (!acknowledged) throw ConnectionException();
-      offset = session.offset;
-      onProgress?.call(TransferProgress(offset, length));
+      if (!wasAcknowledged) throw ConnectionException();
+      acknowledged.add(offset);
+      onProgress?.call(TransferProgress(acknowledgedBytes(), length));
     }
+
+    Future<void> worker() async {
+      while (next < pending.length) {
+        final offset = pending[next++];
+        await uploadRange(offset);
+      }
+    }
+
+    await Future.wait([
+      for (
+        var index = 0;
+        index < math.min(_uploadParallelism, pending.length);
+        index++
+      )
+        worker(),
+    ]);
     ensureWorkspace();
     return _retryUploadRequest(
       () async => JobInfo.fromJson(
