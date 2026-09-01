@@ -219,6 +219,7 @@ class AiContextTools:
         currency_terms = {"cash", "coin", "coins", "currency", "money", "wallet"}
         if tokens & currency_terms:
             tokens.update(currency_terms)
+            tokens.update({"amount", "balance", "inventory", "player", "profile"})
         if tokens & {"key", "keys"}:
             tokens.update({"key", "keys"})
         return tokens
@@ -284,8 +285,16 @@ class AiContextTools:
             # A single large type must not consume the complete evidence budget.
             # Relevant selectors remain first; the fallback members preserve enough
             # surrounding structure for the model to reason about the type.
-            member_limit = 32 if tokens else 24
-            selected_members = members[:member_limit]
+            if tokens:
+                relevant_members = [
+                    member for member in members if self._symbol_relevance(member[1], tokens) > 0
+                ]
+                fallback_members = [
+                    member for member in members if self._symbol_relevance(member[1], tokens) == 0
+                ][:4]
+                selected_members = [*relevant_members[:16], *fallback_members]
+            else:
+                selected_members = members[:24]
             if len(selected_members) < len(members):
                 result["truncated"] = True
             for collection, member in selected_members:
