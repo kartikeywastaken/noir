@@ -176,6 +176,62 @@ def test_cil_companion_output_is_deterministic_for_identical_input(tmp_path):
     assert first.read_bytes() == second.read_bytes()
 
 
+def test_chained_cil_method_edits_rebind_staged_token_sensitive_hashes(tmp_path):
+    from noir.infrastructure.dotnet.adapter import read_method_il
+
+    config = _cil_config(tmp_path)
+    workspace = _workspace(tmp_path, config)
+    relative = "assets/bin/Data/Managed/Assembly-CSharp.dll"
+    target = workspace.safe_path(relative)
+    target.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "mono" / "Assembly-CSharp.dll", target)
+    original_hash = compute_file_hash(target)
+
+    def operation(signature: str, source: str) -> PatchOperation:
+        evidence = read_method_il(
+            config,
+            target,
+            "Game.Economy.CurrencyManager",
+            signature,
+        )
+        return PatchOperation(
+            relative_path=relative,
+            operation=PatchOperationType.CIL_REPLACE_METHOD_BODY,
+            expected_preimage_hash=original_hash,
+            assembly_name="Assembly-CSharp.dll",
+            type_full_name="Game.Economy.CurrencyManager",
+            method_signature=signature,
+            expected_method_il_hash=evidence["il_hash"],
+            new_il_source=source,
+        )
+
+    patch = PatchSet(
+        patch_id="chained-cil-patch",
+        plan_id="binary-plan",
+        project_id="binarytest",
+        workspace_revision=0,
+        provenance=Provenance.MANUAL,
+        operations=[
+            operation("System.Boolean CanAfford(System.Int32)", "ldc.i4.1\nret"),
+            operation("System.Int32 Untouched()", "ldc.i4.s 99\nret"),
+        ],
+    )
+
+    PatchEngine(workspace).apply_patch(patch)
+    assert read_method_il(
+        config,
+        target,
+        "Game.Economy.CurrencyManager",
+        "System.Boolean CanAfford(System.Int32)",
+    )["il_source"] == "ldc.i4.1\nret"
+    assert read_method_il(
+        config,
+        target,
+        "Game.Economy.CurrencyManager",
+        "System.Int32 Untouched()",
+    )["il_source"] == "ldc.i4.s 99\nret"
+
+
 def test_cil_method_preimage_mismatch_is_rejected(tmp_path):
     config = _cil_config(tmp_path)
     workspace = _workspace(tmp_path, config)

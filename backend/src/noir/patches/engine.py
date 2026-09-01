@@ -556,6 +556,7 @@ class PatchEngine:
                         "expected_absent": False,
                     }
                 )
+                staged_op = self._bind_staged_cil_preimage(staged_op, staged_target)
                 single = patch.model_copy(update={"operations": [staged_op]})
                 # The complete patch was already checked against every packaged ABI.
                 # A one-operation staging workspace intentionally contains only the
@@ -576,6 +577,59 @@ class PatchEngine:
         except BaseException:
             temporary.cleanup()
             raise
+
+    def _bind_staged_cil_preimage(self, op, target):
+        """Bind a chained CIL edit to the current, already-validated staged image.
+
+        Rewriting a managed assembly can renumber metadata tokens. Canonical CIL
+        hashes intentionally include those tokens, so a later operation against
+        the same assembly must use the staged method hash rather than the hash
+        from the original image. The complete patch has already been validated
+        against every original preimage before staging begins.
+        """
+        if op.operation not in CIL_OPERATIONS or not target.is_file():
+            return op
+        if op.operation == PatchOperationType.CIL_INSERT_METHOD:
+            return op
+
+        from noir.infrastructure.dotnet.adapter import inspect_assembly
+
+        inspection = inspect_assembly(self.config, target)
+        types = [
+            item
+            for item in inspection.get("types", [])
+            if item.get("full_name") == op.type_full_name
+        ]
+        if len(types) != 1:
+            raise PatchValidationError(
+                f"Staged CIL type selector matched {len(types)} types"
+            )
+        if op.operation == PatchOperationType.CIL_REPLACE_FIELD_INIT:
+            fields = [
+                field
+                for field in types[0].get("fields", [])
+                if field.get("name") == op.field_name
+            ]
+            if len(fields) != 1 or not fields[0].get("constant_hash"):
+                raise PatchValidationError(
+                    f"Staged CIL field selector matched {len(fields)} fields"
+                )
+            return op.model_copy(
+                update={"expected_method_il_hash": fields[0]["constant_hash"]}
+            )
+
+        methods = [
+            method
+            for method in types[0].get("methods", [])
+            if method.get("signature") == op.method_signature
+        ]
+        if len(methods) != 1 or not methods[0].get("il_hash"):
+            raise PatchValidationError(
+                f"Staged CIL method selector matched {len(methods)} methods"
+            )
+        return op.model_copy(
+            update={"expected_method_il_hash": methods[0]["il_hash"]}
+        )
 
     @staticmethod
     def _atomic_write(path, content):

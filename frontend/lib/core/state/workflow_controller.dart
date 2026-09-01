@@ -111,10 +111,10 @@ class WorkflowController extends SafeNotifier {
     this.filename = filename;
     notifyListeners();
     try {
-      job = await api.importApkResumable(
+      job = await api.importApkStream(
         filename,
         length,
-        reader,
+        reader(0, length),
         idempotencyKey: const Uuid().v4(),
         onProgress: (value) {
           upload = value;

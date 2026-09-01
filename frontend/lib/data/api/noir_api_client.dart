@@ -293,12 +293,64 @@ class NoirApiClient {
     TransferCallback? onProgress,
   }) async {
     final file = File(filePath);
-    return importApkResumable(
+    return importApkStream(
       file.uri.pathSegments.last,
       await file.length(),
-      (start, end) => file.openRead(start, end),
+      file.openRead(),
       idempotencyKey: idempotencyKey,
       onProgress: onProgress,
+    );
+  }
+
+  /// Safe-point upload path: one streaming multipart request to `/v1/import`.
+  Future<JobInfo> importApkStream(
+    String filename,
+    int length,
+    Stream<List<int>> bytes, {
+    required String idempotencyKey,
+    TransferCallback? onProgress,
+  }) async {
+    if (token?.isNotEmpty != true) throw UnauthorizedException();
+    if (length <= 0) throw ApiException('Selected APK is empty.');
+    final request = http.MultipartRequest(
+      'POST',
+      _uri('/v1/import', {'authorized': 'true'}),
+    );
+    request.headers['Authorization'] = 'Bearer $token';
+    request.headers['Idempotency-Key'] = idempotencyKey;
+    final revision = credentialRevision;
+    Stream<List<int>> counted() async* {
+      var sent = 0;
+      onProgress?.call(TransferProgress(0, length));
+      await for (final chunk in bytes) {
+        if (revision != credentialRevision) {
+          throw ApiException('Workspace changed. Upload stopped.');
+        }
+        sent += chunk.length;
+        if (sent > length) {
+          throw ApiException('Selected APK returned more bytes than expected.');
+        }
+        onProgress?.call(TransferProgress(sent, length));
+        yield chunk;
+      }
+      if (sent != length) {
+        throw ApiException(
+          'Selected APK changed or became unavailable during upload.',
+        );
+      }
+    }
+
+    request.files.add(
+      http.MultipartFile('file', counted(), length, filename: filename),
+    );
+    return JobInfo.fromJson(
+      _response(
+        await _send(
+          request,
+          timeout: const Duration(minutes: 10),
+          mutation: true,
+        ),
+      ),
     );
   }
 

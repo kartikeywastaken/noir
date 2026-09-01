@@ -34,49 +34,11 @@ void main() {
       'stage': 'complete',
       'result_data': {'operation': 'import', 'result': <String, Object>{}},
     };
-    var offset = 0;
     final api = NoirApiClient(
       token: 'test',
-      uploadParallelism: 1,
       client: StreamClient((request) async {
-        if (request.url.path == '/v1/uploads' && request.method == 'POST') {
-          await request.finalize().drain<void>();
-          return http.StreamedResponse(
-            Stream.value(
-              utf8.encode(
-                jsonEncode({
-                  'upload_id': 'upload',
-                  'size': 4,
-                  'offset': offset,
-                  'chunk_size': 2,
-                }),
-              ),
-            ),
-            201,
-          );
-        }
-        if (request.url.path == '/v1/uploads/upload' &&
-            request.method == 'PATCH') {
-          final body = await request.finalize().fold<List<int>>(
-            [],
-            (all, chunk) => all..addAll(chunk),
-          );
-          offset += body.length;
-          return http.StreamedResponse(
-            Stream.value(
-              utf8.encode(
-                jsonEncode({
-                  'upload_id': 'upload',
-                  'size': 4,
-                  'offset': offset,
-                  'chunk_size': 2,
-                }),
-              ),
-            ),
-            200,
-          );
-        }
-        if (request.url.path == '/v1/uploads/upload/complete') {
+        if (request.url.path == '/v1/import' && request.method == 'POST') {
+          expect(request.url.queryParameters['authorized'], 'true');
           await request.finalize().drain<void>();
           return http.StreamedResponse(
             Stream.value(utf8.encode(jsonEncode(job))),
@@ -107,6 +69,41 @@ void main() {
     expect(flow.project?.id, 'project');
     expect(flow.error, isNull);
     flow.dispose();
+    api.dispose();
+  });
+
+  test('safe-point multipart upload reports actual APK bytes', () async {
+    final progress = <TransferProgress>[];
+    final api = NoirApiClient(
+      token: 'test',
+      client: StreamClient((request) async {
+        expect(request.url.path, '/v1/import');
+        expect(request.url.queryParameters['authorized'], 'true');
+        expect(request.headers['idempotency-key'], 'safe-upload');
+        await request.finalize().drain<void>();
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              jsonEncode({'job_id': 'j', 'project_id': 'p', 'state': 'queued'}),
+            ),
+          ),
+          202,
+        );
+      }),
+    );
+    await api.importApkStream(
+      'app.apk',
+      6,
+      Stream.fromIterable([
+        [1, 2],
+        [3, 4],
+        [5, 6],
+      ]),
+      idempotencyKey: 'safe-upload',
+      onProgress: progress.add,
+    );
+    expect(progress.map((item) => item.bytes), [0, 2, 4, 6]);
+    expect(progress.every((item) => item.total == 6), true);
     api.dispose();
   });
 
