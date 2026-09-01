@@ -177,7 +177,7 @@ def test_cil_companion_output_is_deterministic_for_identical_input(tmp_path):
 
 
 def test_chained_cil_method_edits_rebind_staged_token_sensitive_hashes(tmp_path):
-    from noir.infrastructure.dotnet.adapter import read_method_il
+    from noir.infrastructure.dotnet.adapter import inspect_assembly, read_method_il
 
     config = _cil_config(tmp_path)
     workspace = _workspace(tmp_path, config)
@@ -186,6 +186,7 @@ def test_chained_cil_method_edits_rebind_staged_token_sensitive_hashes(tmp_path)
     target.parent.mkdir(parents=True)
     shutil.copy2(FIXTURES / "mono" / "Assembly-CSharp.dll", target)
     original_hash = compute_file_hash(target)
+    before = inspect_assembly(config, target)
 
     def operation(signature: str, source: str) -> PatchOperation:
         evidence = read_method_il(
@@ -218,6 +219,26 @@ def test_chained_cil_method_edits_rebind_staged_token_sensitive_hashes(tmp_path)
     )
 
     PatchEngine(workspace).apply_patch(patch)
+    after = inspect_assembly(config, target)
+    before_hashes = {
+        (type_info["full_name"], method["signature"]): method["il_hash"]
+        for type_info in before["types"]
+        for method in type_info["methods"]
+    }
+    after_hashes = {
+        (type_info["full_name"], method["signature"]): method["il_hash"]
+        for type_info in after["types"]
+        for method in type_info["methods"]
+    }
+    assert {
+        key for key in before_hashes if before_hashes[key] != after_hashes[key]
+    } == {
+        (
+            "Game.Economy.CurrencyManager",
+            "System.Boolean CanAfford(System.Int32)",
+        ),
+        ("Game.Economy.CurrencyManager", "System.Int32 Untouched()"),
+    }
     assert read_method_il(
         config,
         target,

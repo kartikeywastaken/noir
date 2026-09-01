@@ -273,8 +273,14 @@ internal static class Program
             return " " + string.Join(",", targets.Select(target => $"IL_{indices[target]:D4}"));
         if (operand is string text)
             return " " + JsonSerializer.Serialize(text);
+        // Metadata row numbers are serialization details and dnlib may renumber
+        // them when writing an otherwise semantically unchanged assembly. Hash
+        // the stable member/type identity so post-patch scope validation does
+        // not report every token-referencing method as modified.
+        if (operand is IFullName fullName)
+            return $" ref:{fullName.FullName}";
         if (operand is IMDTokenProvider token)
-            return $" token:0x{token.MDToken.Raw:x8}";
+            return $" ref:{token.GetType().FullName}:{token}";
         if (operand is Local local)
             return $" local:{local.Index}";
         if (operand is Parameter parameter)
