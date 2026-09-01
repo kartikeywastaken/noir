@@ -204,6 +204,68 @@ def test_cil_parser_normalizes_exact_metadata_assembly_stem():
     assert operation.assembly_name == "Assembly-CSharp.dll"
 
 
+def test_cil_patch_binds_host_inspected_method_hash(monkeypatch, provider):
+    from noir.domain.enums import PatchOperationType
+    from noir.domain.models import ChangePlan, PlanFileChange
+
+    relative = "assets/bin/Data/Managed/Assembly-CSharp.dll"
+    signature = "System.Int32 get_amountOfCoins()"
+    trusted_hash = "a" * 64
+    plan = ChangePlan(
+        project_id="cil-hash-binding",
+        workspace_revision=0,
+        user_request="change coins",
+        file_changes=[
+            PlanFileChange(
+                relative_path=relative,
+                operation=PatchOperationType.CIL_REPLACE_METHOD_BODY,
+            )
+        ],
+    )
+    inject_response(
+        monkeypatch,
+        provider,
+        json.dumps(
+            {
+                "operations": [
+                    {
+                        "relative_path": relative,
+                        "operation": "cil_replace_method_body",
+                        "assembly_name": "Assembly-CSharp.dll",
+                        "type_full_name": "PlayerInfo",
+                        "method_signature": signature,
+                        "new_il_source": "ldc.i4 999999999\nret",
+                        "expected_method_il_hash": "b" * 64,
+                    }
+                ]
+            }
+        ),
+    )
+
+    patch = provider.generate_patch(
+        plan,
+        {
+            "file_snippets": {},
+            "file_hashes": {relative: "c" * 64},
+            "binary_inspection": {
+                relative: {
+                    "selected_method_il": [
+                        {
+                            "type_full_name": "PlayerInfo",
+                            "method_signature": signature,
+                            "il_source": "ldarg.0\nldfld token:0x04000e2a\nret",
+                            "il_hash": trusted_hash,
+                        }
+                    ]
+                }
+            },
+        },
+    )
+
+    assert patch.operations[0].expected_method_il_hash == trusted_hash
+    assert patch.operations[0].expected_preimage_hash == "c" * 64
+
+
 def test_unsupported_plan_can_return_zero_file_changes(monkeypatch, provider):
     from noir.domain.models import AnalysisResult
 
