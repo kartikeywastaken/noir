@@ -63,6 +63,11 @@ def _is_structured_output_argument_error(exc: Exception) -> bool:
     return status == 400 and "INVALID_ARGUMENT" in detail
 
 
+def _requires_textual_schema(model_name: str) -> bool:
+    """Avoid a known rejected schema request and its wasted quota/latency."""
+    return model_name == "gemini-3.6-flash"
+
+
 _SCHEMA_PROMPT_PREFIX = "\n\nREQUIRED JSON SCHEMA:\n"
 
 
@@ -318,8 +323,13 @@ class GeminiProvider(AiProvider):
             if self.fallback_model_name and self.fallback_model_name != self.model_name:
                 models.append(self.fallback_model_name)
             for model_index, model_name in enumerate(models):
-                active_schema = response_schema
-                active_prompt = prompt
+                textual_schema = response_schema is not None and _requires_textual_schema(
+                    model_name
+                )
+                active_schema = None if textual_schema else response_schema
+                active_prompt = (
+                    prompt + _schema_prompt_suffix(response_schema) if textual_schema else prompt
+                )
                 while True:
                     config = types.GenerateContentConfig(
                         max_output_tokens=token_budget,

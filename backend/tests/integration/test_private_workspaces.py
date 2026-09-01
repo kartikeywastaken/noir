@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from uuid import uuid4
@@ -430,6 +431,55 @@ def test_resumable_upload_is_owner_scoped_offset_checked_and_idempotent(isolated
     payload = JobRepository().get(job["job_id"]).result_data["payload"]
     assert payload["size"] == 6
     assert payload["sha256"] == hashlib.sha256(b"abcdef").hexdigest()
+
+
+def test_parallel_upload_ranges_leave_event_loop_for_blocking_disk_io(isolated, monkeypatch):
+    app, config, users = isolated
+    config.upload_chunk_size = 4
+    config.max_upload_chunk_size = 4
+    client = users[0][0]
+    started = client.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "parallel-event-loop"},
+        json={"filename": "parallel.apk", "size": 8},
+    )
+    upload_id = started.json()["upload_id"]
+    original_append = app.state.uploads.append
+    barrier = threading.Barrier(2)
+    counter_lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    def observed_append(**kwargs):
+        nonlocal active, maximum_active
+        with counter_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        try:
+            barrier.wait(timeout=2)
+            return original_append(**kwargs)
+        finally:
+            with counter_lock:
+                active -= 1
+
+    monkeypatch.setattr(app.state.uploads, "append", observed_append)
+
+    def send(item):
+        offset, content = item
+        return client.patch(
+            f"/v1/uploads/{upload_id}",
+            headers={"Upload-Offset": str(offset)},
+            content=content,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(send, [(0, b"abcd"), (4, b"efgh")]))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert maximum_active == 2
+    status = client.get(f"/v1/uploads/{upload_id}").json()
+    assert status["received_bytes"] == 8
+    assert status["received_offsets"] == [0, 4]
 
 
 def test_resumable_upload_rejects_declared_and_chunk_size_limits(isolated):

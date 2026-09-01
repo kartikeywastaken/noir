@@ -223,6 +223,8 @@ def test_generate_patch_with_large_smali_and_new_method(ui_workspace, monkeypatc
         prompt = kwargs["contents"]
         sdk_config = kwargs["config"]
         schema = sdk_config.response_json_schema
+        if schema is None:
+            schema = json.loads(prompt.rsplit("\n\nREQUIRED JSON SCHEMA:\n", 1)[1])
         assert json.dumps(source, ensure_ascii=False) in prompt
         assert "class-level" in prompt
         assert set(schema["properties"]["operations"]["items"]["required"]) >= {
@@ -234,7 +236,11 @@ def test_generate_patch_with_large_smali_and_new_method(ui_workspace, monkeypatc
         assert (
             len(prompt.encode())
             + len(sdk_config.system_instruction.encode())
-            + len(json.dumps(schema, separators=(",", ":")).encode())
+            + (
+                0
+                if sdk_config.response_json_schema is None
+                else len(json.dumps(schema, separators=(",", ":")).encode())
+            )
         ) <= cfg.ai_max_request_size
         return SimpleNamespace(
             prompt_feedback=None,

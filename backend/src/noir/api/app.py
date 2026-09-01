@@ -17,6 +17,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Reques
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from noir.application.access_service import AccessError, AccessService
 from noir.domain.config import NoirConfig, get_config
@@ -341,15 +342,17 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             raise HTTPException(400, "Invalid Content-Length") from exc
         chunk = await request.body()
         try:
-            session = uploads.append(
+            # append performs positional disk I/O and waits for a durable group
+            # commit. Running it on the event loop serialized otherwise parallel
+            # range requests behind the first fsync waiter.
+            session = await run_in_threadpool(
+                uploads.append,
                 upload_id=upload_id,
                 user_id=principal.user_id,
                 offset=upload_offset,
                 chunk=chunk,
             )
-            return JSONResponse(
-                session.public(), headers={"Upload-Offset": str(session.offset)}
-            )
+            return JSONResponse(session.public(), headers={"Upload-Offset": str(session.offset)})
         except Exception as exc:
             upload_failure(exc)
 
@@ -366,9 +369,9 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         if not authorized:
             raise HTTPException(400, "Authorization required")
         try:
-            return uploads.complete(
-                upload_id=upload_id, user_id=principal.user_id
-            ).model_dump(mode="json")
+            return uploads.complete(upload_id=upload_id, user_id=principal.user_id).model_dump(
+                mode="json"
+            )
         except Exception as exc:
             upload_failure(exc)
 

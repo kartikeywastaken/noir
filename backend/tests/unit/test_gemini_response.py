@@ -161,6 +161,39 @@ def test_invalid_structured_request_retries_same_model_in_json_mode(monkeypatch,
     assert '"required":["status"]' in calls[1]["contents"]
 
 
+def test_gemini_36_uses_textual_schema_without_wasted_rejected_call(monkeypatch):
+    provider = GeminiProvider(
+        config=NoirConfig(
+            _env_file=None,
+            gemini_api_key="unit-test-only",
+            ai_provider="gemini",
+            ai_model="gemini-3.6-flash",
+            ai_fallback_model="",
+        )
+    )
+    calls = []
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            text='{"status":"ok"}',
+            prompt_feedback=None,
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+        )
+
+    monkeypatch.setattr(
+        provider,
+        "_get_client",
+        lambda: SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+    )
+
+    schema = {"type": "object", "required": ["status"]}
+    assert provider._call_model("test", response_schema=schema) == '{"status":"ok"}'
+    assert len(calls) == 1
+    assert calls[0]["config"].response_json_schema is None
+    assert '"required":["status"]' in calls[0]["contents"]
+
+
 def test_cil_patch_schema_requires_complete_method_operation():
     from noir.domain.enums import PatchOperationType
     from noir.domain.models import ChangePlan, PlanFileChange

@@ -218,9 +218,9 @@ void main() {
   );
 
   test(
-    'upload runs four independently acknowledged ranges in parallel',
+    'upload accepts configured parallelism above the former eight-range cap',
     () async {
-      final source = List<int>.generate(8, (index) => index);
+      final source = List<int>.generate(20, (index) => index);
       final received = <int>{};
       final progress = <TransferProgress>[];
       var inFlight = 0;
@@ -233,7 +233,7 @@ void main() {
         }
         return {
           'upload_id': 'parallel',
-          'size': 8,
+          'size': source.length,
           'offset': contiguous,
           'chunk_size': 2,
           'received_bytes': received.length * 2,
@@ -244,7 +244,7 @@ void main() {
       final api = NoirApiClient(
         token: 'test',
         retryDelay: (_) async {},
-        uploadParallelism: 4,
+        uploadParallelism: 10,
         client: StreamClient((request) async {
           if (request.url.path == '/v1/uploads' && request.method == 'POST') {
             await request.finalize().drain<void>();
@@ -297,9 +297,9 @@ void main() {
         idempotencyKey: 'parallel',
         onProgress: progress.add,
       );
-      expect(maximumInFlight, 4);
-      expect(received, {0, 2, 4, 6});
-      expect(progress.last.bytes, 8);
+      expect(maximumInFlight, 10);
+      expect(received, {0, 2, 4, 6, 8, 10, 12, 14, 16, 18});
+      expect(progress.last.bytes, 20);
       api.dispose();
     },
   );

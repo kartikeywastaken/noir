@@ -60,13 +60,13 @@ class NoirApiClient {
     String? token,
     http.Client? client,
     Future<void> Function(Duration)? retryDelay,
-    int uploadParallelism = 4,
+    int uploadParallelism = 8,
   }) : _baseUrl = normalizeBaseUrl(baseUrl ?? cloudBaseUrl),
        _token = token,
        _client = client ?? http.Client(),
        _retryDelay =
            retryDelay ?? ((duration) => Future<void>.delayed(duration)),
-       _uploadParallelism = math.max(1, math.min(uploadParallelism, 8));
+       _uploadParallelism = math.max(1, uploadParallelism);
   String _baseUrl;
   String? _token;
   int _credentialRevision = 0;
