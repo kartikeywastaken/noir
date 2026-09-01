@@ -330,6 +330,12 @@ class AiContextTools:
 
     def read_method_il(self, relative_path: str, type_name: str, method_sig: str) -> str:
         """Read one selected method while retaining the normal context ceiling."""
+        return self._read_method_evidence(relative_path, type_name, method_sig)["il_source"]
+
+    def _read_method_evidence(
+        self, relative_path: str, type_name: str, method_sig: str
+    ) -> dict[str, str]:
+        """Keep canonical CIL and its preimage hash together for safe AI selection."""
         from noir.infrastructure.dotnet.adapter import read_method_il
 
         result = read_method_il(
@@ -341,7 +347,10 @@ class AiContextTools:
         source = str(result.get("il_source", ""))
         if len(source.encode()) > self.MAX_CONTEXT_BYTES:
             raise ValueError("Selected CIL method exceeds the AI context ceiling")
-        return source
+        il_hash = str(result.get("il_hash", ""))
+        if not re.fullmatch(r"[0-9a-f]{64}", il_hash):
+            raise ValueError("Selected CIL method is missing its canonical preimage hash")
+        return {"il_source": source, "il_hash": il_hash}
 
     def inspect_il2cpp_method(self, type_name: str, method_sig: str) -> dict[str, Any]:
         """Correlate one symbol-rich IL2CPP method without guessing offsets."""
@@ -429,13 +438,15 @@ class AiContextTools:
             inspection["selected_method_il"] = []
             for _score, type_name, method_signature in candidates:
                 try:
-                    source = self.read_method_il(relative_path, type_name, method_signature)
+                    evidence = self._read_method_evidence(
+                        relative_path, type_name, method_signature
+                    )
                 except (ValueError, CilToolError):
                     continue
                 entry = {
                     "type_full_name": type_name,
                     "method_signature": method_signature,
-                    "il_source": source,
+                    **evidence,
                 }
                 candidate = {
                     **inspection,

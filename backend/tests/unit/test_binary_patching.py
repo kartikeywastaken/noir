@@ -36,21 +36,15 @@ from noir.patches.engine import PatchEngine
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 REPOSITORY = Path(__file__).resolve().parents[3]
 CIL_TOOL = (
-    REPOSITORY
-    / "tools"
-    / "noir-cil-tool"
-    / "bin"
-    / "Release"
-    / "net8.0"
-    / "noir-cil-tool.dll"
+    REPOSITORY / "tools" / "noir-cil-tool" / "bin" / "Release" / "net8.0" / "noir-cil-tool.dll"
 )
 
 
 def _dotnet() -> str:
     configured = os.environ.get("NOIR_TEST_DOTNET")
     temporary = Path("/private/tmp/noir-dotnet/dotnet")
-    executable = configured or shutil.which("dotnet") or (
-        str(temporary) if temporary.is_file() else ""
+    executable = (
+        configured or shutil.which("dotnet") or (str(temporary) if temporary.is_file() else "")
     )
     if not executable:
         pytest.skip(".NET 8 SDK is not available for the CIL integration test")
@@ -146,9 +140,7 @@ def test_cil_method_round_trip_changes_only_approved_method(tmp_path):
         }
 
     before_hashes, after_hashes = hashes(before), hashes(after)
-    changed = {
-        key for key in before_hashes if before_hashes[key] != after_hashes[key]
-    }
+    changed = {key for key in before_hashes if before_hashes[key] != after_hashes[key]}
     assert changed == {
         (
             "Game.Economy.CurrencyManager",
@@ -258,9 +250,7 @@ def test_cil_insert_method_and_literal_field_round_trip(tmp_path):
         PatchEngine(workspace).apply_patch(_patch(operation))
         after = inspect_assembly(config, target)
         selected_type = next(
-            item
-            for item in after["types"]
-            if item["full_name"] == "Game.Economy.CurrencyManager"
+            item for item in after["types"] if item["full_name"] == "Game.Economy.CurrencyManager"
         )
         if operation_type == PatchOperationType.CIL_INSERT_METHOD:
             inserted = read_method_il(
@@ -330,9 +320,7 @@ def test_il2cpp_force_return_is_valid_machine_code(tmp_path):
         il2cpp_type_full_name="Game.Economy.CurrencyManager",
         il2cpp_method_signature="System.Boolean CanAfford(System.Int32)",
         il2cpp_return_constant=1,
-        expected_function_bytes_hash=range_hash(
-            target, reference.file_offset, reference.size
-        ),
+        expected_function_bytes_hash=range_hash(target, reference.file_offset, reference.size),
         native_abi="x86_64",
         native_offset=reference.file_offset,
         native_length=reference.size,
@@ -379,9 +367,7 @@ def test_native_byte_nop_and_branch_operations_round_trip(tmp_path):
             )["file_offset"]
 
         PatchEngine(workspace).apply_patch(_patch(operation))
-        assert disassemble_range(
-            target, selected["file_offset"], selected["size"], abi="x86_64"
-        )
+        assert disassemble_range(target, selected["file_offset"], selected["size"], abi="x86_64")
 
 
 def test_native_wrong_length_preimage_and_invalid_postimage_are_rejected(tmp_path):
@@ -395,9 +381,7 @@ def test_native_wrong_length_preimage_and_invalid_postimage_are_rejected(tmp_pat
         native_offset=selected["file_offset"],
         native_length=selected["size"],
         native_abi="x86_64",
-        expected_native_bytes_hash=range_hash(
-            target, selected["file_offset"], selected["size"]
-        ),
+        expected_native_bytes_hash=range_hash(target, selected["file_offset"], selected["size"]),
     )
     wrong_length = PatchOperation(**base, native_new_bytes_hex="90")
     assert any(
@@ -447,9 +431,7 @@ def test_multi_abi_library_cannot_be_partially_patched(tmp_path):
         native_offset=selected["file_offset"],
         native_length=selected["size"],
         native_abi="x86_64",
-        expected_native_bytes_hash=range_hash(
-            target, selected["file_offset"], selected["size"]
-        ),
+        expected_native_bytes_hash=range_hash(target, selected["file_offset"], selected["size"]),
     )
     errors = PatchEngine(workspace).validate_patch(_patch(operation))
     assert any("unaddressed ABIs: arm64-v8a" in error for error in errors)
@@ -492,9 +474,7 @@ def test_complete_multi_abi_patch_applies_both_architectures(tmp_path):
 
     PatchEngine(workspace).apply_patch(patch)
     for abi, _relative, target, selected in targets:
-        instructions = disassemble_range(
-            target, selected["file_offset"], selected["size"], abi=abi
-        )
+        instructions = disassemble_range(target, selected["file_offset"], selected["size"], abi=abi)
         assert all(item["mnemonic"] == "nop" for item in instructions)
 
 
@@ -519,12 +499,41 @@ def test_ai_binary_context_is_structured_and_bounded(tmp_path):
 
     inspection = context["binary_inspection"][relative]
     assert inspection["selected_disassembly"]
-    assert len(json.dumps(inspection).encode()) <= (
-        tools.MAX_BINARY_INSPECTION_BYTES
-    )
+    assert len(json.dumps(inspection).encode()) <= (tools.MAX_BINARY_INSPECTION_BYTES)
     with pytest.raises(ValueError, match="256-byte context ceiling"):
         tools.disassemble_native(relative, 0, tools.MAX_DISASSEMBLY_BYTES + 1)
     assert target.is_file()
+
+
+def test_ai_cil_context_colocates_selected_source_and_preimage_hash(tmp_path):
+    from noir.infrastructure.ai.context import AiContextTools
+    from noir.infrastructure.dotnet.adapter import read_method_il
+
+    config = _cil_config(tmp_path)
+    workspace = _workspace(tmp_path, config)
+    relative = "assets/bin/Data/Managed/Assembly-CSharp.dll"
+    target = workspace.safe_path(relative)
+    target.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "mono" / "Assembly-CSharp.dll", target)
+
+    context = AiContextTools(workspace).build_context(
+        [relative], user_request="change currency afford behavior"
+    )
+    selected = context["binary_inspection"][relative]["selected_method_il"]
+    expected = read_method_il(
+        config,
+        target,
+        "Game.Economy.CurrencyManager",
+        "System.Boolean CanAfford(System.Int32)",
+    )
+
+    evidence = next(
+        item
+        for item in selected
+        if item["method_signature"] == "System.Boolean CanAfford(System.Int32)"
+    )
+    assert evidence["il_source"] == expected["il_source"]
+    assert evidence["il_hash"] == expected["il_hash"]
 
 
 def test_manual_replace_cannot_bypass_structured_binary_operations(tmp_path):
