@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Iterable
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -692,7 +693,8 @@ To add a method that is absent from the class, use its exact signature, a unique
 comment anchor (for example # virtual methods), and exactly one complete .method ... .end method
 block as new_content. Never nest methods, duplicate an existing signature, or include the anchor
 itself in new_content. Preserve the superclass dispatch and return value when adding an override.
-For CIL operations include assembly_name, type_full_name and the exact method_signature or
+For CIL operations include assembly_name as the exact filename including .dll, type_full_name,
+and the exact method_signature or
 field_name. cil_replace_method_body requires expected_method_il_hash and new_il_source;
 cil_insert_method requires new_il_source; cil_replace_field_init uses JSON scalar text as
 new_il_source and requires the current initializer hash. Copy hashes exactly from inspection.
@@ -757,10 +759,22 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
         # model remains strict; handle the provider's optional nulls only at this boundary.
         attrs = data.get("xml_attributes")
         scope = data.get("affected_scope")
+        relative_path = data.get("relative_path")
+        assembly_name = data.get("assembly_name")
+        if isinstance(relative_path, str) and isinstance(assembly_name, str):
+            target_name = PurePosixPath(relative_path).name
+            # Managed metadata commonly calls Assembly-CSharp.dll "Assembly-CSharp".
+            # Normalize only that exact stem/filename equivalence; the engine still
+            # binds the operation to the real path and verifies all preimage hashes.
+            if (
+                target_name.lower().endswith(".dll")
+                and assembly_name.lower() == target_name[:-4].lower()
+            ):
+                assembly_name = target_name
         try:
             operation = PatchOperation.model_validate(
                 {
-                    "relative_path": data.get("relative_path"),
+                    "relative_path": relative_path,
                     "operation": data.get("operation"),
                     "match_content": data.get("match_content"),
                     "new_content": data.get("new_content"),
@@ -770,7 +784,7 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
                     "xml_element": data.get("xml_element"),
                     "xml_attributes": {} if attrs is None else attrs,
                     "affected_scope": "" if scope is None else scope,
-                    "assembly_name": data.get("assembly_name"),
+                    "assembly_name": assembly_name,
                     "type_full_name": data.get("type_full_name"),
                     "new_il_source": data.get("new_il_source"),
                     "expected_method_il_hash": data.get("expected_method_il_hash"),

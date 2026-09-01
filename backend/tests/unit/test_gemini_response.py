@@ -187,6 +187,23 @@ def test_cil_patch_schema_requires_complete_method_operation():
     assert "expected_method_il_hash" in required
 
 
+def test_cil_parser_normalizes_exact_metadata_assembly_stem():
+    operation = GeminiProvider._parse_patch_operation(
+        {
+            "relative_path": "assets/bin/Data/Managed/Assembly-CSharp.dll",
+            "operation": "cil_replace_method_body",
+            "assembly_name": "Assembly-CSharp",
+            "type_full_name": "PlayerInfo",
+            "method_signature": "System.Int32 get_amountOfCoins()",
+            "new_il_source": "ldc.i4 100\nret",
+            "expected_method_il_hash": "a" * 64,
+        },
+        0,
+    )
+
+    assert operation.assembly_name == "Assembly-CSharp.dll"
+
+
 def test_unsupported_plan_can_return_zero_file_changes(monkeypatch, provider):
     from noir.domain.models import AnalysisResult
 
