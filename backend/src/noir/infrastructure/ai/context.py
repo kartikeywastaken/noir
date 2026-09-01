@@ -179,24 +179,70 @@ class AiContextTools:
 
     @staticmethod
     def _binary_context_tokens(user_request: str) -> set[str]:
-        return {
+        tokens = {
             token
             for token in re.findall(r"[a-z_][a-z0-9_]{2,}", user_request.lower())
             if token
             not in {
                 "add",
+                "all",
+                "also",
                 "app",
                 "change",
+                "code",
+                "codebase",
+                "decide",
+                "edited",
+                "file",
+                "files",
+                "first",
+                "gimme",
+                "give",
+                "go",
                 "make",
                 "method",
                 "modify",
                 "native",
                 "please",
+                "through",
+                "then",
+                "only",
+                "path",
                 "return",
                 "the",
                 "this",
+                "unlimited",
+                "want",
+                "what",
             }
         }
+        currency_terms = {"cash", "coin", "coins", "currency", "money", "wallet"}
+        if tokens & currency_terms:
+            tokens.update(currency_terms)
+        if tokens & {"key", "keys"}:
+            tokens.update({"key", "keys"})
+        return tokens
+
+    @staticmethod
+    def _symbol_terms(value: Any) -> set[str]:
+        """Split managed/native identifiers without treating substrings as matches."""
+        rendered = json.dumps(value, sort_keys=True, default=str)
+        rendered = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", rendered)
+        terms = set(re.findall(r"[a-z][a-z0-9]{1,}", rendered.lower()))
+        # Treat a simple plural as equivalent while retaining the original selector.
+        terms.update(term[:-1] for term in tuple(terms) if len(term) > 3 and term.endswith("s"))
+        return terms
+
+    @classmethod
+    def _symbol_relevance(cls, value: Any, tokens: set[str]) -> int:
+        if not tokens:
+            return 0
+        terms = cls._symbol_terms(value)
+        normalized_tokens = set(tokens)
+        normalized_tokens.update(
+            token[:-1] for token in tokens if len(token) > 3 and token.endswith("s")
+        )
+        return len(terms & normalized_tokens)
 
     def _compact_assembly_inspection(
         self,
@@ -211,58 +257,50 @@ class AiContextTools:
             max_bytes or self.MAX_BINARY_INSPECTION_BYTES,
             self.MAX_BINARY_INSPECTION_BYTES,
         )
-        result = {
-            key: value
-            for key, value in inspection.items()
-            if key not in {"types"}
-        }
+        result = {key: value for key, value in inspection.items() if key not in {"types"}}
         result["types"] = []
         result["truncated"] = False
 
         def relevance(type_info: dict[str, Any]) -> tuple[int, str]:
-            searchable = " ".join(
-                [str(type_info.get("full_name", ""))]
-                + [str(item.get("name", "")) for item in type_info.get("fields", [])]
-                + [str(item.get("signature", "")) for item in type_info.get("methods", [])]
-            ).lower()
-            return (-sum(token in searchable for token in tokens), searchable)
+            rendered = json.dumps(type_info, sort_keys=True, default=str)
+            return (-self._symbol_relevance(type_info, tokens), rendered)
 
-        for type_info in sorted(inspection.get("types", []), key=relevance):
+        ranked_types = sorted(inspection.get("types", []), key=relevance)
+        for type_info in ranked_types:
             compact_type = {
                 "full_name": type_info.get("full_name"),
                 "fields": [],
                 "methods": [],
             }
-            members = [
-                ("fields", member)
-                for member in type_info.get("fields", [])
-            ] + [
-                ("methods", member)
-                for member in type_info.get("methods", [])
+            members = [("fields", member) for member in type_info.get("fields", [])] + [
+                ("methods", member) for member in type_info.get("methods", [])
             ]
             members.sort(
                 key=lambda item: (
-                    -sum(
-                        token in json.dumps(item[1], default=str).lower()
-                        for token in tokens
-                    ),
+                    -self._symbol_relevance(item[1], tokens),
                     json.dumps(item[1], sort_keys=True, default=str),
                 )
             )
-            for collection, member in members:
+            # A single large type must not consume the complete evidence budget.
+            # Relevant selectors remain first; the fallback members preserve enough
+            # surrounding structure for the model to reason about the type.
+            member_limit = 32 if tokens else 24
+            selected_members = members[:member_limit]
+            if len(selected_members) < len(members):
+                result["truncated"] = True
+            for collection, member in selected_members:
                 compact_type[collection].append(member)
                 candidate = {**result, "types": [*result["types"], compact_type]}
-                if (
-                    len(json.dumps(candidate, default=str).encode())
-                    > ceiling
-                ):
+                if len(json.dumps(candidate, default=str).encode()) > ceiling:
                     compact_type[collection].pop()
                     result["truncated"] = True
                     break
             if compact_type["fields"] or compact_type["methods"]:
                 result["types"].append(compact_type)
-            if result["truncated"]:
+            if len(json.dumps(result, default=str).encode()) >= ceiling:
                 break
+        if len(result["types"]) < len(ranked_types):
+            result["truncated"] = True
         result["included_type_count"] = len(result["types"])
         result["total_type_count"] = len(inspection.get("types", []))
         return result
@@ -275,17 +313,13 @@ class AiContextTools:
             raise ValueError("Managed assembly inspection requires a .dll path")
         return inspect_assembly(self.workspace.config, path)
 
-    def inspect_assembly(
-        self, relative_path: str, *, user_request: str = ""
-    ) -> dict[str, Any]:
+    def inspect_assembly(self, relative_path: str, *, user_request: str = "") -> dict[str, Any]:
         """Inspect one bounded managed assembly without exposing its raw bytes."""
         return self._compact_assembly_inspection(
             self._full_assembly_inspection(relative_path), user_request
         )
 
-    def read_method_il(
-        self, relative_path: str, type_name: str, method_sig: str
-    ) -> str:
+    def read_method_il(self, relative_path: str, type_name: str, method_sig: str) -> str:
         """Read one selected method while retaining the normal context ceiling."""
         from noir.infrastructure.dotnet.adapter import read_method_il
 
@@ -324,25 +358,17 @@ class AiContextTools:
                 results.append(
                     {
                         "relative_path": relative_path,
-                        **Il2CppMetadata(metadata[0], binary).inspect_method(
-                            type_name, method_sig
-                        ),
+                        **Il2CppMetadata(metadata[0], binary).inspect_method(type_name, method_sig),
                     }
                 )
             except Il2CppMetadataError as exc:
-                results.append(
-                    {"relative_path": relative_path, "unsupported_reason": str(exc)}
-                )
+                results.append({"relative_path": relative_path, "unsupported_reason": str(exc)})
         return {
-            "metadata_path": metadata[0]
-            .relative_to(self.workspace.decoded_dir)
-            .as_posix(),
+            "metadata_path": metadata[0].relative_to(self.workspace.decoded_dir).as_posix(),
             "abi_results": results,
         }
 
-    def disassemble_native(
-        self, relative_path: str, offset: int, length: int
-    ) -> list[dict]:
+    def disassemble_native(self, relative_path: str, offset: int, length: int) -> list[dict]:
         """Return a tightly bounded instruction window for human/AI review."""
         from noir.infrastructure.native.adapter import disassemble_range
 
@@ -350,9 +376,7 @@ class AiContextTools:
             raise ValueError("Native disassembly request exceeds the 256-byte context ceiling")
         return disassemble_range(self.workspace.safe_path(relative_path), offset, length)
 
-    def _inspect_binary_path(
-        self, relative_path: str, *, user_request: str = ""
-    ) -> dict[str, Any]:
+    def _inspect_binary_path(self, relative_path: str, *, user_request: str = "") -> dict[str, Any]:
         path = self.workspace.safe_path(relative_path)
         if path.suffix.lower() == ".dll":
             from noir.infrastructure.dotnet.adapter import CilToolError
@@ -366,27 +390,37 @@ class AiContextTools:
                 ),
             }
             tokens = self._binary_context_tokens(user_request)
-            candidates = [
-                (type_info.get("full_name", ""), method.get("signature", ""))
-                for type_info in inspection.get("types", [])
-                for method in type_info.get("methods", [])
-                if method.get("has_body")
-                if not tokens
-                or any(
-                    token
-                    in (
-                        f"{type_info.get('full_name', '')} "
-                        f"{method.get('signature', '')}"
-                    ).lower()
-                    for token in tokens
-                )
-            ][:3]
-            inspection["selected_method_il"] = []
-            for type_name, method_signature in candidates:
-                try:
-                    source = self.read_method_il(
-                        relative_path, type_name, method_signature
+            candidates = sorted(
+                [
+                    (
+                        self._symbol_relevance(
+                            {
+                                "type": type_info.get("full_name", ""),
+                                "method": method.get("signature", ""),
+                            },
+                            tokens,
+                        ),
+                        type_info.get("full_name", ""),
+                        method.get("signature", ""),
                     )
+                    for type_info in inspection.get("types", [])
+                    for method in type_info.get("methods", [])
+                    if method.get("has_body")
+                    if not tokens
+                    or self._symbol_relevance(
+                        {
+                            "type": type_info.get("full_name", ""),
+                            "method": method.get("signature", ""),
+                        },
+                        tokens,
+                    )
+                ],
+                key=lambda item: (-item[0], item[1], item[2]),
+            )[:3]
+            inspection["selected_method_il"] = []
+            for _score, type_name, method_signature in candidates:
+                try:
+                    source = self.read_method_il(relative_path, type_name, method_signature)
                 except (ValueError, CilToolError):
                     continue
                 entry = {
@@ -440,10 +474,7 @@ class AiContextTools:
                 len(bounded[key]) < len(inspection.get(key, []))
                 for key in ("symbol_details", "exports", "imports", "sections")
             )
-            while (
-                len(json.dumps(bounded, default=str).encode())
-                > self.MAX_BINARY_INSPECTION_BYTES
-            ):
+            while len(json.dumps(bounded, default=str).encode()) > self.MAX_BINARY_INSPECTION_BYTES:
                 largest = max(
                     (key for key in ("exports", "imports", "symbol_details", "sections")),
                     key=lambda key: len(json.dumps(bounded[key], default=str)),
@@ -500,16 +531,11 @@ class AiContextTools:
                         raise Il2CppMetadataError(
                             f"Expected one global-metadata.dat, found {len(metadata)}"
                         )
-                    if (
-                        metadata[0].stat().st_size
-                        > self.workspace.config.max_il2cpp_metadata_size
-                    ):
+                    if metadata[0].stat().st_size > self.workspace.config.max_il2cpp_metadata_size:
                         raise Il2CppMetadataError(
                             "IL2CPP metadata exceeds the configured inspection ceiling"
                         )
-                    summary = Il2CppMetadata(metadata[0], path).search_strings(
-                        user_request
-                    )
+                    summary = Il2CppMetadata(metadata[0], path).search_strings(user_request)
                     candidate = {**bounded, "il2cpp_metadata": summary}
                     if (
                         len(json.dumps(candidate, default=str).encode())
@@ -519,10 +545,7 @@ class AiContextTools:
                 except (OSError, Il2CppMetadataError) as exc:
                     bounded["il2cpp_metadata_error"] = str(exc)
             result = {"format": "elf", **bounded}
-            while (
-                len(json.dumps(result, default=str).encode())
-                > self.MAX_BINARY_INSPECTION_BYTES
-            ):
+            while len(json.dumps(result, default=str).encode()) > self.MAX_BINARY_INSPECTION_BYTES:
                 trimmed = False
                 for key in (
                     "selected_disassembly",
@@ -634,14 +657,9 @@ class AiContextTools:
         if file_paths is not None and len(paths) > self.MAX_FILES:
             raise ValueError("Approved plan exceeds the AI file limit; split it into smaller plans")
         if not paths:
-            # Include key files by default
+            # Binary runtimes need structured code evidence during discovery. Reserve
+            # those slots before XML/Smali can consume the complete file allowance.
             paths = ["AndroidManifest.xml"]
-            all_files = label_paths if label_task else context["files"]
-            for f in all_files:
-                if f.endswith(".smali") or f.endswith(".xml"):
-                    paths.append(f)
-                    if len(paths) >= self.MAX_FILES:
-                        break
             if self.analysis and self.analysis.runtime in {"mono", "il2cpp", "native_only"}:
                 binary_paths = [
                     *self.analysis.managed_assemblies,
@@ -652,26 +670,43 @@ class AiContextTools:
                     ],
                 ]
                 request_tokens = self._binary_context_tokens(user_request)
-                binary_paths.sort(
-                    key=lambda path: (
-                        -sum(token in path.lower() for token in request_tokens),
-                        path.rsplit("/", 1)[-1]
-                        not in {"libil2cpp.so", "libmain.so"},
+
+                def binary_priority(path: str) -> tuple[int, int, int, str]:
+                    basename = path.rsplit("/", 1)[-1].lower()
+                    if self.analysis and self.analysis.runtime == "mono":
+                        runtime_rank = {
+                            "assembly-csharp.dll": 0,
+                            "assembly-csharp-firstpass.dll": 1,
+                        }.get(basename, 2 if basename.endswith(".dll") else 4)
+                    elif self.analysis and self.analysis.runtime == "il2cpp":
+                        runtime_rank = 0 if basename == "libil2cpp.so" else 3
+                    else:
+                        runtime_rank = 0 if basename == "libmain.so" else 2
+                    return (
+                        runtime_rank,
+                        -self._symbol_relevance(path, request_tokens),
+                        path.count("/"),
                         path.lower(),
                     )
-                )
-                for path in binary_paths:
-                    if path not in paths and len(paths) < self.MAX_FILES:
+
+                for path in sorted(dict.fromkeys(binary_paths), key=binary_priority)[:2]:
+                    if path not in paths:
                         paths.append(path)
+
+            # Fill the remaining discovery slots with key text files.
+            all_files = label_paths if label_task else context["files"]
+            for f in all_files:
+                if (f.endswith(".smali") or f.endswith(".xml")) and f not in paths:
+                    paths.append(f)
+                    if len(paths) >= self.MAX_FILES:
+                        break
 
         used = 0
         for path in dict.fromkeys(paths[: self.MAX_FILES]):
             try:
                 target = self.workspace.safe_path(path)
                 if target.suffix.lower() in {".dll", ".so"}:
-                    inspection = self._inspect_binary_path(
-                        path, user_request=user_request
-                    )
+                    inspection = self._inspect_binary_path(path, user_request=user_request)
                     encoded = json.dumps(inspection, separators=(",", ":")).encode()
                     if used + len(encoded) > self.MAX_CONTEXT_BYTES:
                         context["omitted_files"].append(path)

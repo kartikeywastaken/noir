@@ -165,6 +165,83 @@ def test_inventory_ranks_real_public_entrypoints_ahead_of_localization_noise(ws,
     assert inventory.index("assets/public/main.js") < inventory.index(noise[0])
 
 
+def test_mono_discovery_reserves_context_for_primary_managed_assembly(ws, monkeypatch):
+    relative = "assets/bin/Data/Managed/Assembly-CSharp.dll"
+    target = ws.decoded_dir / relative
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"MZ test assembly")
+    for index in range(AiContextTools.MAX_FILES + 5):
+        (ws.decoded_dir / f"noise-{index:02}.smali").write_text("noise")
+
+    analysis = AnalysisResult(
+        project_id=ws.project_id,
+        runtime="mono",
+        managed_assemblies=[relative],
+    )
+    tools = AiContextTools(ws, analysis)
+    monkeypatch.setattr(
+        tools,
+        "_inspect_binary_path",
+        lambda path, *, user_request="": {
+            "format": "cil",
+            "path": path,
+            "request": user_request,
+        },
+    )
+
+    context = tools.build_context(user_request="give me unlimited money and keys")
+
+    assert relative in context["binary_inspection"]
+    assert context["file_coverage"][relative] == "structured_binary_inspection"
+    assert len(context["file_snippets"]) < AiContextTools.MAX_FILES
+
+
+def test_managed_symbol_ranking_favors_exact_currency_and_key_terms(ws):
+    noisy_fields = [
+        {"name": f"ONLINE_SETTING_KEY_{index}", "field_type": "System.String"}
+        for index in range(100)
+    ]
+    inspection = {
+        "assembly_name": "Assembly-CSharp",
+        "types": [
+            {
+                "full_name": "SocialManager",
+                "fields": noisy_fields,
+                "methods": [{"signature": "System.Void StartGame()", "has_body": True}],
+            },
+            {
+                "full_name": "PlayerInfo",
+                "fields": [
+                    {"name": "_amountOfCoins", "field_type": "System.Int32"},
+                    {"name": "_amountOfKeys", "field_type": "System.Int32"},
+                ],
+                "methods": [
+                    {
+                        "signature": "System.Void set_amountOfCoins(System.Int32)",
+                        "has_body": True,
+                    },
+                    {
+                        "signature": "System.Void set_amountOfKeys(System.Int32)",
+                        "has_body": True,
+                    },
+                ],
+            },
+        ],
+    }
+
+    compact = AiContextTools(ws)._compact_assembly_inspection(
+        inspection,
+        "gimme unlimited money and keys; inspect the codebase first",
+        max_bytes=4000,
+    )
+
+    assert compact["types"][0]["full_name"] == "PlayerInfo"
+    selectors = json.dumps(compact["types"][0])
+    assert "amountOfCoins" in selectors
+    assert "amountOfKeys" in selectors
+    assert len(compact["types"][1]["fields"]) <= 32
+
+
 def test_patch_budget_preserves_required_files(ws, monkeypatch):
     context = AiContextTools(ws).build_context(["AndroidManifest.xml"])
     context["files"] = ["irrelevant/" * 80] * 500
