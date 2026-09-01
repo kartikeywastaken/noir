@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -105,7 +105,8 @@ class AnalysisResult(BaseModel):
     assets: list[str] = Field(default_factory=list)
     native_libs: list[NativeLibInfo] = Field(default_factory=list)
     native_abis: list[str] = Field(default_factory=list)
-    runtime: Literal["dalvik", "mono", "il2cpp", "native_only"] = "dalvik"
+    runtimes: set[str] = Field(default_factory=set)
+    runtime: str = "dalvik"  # backward compat; prefer runtimes set
     managed_assemblies: list[str] = Field(default_factory=list)
     il2cpp_metadata_files: list[str] = Field(default_factory=list)
     apktool_metadata: dict[str, Any] = Field(default_factory=dict)
@@ -115,6 +116,19 @@ class AnalysisResult(BaseModel):
     compatibility_warnings: list[str] = Field(default_factory=list)
     metadata_sources: dict[str, str] = Field(default_factory=dict)
     analyzed_at: datetime = Field(default_factory=_now)
+
+    @property
+    def primary_runtime(self) -> str:
+        """Single display label derived from the runtimes set.
+
+        Priority: il2cpp > mono > native_only > hybrid_web > dalvik.
+        Nothing should gate evidence collection on this property;
+        use ``runtimes`` membership or direct evidence fields instead.
+        """
+        for candidate in ("il2cpp", "mono", "native_only", "hybrid_web", "dalvik"):
+            if candidate in self.runtimes:
+                return candidate
+        return self.runtime  # backward compat with legacy serialized data
 
 
 # ── File Manifest ────────────────────────────────────────────────────
@@ -167,8 +181,12 @@ class ChangePlan(BaseModel):
     expected_test_results: list[str] = Field(default_factory=list)
     unsupported_aspects: list[str] = Field(default_factory=list)
     native_runtime: str | None = None
+    native_runtimes: list[str] = Field(default_factory=list)
     binary_targets: list[str] = Field(default_factory=list)
     binary_risks: list[str] = Field(default_factory=list)
+    discovery_transcript: list[dict[str, Any]] = Field(default_factory=list)
+    discovery_api_calls: int = 0
+    discovery_stop_reason: str = ""
     created_at: datetime = Field(default_factory=_now)
 
     def compute_hash(self) -> str:

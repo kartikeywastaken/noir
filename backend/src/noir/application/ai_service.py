@@ -72,9 +72,40 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
             raise PlanServiceError("No analysis available")
         workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
-        context = context_tools.build_context(user_request=request)
         provider = GeminiProvider(config=config)
+
+        # Phase C: evidence-driven discovery before plan generation.
+        discovery_transcript: list[dict] = []
+        discovery_api_calls = 0
+        discovery_stop_reason = ""
+        try:
+            from noir.infrastructure.ai.discovery import (
+                EvidenceDiscovery,
+                build_discovered_context,
+            )
+
+            discovery = EvidenceDiscovery(
+                provider, context_tools, config, analysis
+            ).discover(request)
+            discovery_transcript = [r.to_dict() for r in discovery.transcript]
+            discovery_api_calls = discovery.api_calls
+            discovery_stop_reason = discovery.stop_reason
+
+            if not discovery.used_static_fallback:
+                context = build_discovered_context(
+                    context_tools, discovery, user_request=request
+                )
+            else:
+                context = context_tools.build_context(user_request=request)
+        except Exception:
+            # Any discovery failure falls back to static selection (requirement #4).
+            context = context_tools.build_context(user_request=request)
+
         plan = provider.generate_plan(request, analysis, context, project_id=project_id)
+        plan.discovery_transcript = discovery_transcript
+        plan.discovery_api_calls = discovery_api_calls
+        plan.discovery_stop_reason = discovery_stop_reason
+
         # The human-readable inventory is independently byte-bounded and can omit a
         # binary that was deliberately selected for structured inspection. Evidence
         # paths are equally host-grounded, and _invalid_plan_paths still verifies the
@@ -88,6 +119,9 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
         if invalid:
             context["planning_feedback"] = _grounding_feedback(invalid, sorted(allowed_paths))
             plan = provider.generate_plan(request, analysis, context, project_id=project_id)
+            plan.discovery_transcript = discovery_transcript
+            plan.discovery_api_calls = discovery_api_calls
+            plan.discovery_stop_reason = discovery_stop_reason
             invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
         if invalid:
             missing = ", ".join(invalid[:10])

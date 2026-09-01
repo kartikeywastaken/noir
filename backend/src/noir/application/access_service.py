@@ -180,6 +180,14 @@ class AccessService:
             access = session.get(ProjectAccessRow, project_id)
             return bool(access and access.user_id == user_id)
 
+    def project_owner(self, project_id: str) -> str:
+        """Return the server-side owner used to namespace private artifacts."""
+        with get_session() as session:
+            access = session.get(ProjectAccessRow, project_id)
+            if access is None:
+                raise AccessError("Workspace owner not found")
+            return access.user_id
+
     def owns_signer(self, user_id: str, profile_name: str) -> bool:
         with get_session() as session:
             access = session.get(SigningAccessRow, profile_name)

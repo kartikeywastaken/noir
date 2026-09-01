@@ -9,6 +9,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from noir.application.access_service import AccessService
 from noir.domain.config import NoirConfig, get_config
 from noir.domain.enums import (
     ApprovalScope,
@@ -31,6 +32,7 @@ from noir.infrastructure.android_tools.tools import (
     verify_signature,
     zipalign,
 )
+from noir.infrastructure.artifacts import ArtifactStore, ArtifactStoreError
 from noir.infrastructure.database.repositories import (
     ApprovalRepository,
     BuildRepository,
@@ -282,6 +284,15 @@ class SigningService:
 
             build.signed_apk_path = str(signed_apk)
             build.signed_apk_hash = compute_file_hash(signed_apk)
+
+            # Upload only after local signature verification has succeeded.
+            object_key = ArtifactStore(self.config).store_signed(
+                AccessService().project_owner(project_id),
+                project_id,
+                build_id,
+                signed_apk,
+                sha256=build.signed_apk_hash,
+            )
             self.build_repo.update(build)
 
             # Update project
@@ -298,6 +309,7 @@ class SigningService:
                         "build_id": build_id,
                         "profile": profile_name,
                         "signed_hash": build.signed_apk_hash,
+                        "durable_object_key": object_key,
                         "cert_info": sig_result.get("cert_info", {}),
                     },
                 )
@@ -305,7 +317,7 @@ class SigningService:
 
             return build
 
-        except (ZipalignError, ApksignerError) as e:
+        except (ZipalignError, ApksignerError, ArtifactStoreError) as e:
             self.event_repo.create(
                 AuditEvent(
                     project_id=project_id,

@@ -34,7 +34,10 @@ Gemini 3.7 can be reconsidered after a successful live probe.
 - Caddy HTTPS with automatic certificate renewal and HTTP-to-HTTPS redirection.
 - The API listens only on `127.0.0.1:8787`; Caddy exposes ports 80/443.
 - Service credentials use systemd host-key encryption at rest, not a plaintext `.env`.
-- Projects, SQLite database, APKs, and signing keys persist in `/var/lib/noir/data`.
+- Projects, decoded workspaces, SQLite data, and signing keys persist in
+  `/var/lib/noir/data`. Immutable original APKs and verified signed APKs are also
+  mirrored to the private `noir-private-artifacts-865675170355-eu-north-1` S3 bucket.
+  Downloads use short-lived, owner-authorized presigned URLs; the bucket remains private.
 - Incomplete uploads persist as private, independently acknowledged 256 KiB ranges for
   24 hours; clients use four concurrent connections and retry only missing ranges.
 - The service restarts on failure and is enabled at boot. No active SSH session is required.
@@ -189,10 +192,11 @@ and `/var/log/noir-tests.log`. Credentials are never intentionally printed in th
 - The free auto-DNS hostname embeds the instance's current public IP. Stopping and
   starting EC2 can change that IP; then update DNS/hostname, Caddy configuration, and
   the app URL. A service restart does not change the IP.
-- No automated off-instance backup was configured. Before terminating this VM, back up
-  `/var/lib/noir/data`, `/etc/credstore.encrypted/noir-*`, `/var/lib/systemd/credential.secret`,
-  and `/etc/noir` securely. Encrypted credentials depend on the host key; copying the
-  encrypted files alone to a new VM is insufficient. Keep any backup private.
+- S3 protects immutable original and final APK artifacts from loss with the VM, but it is
+  not a complete server backup. Before terminating this VM, back up `/var/lib/noir/data`,
+  `/etc/credstore.encrypted/noir-*`, `/var/lib/systemd/credential.secret`, and `/etc/noir`
+  securely. Encrypted credentials depend on the host key; copying the encrypted files alone
+  to a new VM is insufficient. Keep any backup private.
 - The security group remains user-managed. Restrict SSH port 22 to your own IP in AWS;
   keep 80/443 available for HTTPS and certificate renewal. Port 8787 must not be public.
 - This deployment verifies the backend and APK artifacts; it does not prove arbitrary

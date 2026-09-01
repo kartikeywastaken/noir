@@ -81,6 +81,10 @@ class NoirConfig(BaseSettings):
     ai_max_request_size: int = 100_000
     ai_max_output_size: int = 50_000
     ai_max_workflow_calls: int = 10
+    # Discovery model calls made before the final plan call. Two turns are enough
+    # for the common search -> read/inspect flow; exact evidence stops it earlier.
+    discovery_max_rounds: int = Field(default=2, ge=1, le=3)
+    discovery_enabled: bool = True  # kill switch — falls back to static selection if False
 
     @classmethod
     def settings_customise_sources(
@@ -113,6 +117,15 @@ class NoirConfig(BaseSettings):
     upload_session_ttl: int = 24 * 60 * 60
     upload_fsync_interval_ms: int = 75  # max hold time for group-commit window
     upload_fsync_batch_max: int = 8  # max chunks per commit batch
+
+    # ── Durable artifact storage ────────────────────────────────────
+    # APKTool still works on local EBS. S3 stores only durable originals
+    # and signed outputs, using the EC2 instance role (never static keys).
+    artifact_store: Literal["local", "s3"] = "local"
+    s3_bucket: str = ""
+    s3_region: str = ""
+    s3_prefix: str = "noir"
+    s3_presign_expiry: int = Field(default=900, ge=60, le=3600)
 
     @field_validator("android_sdk_dir", mode="before")
     @classmethod

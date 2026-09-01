@@ -15,7 +15,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -818,7 +818,12 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         "/v1/projects/{project_id}/builds/{build_id}/download",
         dependencies=[Depends(_verify_token)],
     )
-    def download_artifact(project_id: str, build_id: str, artifact: str = "signed"):
+    def download_artifact(
+        project_id: str,
+        build_id: str,
+        principal: Principal,
+        artifact: str = "signed",
+    ):
         from noir.infrastructure.database.repositories import BuildRepository
 
         build = BuildRepository().get(build_id)
@@ -833,6 +838,22 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         apk_path = path_map.get(artifact)
         if not apk_path or not Path(apk_path).exists():
             raise HTTPException(404, f"Artifact '{artifact}' not found")
+
+        if artifact == "signed" and build.signed_apk_hash:
+            from noir.infrastructure.artifacts import ArtifactStore, ArtifactStoreError
+
+            try:
+                url = ArtifactStore(cfg).signed_download_url(
+                    principal.user_id,
+                    project_id,
+                    build_id,
+                    expected_sha256=build.signed_apk_hash,
+                    filename=f"noir-{project_id}-{build_id}-signed.apk",
+                )
+            except ArtifactStoreError as exc:
+                raise HTTPException(503, str(exc)) from exc
+            if url:
+                return RedirectResponse(url=url, status_code=307)
 
         return FileResponse(apk_path, filename=Path(apk_path).name)
 

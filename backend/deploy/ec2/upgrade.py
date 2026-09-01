@@ -62,6 +62,10 @@ def main() -> None:
                 ):
                     raise RuntimeError("Unexpected deployment archive member")
             archive.extractall("/opt/noir", filter="data")
+        # macOS tar archives can carry AppleDouble sidecars as extended metadata.
+        # They are never source files and make the Linux C# compiler reject the tree.
+        for metadata in Path("/opt/noir").rglob("._*"):
+            metadata.unlink()
         if not shutil.which("dotnet"):
             subprocess.run(
                 [
@@ -126,6 +130,11 @@ def main() -> None:
             "NOIR_UPLOAD_CHUNK_SIZE",
             "NOIR_MAX_UPLOAD_CHUNK_SIZE",
             "NOIR_UPLOAD_SESSION_TTL",
+            "NOIR_ARTIFACT_STORE",
+            "NOIR_S3_BUCKET",
+            "NOIR_S3_REGION",
+            "NOIR_S3_PREFIX",
+            "NOIR_S3_PRESIGN_EXPIRY",
         ):
             current_environment[name] = desired_environment[name]
         Path("/etc/noir/backend.env").write_text(

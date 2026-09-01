@@ -176,6 +176,18 @@ class ImportService:
             project.status = ProjectStatus.IMPORTING
             self.project_repo.update(project)
 
+            # Preserve a durable, private copy before expensive decoding begins.
+            from noir.application.access_service import AccessService
+            from noir.infrastructure.artifacts import ArtifactStore
+
+            artifact_store = ArtifactStore(self.config)
+            object_key = artifact_store.store_original(
+                AccessService().project_owner(project.id),
+                project.id,
+                stored_apk,
+                sha256=sha256,
+            )
+
             self._emit_event(
                 project.id,
                 job.job_id,
@@ -185,6 +197,7 @@ class ImportService:
                 sha256=sha256,
                 size=file_size,
                 classification=validation.get("classification", "unknown"),
+                durable_object_key=object_key,
             )
 
             # Step 3: Decode with APKTool

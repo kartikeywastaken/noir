@@ -20,6 +20,49 @@ from noir.infrastructure.database.repositories import AnalysisRepository
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace
 
 
+def _has_hybrid_web_evidence(decoded, assets_dir, result) -> bool:
+    """Detect hybrid/web apps (Cordova, React Native, WebView-heavy).
+
+    Reuses the already-indexed smali classes rather than re-walking the tree.
+    """
+    if assets_dir is not None:
+        # Cordova / PhoneGap
+        www_index = assets_dir / "www" / "index.html"
+        if www_index.is_file():
+            return True
+        # Cordova config
+        cordova_config = assets_dir / "config.xml"
+        if cordova_config.is_file():
+            return True
+        # React Native
+        rn_bundle = assets_dir / "index.android.bundle"
+        if rn_bundle.is_file():
+            return True
+
+    # A WebView reference by itself is weak evidence: ad/analytics SDKs embed one
+    # in otherwise ordinary native apps. Only classify a WebView wrapper when it
+    # also ships a meaningful bundle of editable web assets.
+    web_asset_count = 0
+    if assets_dir is not None:
+        for path in assets_dir.rglob("*"):
+            if path.is_file() and path.suffix.lower() in {".html", ".htm", ".js", ".css"}:
+                web_asset_count += 1
+                if web_asset_count >= 3:
+                    break
+    if web_asset_count < 3:
+        return False
+
+    # Bounded smali scan: look for WebView references in already-indexed classes.
+    # This avoids another full walk of the decoded tree.
+    webview_markers = {"android/webkit/WebView", "addJavascriptInterface"}
+    for cls in result.smali_classes[:5000]:
+        for method in cls.methods:
+            if any(marker in method for marker in webview_markers):
+                return True
+
+    return False
+
+
 class AnalysisService:
     """Performs static analysis on decoded APK workspaces."""
 
@@ -159,12 +202,23 @@ class AnalysisService:
             for abi in result.native_libs
             for library in abi.libraries
         }
+
+        # Additive capability detection — an app can have multiple runtimes.
+        if result.smali_classes:
+            result.runtimes.add("dalvik")
         if result.il2cpp_metadata_files and "libil2cpp.so" in native_names:
-            result.runtime = "il2cpp"
-        elif result.managed_assemblies or any(name.startswith("libmono") for name in native_names):
-            result.runtime = "mono"
-        elif result.native_libs and not result.smali_classes:
-            result.runtime = "native_only"
+            result.runtimes.add("il2cpp")
+        if result.managed_assemblies or any(name.startswith("libmono") for name in native_names):
+            result.runtimes.add("mono")
+        if result.native_libs:
+            result.runtimes.add("native")
+        if not result.smali_classes and result.native_libs:
+            result.runtimes.add("native_only")
+        if _has_hybrid_web_evidence(decoded, assets_dir if assets_dir.exists() else None, result):
+            result.runtimes.add("hybrid_web")
+
+        # Backward-compatible single value from the set.
+        result.runtime = result.primary_runtime
 
         # Input certificate info (from META-INF if available)
         meta_inf = decoded / "original" / "META-INF"

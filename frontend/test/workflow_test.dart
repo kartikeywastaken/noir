@@ -330,6 +330,60 @@ void main() {
   });
 
   test(
+    'download follows one HTTPS S3 redirect without forwarding auth',
+    () async {
+      final requests = <http.BaseRequest>[];
+      final api = NoirApiClient(
+        token: 'private-token',
+        client: StreamClient((request) async {
+          requests.add(request);
+          if (requests.length == 1) {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              307,
+              headers: {
+                'location':
+                    'https://noir-bucket.s3.eu-north-1.amazonaws.com/noir/signed.apk?X-Amz-Signature=test',
+              },
+            );
+          }
+          return http.StreamedResponse(
+            Stream.value([1, 2, 3]),
+            200,
+            contentLength: 3,
+          );
+        }),
+      );
+
+      expect(await api.downloadArtifact('p', 'b'), [1, 2, 3]);
+      expect(requests, hasLength(2));
+      expect(requests.first.headers['Authorization'], 'Bearer private-token');
+      expect(requests.last.headers.containsKey('Authorization'), false);
+      expect(requests.last.followRedirects, false);
+      api.dispose();
+    },
+  );
+
+  test('download rejects redirects outside Amazon S3', () async {
+    final api = NoirApiClient(
+      token: 'private-token',
+      client: StreamClient(
+        (_) async => http.StreamedResponse(
+          const Stream.empty(),
+          307,
+          headers: {'location': 'https://example.com/stolen.apk'},
+        ),
+      ),
+    );
+
+    await expectLater(
+      api.downloadArtifact('p', 'b'),
+      throwsA(isA<ApiException>()),
+    );
+    api.dispose();
+  });
+
+  test(
     'account change mid-download discards bytes from the old workspace',
     () async {
       final chunks = StreamController<List<int>>();

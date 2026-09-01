@@ -655,6 +655,7 @@ class AiContextTools:
             "omitted_files": [],
             "files": self.list_project_files(user_request=user_request),
             "runtime": self.analysis.runtime if self.analysis else "dalvik",
+            "runtimes": sorted(self.analysis.runtimes) if self.analysis else ["dalvik"],
             "binary_inspection": {},
         }
 
@@ -680,7 +681,11 @@ class AiContextTools:
             # Binary runtimes need structured code evidence during discovery. Reserve
             # those slots before XML/Smali can consume the complete file allowance.
             paths = ["AndroidManifest.xml"]
-            if self.analysis and self.analysis.runtime in {"mono", "il2cpp", "native_only"}:
+            if self.analysis and (
+                self.analysis.native_libs
+                or self.analysis.managed_assemblies
+                or self.analysis.il2cpp_metadata_files
+            ):
                 binary_paths = [
                     *self.analysis.managed_assemblies,
                     *[
@@ -693,12 +698,12 @@ class AiContextTools:
 
                 def binary_priority(path: str) -> tuple[int, int, int, str]:
                     basename = path.rsplit("/", 1)[-1].lower()
-                    if self.analysis and self.analysis.runtime == "mono":
+                    if self.analysis and "mono" in self.analysis.runtimes:
                         runtime_rank = {
                             "assembly-csharp.dll": 0,
                             "assembly-csharp-firstpass.dll": 1,
                         }.get(basename, 2 if basename.endswith(".dll") else 4)
-                    elif self.analysis and self.analysis.runtime == "il2cpp":
+                    elif self.analysis and "il2cpp" in self.analysis.runtimes:
                         runtime_rank = 0 if basename == "libil2cpp.so" else 3
                     else:
                         runtime_rank = 0 if basename == "libmain.so" else 2

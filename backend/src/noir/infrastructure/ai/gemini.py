@@ -83,6 +83,15 @@ def _schema_size(schema: dict[str, Any] | None) -> int:
     return len(_schema_prompt_suffix(schema).encode())
 
 
+def _allowed_operations_line() -> str:
+    """Generate the allowed-operations catalog from PatchOperationType.
+
+    Keeping this in sync with the enum means new operation types are
+    automatically exposed to the model without a manual prompt edit.
+    """
+    return "Allowed operations: " + ", ".join(op.value for op in PatchOperationType) + "."
+
+
 def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
     """Keep wire output small; host validation and approval still enforce the change scope."""
     properties: dict[str, Any] = {
@@ -512,6 +521,7 @@ class GeminiProvider(AiProvider):
             "task_focus": context.get("task_focus", "general"),
             "planning_feedback": context.get("planning_feedback", ""),
             "runtime": analysis.runtime,
+            "runtimes": sorted(analysis.runtimes),
             "managed_assemblies": analysis.managed_assemblies,
             "il2cpp_metadata_files": analysis.il2cpp_metadata_files,
             "native_abis": analysis.native_abis,
@@ -538,10 +548,7 @@ to make the plan appear actionable.
 For label-only tasks, consider changing application and launcher android:label attributes
 instead of editing every localized resource. Keep the plan minimal and within 20 files.
 
-Allowed operations: create_file, replace_file, replace_block, delete_file,
-manifest_add, manifest_update, manifest_remove, smali_replace_method, smali_insert_at_anchor,
-cil_replace_method_body, cil_insert_method, cil_replace_field_init, il2cpp_force_return,
-il2cpp_nop_range, native_byte_patch, native_nop_range, native_branch_redirect.
+{_allowed_operations_line()}
 smali_insert_at_anchor supports inserting instructions inside an existing method, or adding
 one complete new method after a unique class-level comment anchor such as # virtual methods.
 Both require the exact class descriptor and method signature. Do not add an already defined method.
@@ -575,7 +582,7 @@ Output a JSON object with this exact schema:
   "validation_steps": ["how to verify the modification works"],
   "expected_test_results": ["what successful validation should show"],
   "unsupported_aspects": ["what cannot be done"],
-  "native_runtime": "dalvik, mono, il2cpp, native_only, or empty",
+  "native_runtime": "dalvik, mono, il2cpp, native_only, hybrid_web, or empty",
   "binary_targets": ["exact assembly or ELF paths touched"],
   "binary_risks": ["binary-format and ABI risks"]
 }}"""
@@ -631,6 +638,9 @@ Output a JSON object with this exact schema:
             expected_test_results=data.get("expected_test_results", []),
             unsupported_aspects=data.get("unsupported_aspects", []),
             native_runtime=data.get("native_runtime") or analysis.runtime,
+            native_runtimes=(
+                data.get("native_runtimes") or sorted(analysis.runtimes) or [analysis.runtime]
+            ),
             binary_targets=data.get("binary_targets", []),
             binary_risks=data.get("binary_risks", []),
         )

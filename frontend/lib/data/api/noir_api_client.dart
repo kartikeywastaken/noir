@@ -771,10 +771,20 @@ class NoirApiClient {
     }
 
     try {
-      final response = await _client
+      var response = await _client
           .send(request)
           .timeout(const Duration(seconds: 30));
       checkIdentity();
+      if (response.statusCode == 307) {
+        final redirect = _artifactRedirect(response.headers['location']);
+        await response.stream.drain<void>();
+        final redirectedRequest = http.Request('GET', redirect)
+          ..followRedirects = false;
+        response = await _client
+            .send(redirectedRequest)
+            .timeout(const Duration(seconds: 30));
+        checkIdentity();
+      }
       if (response.statusCode != 200) {
         final error = await http.Response.fromStream(
           response,
@@ -812,6 +822,26 @@ class NoirApiClient {
         'Download connection lost. Try downloading again from History.',
       );
     }
+  }
+
+  Uri _artifactRedirect(String? value) {
+    final uri = value == null ? null : Uri.tryParse(value);
+    final host = uri?.host.toLowerCase() ?? '';
+    final isAmazonS3 = RegExp(
+      r'(^|\.)(s3|s3[.-][a-z0-9-]+)\.amazonaws\.com$',
+    ).hasMatch(host);
+    if (uri == null ||
+        !uri.isAbsolute ||
+        uri.scheme != 'https' ||
+        uri.hasFragment ||
+        uri.userInfo.isNotEmpty ||
+        (uri.hasPort && uri.port != 443) ||
+        !isAmazonS3) {
+      throw ApiException(
+        'The server returned an unsafe artifact download URL.',
+      );
+    }
+    return uri;
   }
 
   Future<JobInfo> prepareWorkflow(

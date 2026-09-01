@@ -78,6 +78,7 @@ class AuditReporter:
                 "components_count": len(analysis.components) if analysis else 0,
                 "smali_classes_count": len(analysis.smali_classes) if analysis else 0,
                 "runtime": analysis.runtime if analysis else "dalvik",
+                "runtimes": sorted(analysis.runtimes) if analysis else ["dalvik"],
                 "managed_assemblies": analysis.managed_assemblies if analysis else [],
                 "native_abis": analysis.native_abis if analysis else [],
             },
@@ -96,6 +97,9 @@ class AuditReporter:
                     "native_runtime": p.native_runtime,
                     "binary_targets": p.binary_targets,
                     "binary_risks": p.binary_risks,
+                    "discovery_transcript": p.discovery_transcript,
+                    "discovery_api_calls": p.discovery_api_calls,
+                    "discovery_stop_reason": p.discovery_stop_reason,
                     "plan_hash": p.compute_hash(),
                 }
                 for p in plans
@@ -345,6 +349,30 @@ class AuditReporter:
                     lines.append(f"- **Binary targets:** {', '.join(plan['binary_targets'])}")
                 if plan["binary_risks"]:
                     lines.append(f"- **Binary risks:** {', '.join(plan['binary_risks'])}")
+                lines.append(
+                    f"- **Discovery API calls:** {plan.get('discovery_api_calls', 0)}"
+                )
+                if plan.get("discovery_stop_reason"):
+                    lines.append(
+                        f"- **Discovery stop reason:** {plan['discovery_stop_reason']}"
+                    )
+                discovery = plan.get("discovery_transcript", [])
+                if discovery:
+                    lines.append("")
+                    lines.append("#### Evidence Gathered")
+                    lines.append("")
+                    lines.append("| Tool | Arguments | Bytes | Summary |")
+                    lines.append("|------|-----------|-------|---------|")
+                    for record in discovery:
+                        tool = record.get("tool_name", "?")
+                        args = json.dumps(record.get("arguments", {}), separators=(",", ":"))
+                        if len(args) > 60:
+                            args = args[:57] + "..."
+                        nbytes = record.get("bytes_returned", 0)
+                        summary = record.get("result_summary", "")[:80]
+                        lines.append(f"| {tool} | `{args}` | {nbytes:,} | {summary} |")
+                else:
+                    lines.append("- **Evidence selection:** static (no discovery)")
                 lines.append("")
 
         binary_operations = [
