@@ -158,6 +158,33 @@ def test_invalid_structured_request_retries_same_model_in_json_mode(monkeypatch,
     assert [call["model"] for call in calls] == ["gemini-3.7-flash"] * 2
     assert calls[0]["config"].response_json_schema == schema
     assert calls[1]["config"].response_json_schema is None
+    assert '"required":["status"]' in calls[1]["contents"]
+
+
+def test_cil_patch_schema_requires_complete_method_operation():
+    from noir.domain.enums import PatchOperationType
+    from noir.domain.models import ChangePlan, PlanFileChange
+    from noir.infrastructure.ai.gemini import _patch_response_schema
+
+    plan = ChangePlan(
+        project_id="cil-schema",
+        workspace_revision=0,
+        user_request="change managed state",
+        file_changes=[
+            PlanFileChange(
+                relative_path="assets/bin/Data/Managed/Assembly-CSharp.dll",
+                operation=PatchOperationType.CIL_REPLACE_METHOD_BODY,
+            )
+        ],
+    )
+
+    required = _patch_response_schema(plan)["properties"]["operations"]["items"]["required"]
+
+    assert "assembly_name" in required
+    assert "type_full_name" in required
+    assert "method_signature" in required
+    assert "new_il_source" in required
+    assert "expected_method_il_hash" in required
 
 
 def test_unsupported_plan_can_return_zero_file_changes(monkeypatch, provider):

@@ -62,10 +62,19 @@ def _is_structured_output_argument_error(exc: Exception) -> bool:
     return status == 400 and "INVALID_ARGUMENT" in detail
 
 
+_SCHEMA_PROMPT_PREFIX = "\n\nREQUIRED JSON SCHEMA:\n"
+
+
+def _schema_prompt_suffix(schema: dict[str, Any] | None) -> str:
+    if not schema:
+        return ""
+    return _SCHEMA_PROMPT_PREFIX + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+
+
 def _schema_size(schema: dict[str, Any] | None) -> int:
-    return (
-        len(json.dumps(schema, ensure_ascii=False, separators=(",", ":")).encode()) if schema else 0
-    )
+    # Reserve enough input budget for the textual fallback too. Gemini normally
+    # receives the schema structurally; some models reject that SDK argument.
+    return len(_schema_prompt_suffix(schema).encode())
 
 
 def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
@@ -125,6 +134,25 @@ def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
         required += ["class_descriptor", "method_signature", "new_content"]
         if all(c.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR for c in plan.file_changes):
             required.append("anchor")
+    operation_types = {change.operation for change in plan.file_changes}
+    if operation_types == {PatchOperationType.CIL_REPLACE_METHOD_BODY}:
+        required += [
+            "assembly_name",
+            "type_full_name",
+            "method_signature",
+            "new_il_source",
+            "expected_method_il_hash",
+        ]
+    elif operation_types == {PatchOperationType.CIL_INSERT_METHOD}:
+        required += ["assembly_name", "type_full_name", "method_signature", "new_il_source"]
+    elif operation_types == {PatchOperationType.CIL_REPLACE_FIELD_INIT}:
+        required += [
+            "assembly_name",
+            "type_full_name",
+            "field_name",
+            "new_il_source",
+            "expected_method_il_hash",
+        ]
     return {
         "type": "object",
         "properties": {
@@ -243,8 +271,7 @@ class GeminiProvider(AiProvider):
                 # configured SDK retry policy.
                 sdk_attempts = (
                     1
-                    if self.fallback_model_name
-                    and self.fallback_model_name != self.model_name
+                    if self.fallback_model_name and self.fallback_model_name != self.model_name
                     else self.config.ai_retry_limit + 1
                 )
                 self._client = genai.Client(
@@ -291,6 +318,7 @@ class GeminiProvider(AiProvider):
                 models.append(self.fallback_model_name)
             for model_index, model_name in enumerate(models):
                 active_schema = response_schema
+                active_prompt = prompt
                 while True:
                     config = types.GenerateContentConfig(
                         max_output_tokens=token_budget,
@@ -301,7 +329,7 @@ class GeminiProvider(AiProvider):
                     try:
                         response = client.models.generate_content(
                             model=model_name,
-                            contents=prompt,
+                            contents=active_prompt,
                             config=config,
                         )
                         self.last_model_name = model_name
@@ -310,9 +338,10 @@ class GeminiProvider(AiProvider):
                         if active_schema is not None and _is_structured_output_argument_error(exc):
                             logger.warning(
                                 "Gemini rejected the structured-output schema; retrying the same "
-                                "model with JSON mode and host-side schema validation"
+                                "model with a textual schema, JSON mode, and host-side validation"
                             )
                             active_schema = None
+                            active_prompt = prompt + _schema_prompt_suffix(response_schema)
                             continue
                         can_fallback = model_index == 0 and len(models) > 1
                         if can_fallback and _is_retryable_availability_error(exc):
@@ -852,9 +881,7 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
         ):
             raise GeminiProviderError(f"{prefix}: Native operation is missing bounded range data")
         if operation.native_skipped_abis and not operation.native_skip_reason:
-            raise GeminiProviderError(
-                f"{prefix}: Skipped native ABIs require native_skip_reason"
-            )
+            raise GeminiProviderError(f"{prefix}: Skipped native ABIs require native_skip_reason")
         if operation.operation in {
             PatchOperationType.IL2CPP_FORCE_RETURN,
             PatchOperationType.IL2CPP_NOP_RANGE,
