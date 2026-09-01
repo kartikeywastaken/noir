@@ -75,12 +75,18 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
         context = context_tools.build_context(user_request=request)
         provider = GeminiProvider(config=config)
         plan = provider.generate_plan(request, analysis, context, project_id=project_id)
-        allowed_paths = set(context["files"])
+        # The human-readable inventory is independently byte-bounded and can omit a
+        # binary that was deliberately selected for structured inspection. Evidence
+        # paths are equally host-grounded, and _invalid_plan_paths still verifies the
+        # target is a real file inside the decoded workspace.
+        allowed_paths = (
+            set(context["files"])
+            | set(context["file_snippets"])
+            | set(context["binary_inspection"])
+        )
         invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
         if invalid:
-            context["planning_feedback"] = _grounding_feedback(
-                invalid, context_tools.list_project_files(user_request=request)
-            )
+            context["planning_feedback"] = _grounding_feedback(invalid, sorted(allowed_paths))
             plan = provider.generate_plan(request, analysis, context, project_id=project_id)
             invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
         if invalid:

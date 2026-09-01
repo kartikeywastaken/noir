@@ -100,6 +100,64 @@ def test_plan_generation_regrounds_an_invented_path_before_saving(workspace, mon
     assert len(PlanRepository().list_by_project(ws.project_id)) == 1
 
 
+def test_plan_accepts_real_binary_selected_outside_truncated_inventory(workspace, monkeypatch):
+    from noir.application.ai_service import generate_plan
+    from noir.domain.models import AnalysisResult, ChangePlan, PlanFileChange
+
+    cfg, ws = workspace
+    relative = "assets/bin/Data/Managed/Assembly-CSharp.dll"
+    target = ws.decoded_dir / relative
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"MZ test assembly")
+    monkeypatch.setattr(
+        "noir.application.ai_service.require_clean_workspace", lambda *args, **kwargs: None
+    )
+
+    class Provider:
+        calls = 0
+
+        def __init__(self, **kwargs):
+            pass
+
+        def generate_plan(self, request, analysis, context, *, project_id):
+            self.__class__.calls += 1
+            return ChangePlan(
+                project_id=project_id,
+                workspace_revision=0,
+                user_request=request,
+                file_changes=[
+                    PlanFileChange(
+                        relative_path=relative,
+                        operation=PatchOperationType.CIL_REPLACE_METHOD_BODY,
+                    )
+                ],
+                intended_outcome="Patch a host-inspected managed assembly",
+            )
+
+    monkeypatch.setattr("noir.application.ai_service.GeminiProvider", Provider)
+    monkeypatch.setattr(
+        "noir.application.ai_service.AnalysisService.analyze",
+        lambda *args, **kwargs: AnalysisResult(
+            project_id=ws.project_id,
+            runtime="mono",
+            managed_assemblies=[relative],
+        ),
+    )
+    monkeypatch.setattr(
+        "noir.application.ai_service.AiContextTools.build_context",
+        lambda *args, **kwargs: {
+            "files": ["sample.txt"],
+            "file_snippets": {},
+            "binary_inspection": {relative: {"format": "cil"}},
+        },
+    )
+
+    plan = generate_plan(cfg, ws.project_id, "change managed game state", True)
+
+    assert Provider.calls == 1
+    assert plan.file_changes[0].relative_path == relative
+
+
 def test_sibling_prefix_symlink_rejected(workspace):
     _, ws = workspace
     outside = ws.root / "decoded_outside"
@@ -422,9 +480,7 @@ def test_process_output_is_batched_into_bounded_events(workspace):
     job = JobInfo(project_id=ws.project_id, stage=WorkflowStage.DECODING, state=JobState.RUNNING)
     JobRepository().create(job)
     with job_runtime(job.job_id):
-        result = run_tool(
-            [sys.executable, "-u", "-c", "[print(f'line-{i}') for i in range(100)]"]
-        )
+        result = run_tool([sys.executable, "-u", "-c", "[print(f'line-{i}') for i in range(100)]"])
     assert result.exit_code == 0
     events = EventRepository().list_by_job(job.job_id)
     assert len(events) <= 10
