@@ -55,6 +55,13 @@ def _is_retryable_availability_error(exc: Exception) -> bool:
     )
 
 
+def _is_structured_output_argument_error(exc: Exception) -> bool:
+    """Detect provider-side schema rejection without treating every 400 as retryable."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    detail = str(exc).upper()
+    return status == 400 and "INVALID_ARGUMENT" in detail
+
+
 def _schema_size(schema: dict[str, Any] | None) -> int:
     return (
         len(json.dumps(schema, ensure_ascii=False, separators=(",", ":")).encode()) if schema else 0
@@ -278,36 +285,51 @@ class GeminiProvider(AiProvider):
         attempts = 1 + self.config.ai_response_retry_limit if json_output else 1
         token_budget = self.max_output_tokens
         for attempt in range(1, attempts + 1):
-            config = types.GenerateContentConfig(
-                max_output_tokens=token_budget,
-                system_instruction=system_instruction or None,
-                response_mime_type="application/json" if json_output else "text/plain",
-                response_json_schema=response_schema,
-            )
             response = None
             models = [self.model_name]
             if self.fallback_model_name and self.fallback_model_name != self.model_name:
                 models.append(self.fallback_model_name)
             for model_index, model_name in enumerate(models):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=config,
+                active_schema = response_schema
+                while True:
+                    config = types.GenerateContentConfig(
+                        max_output_tokens=token_budget,
+                        system_instruction=system_instruction or None,
+                        response_mime_type=("application/json" if json_output else "text/plain"),
+                        response_json_schema=active_schema,
                     )
-                    self.last_model_name = model_name
-                    break
-                except Exception as exc:
-                    can_fallback = model_index == 0 and len(models) > 1
-                    if can_fallback and _is_retryable_availability_error(exc):
-                        logger.warning(
-                            "Gemini model %s is temporarily unavailable; retrying with %s",
-                            self.model_name,
-                            self.fallback_model_name,
+                    try:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config=config,
                         )
-                        continue
-                    detail = str(exc).replace(self.api_key, "[REDACTED]")
-                    raise GeminiProviderError(f"Gemini API call failed: {detail}") from None
+                        self.last_model_name = model_name
+                        break
+                    except Exception as exc:
+                        if active_schema is not None and _is_structured_output_argument_error(exc):
+                            logger.warning(
+                                "Gemini rejected the structured-output schema; retrying the same "
+                                "model with JSON mode and host-side schema validation"
+                            )
+                            active_schema = None
+                            continue
+                        can_fallback = model_index == 0 and len(models) > 1
+                        if can_fallback and _is_retryable_availability_error(exc):
+                            logger.warning(
+                                "Gemini model %s is temporarily unavailable; retrying with %s",
+                                self.model_name,
+                                self.fallback_model_name,
+                            )
+                            break
+                        detail = str(exc).replace(self.api_key, "[REDACTED]")
+                        raise GeminiProviderError(f"Gemini API call failed: {detail}") from None
+                if response is not None:
+                    break
+                if model_index == 0 and len(models) > 1 and active_schema is None:
+                    logger.warning(
+                        "Retrying fallback model with its normal structured-output request"
+                    )
             if response is None:
                 raise GeminiProviderError("Gemini returned no response")
 

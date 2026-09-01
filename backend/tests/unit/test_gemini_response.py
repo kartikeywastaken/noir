@@ -131,6 +131,35 @@ def test_invalid_request_does_not_use_fallback(monkeypatch, provider):
     assert calls == ["gemini-3.7-flash"]
 
 
+def test_invalid_structured_request_retries_same_model_in_json_mode(monkeypatch, provider):
+    calls = []
+
+    class InvalidRequestError(Exception):
+        status_code = 400
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise InvalidRequestError("400 INVALID_ARGUMENT")
+        return SimpleNamespace(
+            text='{"status":"ok"}',
+            prompt_feedback=None,
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+        )
+
+    monkeypatch.setattr(
+        provider,
+        "_get_client",
+        lambda: SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+    )
+
+    schema = {"type": "object", "required": ["status"]}
+    assert provider._call_model("test", response_schema=schema) == '{"status":"ok"}'
+    assert [call["model"] for call in calls] == ["gemini-3.7-flash"] * 2
+    assert calls[0]["config"].response_json_schema == schema
+    assert calls[1]["config"].response_json_schema is None
+
+
 def test_unsupported_plan_can_return_zero_file_changes(monkeypatch, provider):
     from noir.domain.models import AnalysisResult
 
