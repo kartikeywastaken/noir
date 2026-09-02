@@ -144,6 +144,28 @@ def _grounding_feedback(missing: list[str], real_files: list[str]) -> str:
     return "\n".join(lines)[:12_000]
 
 
+def _create_discovery_provider(config):
+    """Factory: create the configured discovery provider."""
+    provider_name = config.discovery_provider
+    if provider_name == "openrouter":
+        try:
+            from noir.infrastructure.ai.openrouter import OpenRouterDiscoveryProvider
+
+            return OpenRouterDiscoveryProvider(config)
+        except Exception as exc:
+            logger.warning("OpenRouter discovery unavailable (%s); falling back to local", exc)
+            from noir.infrastructure.ai.local_discovery import LocalDiscoveryProvider
+
+            return LocalDiscoveryProvider(config)
+    elif provider_name == "gemini":
+        # Gemini discovery requires the full EvidenceDiscovery wrapper — handled below.
+        return None  # Signal caller to use the legacy Gemini path
+    else:
+        from noir.infrastructure.ai.local_discovery import LocalDiscoveryProvider
+
+        return LocalDiscoveryProvider(config)
+
+
 def generate_plan(config, project_id, request, consent, *, analysis=None):
     if not consent:
         raise PlanServiceError("Explicit AI upload consent required")
@@ -165,7 +187,6 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
 
         workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
-        discovery_provider = GeminiProvider(config=config, purpose="discovery")
         generation_provider = GeminiProvider(config=config, purpose="generation")
         budget = _WorkflowCallBudget(config)
 
@@ -174,14 +195,22 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
         discovery_api_calls = 0
         discovery_stop_reason = ""
         try:
-            from noir.infrastructure.ai.discovery import (
-                EvidenceDiscovery,
-                build_discovered_context,
-            )
+            from noir.infrastructure.ai.discovery import build_discovered_context
 
-            discovery = EvidenceDiscovery(
-                discovery_provider, context_tools, config, analysis
-            ).discover(request)
+            discovery_provider = _create_discovery_provider(config)
+
+            if discovery_provider is not None:
+                # OpenRouter or local provider — clean interface
+                discovery = discovery_provider.discover(request, context_tools, analysis)
+            else:
+                # Legacy Gemini discovery path
+                from noir.infrastructure.ai.discovery import EvidenceDiscovery
+
+                gemini_discovery = GeminiProvider(config=config, purpose="discovery")
+                discovery = EvidenceDiscovery(
+                    gemini_discovery, context_tools, config, analysis
+                ).discover(request)
+
             discovery_transcript = [r.to_dict() for r in discovery.transcript]
             discovery_api_calls = discovery.api_calls
             discovery_stop_reason = discovery.stop_reason

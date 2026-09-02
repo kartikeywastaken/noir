@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
@@ -304,7 +305,7 @@ class GeminiProvider(AiProvider):
                 sdk_attempts = (
                     1
                     if self.fallback_model_name and self.fallback_model_name != self.model_name
-                    else self.config.ai_retry_limit + 1
+                    else min(self.config.ai_retry_limit + 1, 2)
                 )
                 self._client = genai.Client(
                     api_key=self.api_key,
@@ -328,6 +329,7 @@ class GeminiProvider(AiProvider):
         response_schema: dict[str, Any] | None = None,
     ) -> str:
         """Accept complete responses only; regenerate invalid JSON within a fixed attempt limit."""
+        stall_deadline = time.monotonic() + self.config.ai_stall_timeout
         actual = (
             len(prompt.encode("utf-8"))
             + len(system_instruction.encode("utf-8"))
@@ -344,6 +346,12 @@ class GeminiProvider(AiProvider):
         attempts = 1 + self.config.ai_response_retry_limit if json_output else 1
         token_budget = self.max_output_tokens
         for attempt in range(1, attempts + 1):
+            # Stall protection: abort if total wall-clock time exceeds the configured limit
+            if time.monotonic() > stall_deadline:
+                elapsed = self.config.ai_stall_timeout
+                raise GeminiProviderError(
+                    f"AI call exceeded stall timeout ({elapsed}s). No response was used."
+                )
             response = None
             models = [self.model_name]
             if self.fallback_model_name and self.fallback_model_name != self.model_name:

@@ -1,12 +1,15 @@
 """Bounded evidence-discovery phase for AI plan generation.
 
-Runs a tool-using conversation with Gemini BEFORE the final planning call,
+Runs a tool-using conversation BEFORE the final planning call,
 allowing the model to search, list, and read workspace files to gather the
 exact evidence it needs — rather than receiving a fixed pre-selected bundle.
 
 Discovery is bounded by both round count and cumulative byte budget. If the
 model doesn't request anything, or the budget runs out, the system falls back
 to today's static heuristic selection.
+
+Provider-agnostic: the discovery loop can run against Gemini, OpenRouter, or
+any provider that implements the DiscoveryProvider interface.
 """
 
 from __future__ import annotations
@@ -83,7 +86,7 @@ class DiscoveryResult:
 
 # ── Tool definitions ─────────────────────────────────────────────────
 
-_DISCOVERY_TOOL_DECLARATIONS = [
+DISCOVERY_TOOL_DECLARATIONS = [
     {
         "name": "search_workspace",
         "description": (
@@ -148,6 +151,143 @@ _DISCOVERY_TOOL_DECLARATIONS = [
     },
 ]
 
+# Keep backward-compatible alias for any external reference
+_DISCOVERY_TOOL_DECLARATIONS = DISCOVERY_TOOL_DECLARATIONS
+
+
+# ── Shared utilities ─────────────────────────────────────────────────
+
+
+def is_label_task(user_request: str) -> bool:
+    """Detect label/rename tasks that skip discovery entirely."""
+    return bool(
+        re.search(
+            r"\b(label|rename|app[ -]?name|display[ -]?name)\b|name of (?:the )?app",
+            user_request,
+            re.IGNORECASE,
+        )
+    )
+
+
+def has_exact_evidence(result: DiscoveryResult, user_request: str) -> bool:
+    """Return whether discovery has host-grounded content ready for planning.
+
+    Search/list results are only leads. A successful file read or structured
+    binary inspection is exact evidence and avoids paying for another model
+    turn whose only purpose would be to summarize data already held locally.
+    AndroidManifest.xml alone is sufficient only for manifest-oriented work.
+    """
+    if result.binary_inspections:
+        return True
+    non_manifest_reads = {path for path in result.seen_files if path != "AndroidManifest.xml"}
+    if non_manifest_reads:
+        return True
+    return bool(
+        result.seen_files
+        and re.search(
+            r"\b(manifest|permission|activity|service|receiver|provider|intent)\b",
+            user_request,
+            re.IGNORECASE,
+        )
+    )
+
+
+# ── Tool executor ────────────────────────────────────────────────────
+
+
+class DiscoveryToolExecutor:
+    """Dispatches discovery tool calls to workspace primitives.
+
+    Extracted from EvidenceDiscovery so it can be shared across providers
+    (Gemini, OpenRouter, etc.) without duplicating workspace access logic.
+    """
+
+    def __init__(self, context_tools: AiContextTools):
+        self.context_tools = context_tools
+
+    def execute(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        result: DiscoveryResult,
+    ) -> tuple[str, str, int]:
+        """Dispatch a tool call to the appropriate workspace primitive.
+
+        Returns (tool_result_text, summary, bytes_used).
+        """
+        try:
+            if tool_name == "search_workspace":
+                return self._exec_search(args, result)
+            elif tool_name == "list_directory":
+                return self._exec_list(args)
+            elif tool_name == "read_file_excerpt":
+                return self._exec_read(args, result)
+            elif tool_name == "inspect_binary":
+                return self._exec_inspect_binary(args, result)
+            else:
+                return f"Unknown tool: {tool_name}", f"Unknown tool: {tool_name}", 0
+        except Exception as exc:
+            error_msg = f"Error: {exc}"
+            return error_msg, error_msg[:200], 0
+
+    def _exec_search(self, args: dict[str, Any], result: DiscoveryResult) -> tuple[str, str, int]:
+        query = str(args.get("query", ""))
+        glob = str(args.get("glob", "*"))
+        if not query:
+            return "Error: query is required", "Empty query", 0
+
+        matches = self.context_tools.workspace.search_text(
+            query, max_results=self.context_tools.MAX_SEARCH_RESULTS, glob=glob
+        )
+
+        if not matches:
+            text = f"No matches found for '{query}'"
+            return text, text, len(text.encode())
+
+        output = json.dumps(matches, ensure_ascii=False, separators=(",", ":"))
+        nbytes = len(output.encode())
+        file_count = len({match["file"] for match in matches})
+        summary = f"Found {len(matches)} match(es) for '{query}' in {file_count} file(s)"
+        return output, summary, nbytes
+
+    def _exec_list(self, args: dict[str, Any]) -> tuple[str, str, int]:
+        subdir = str(args.get("subdir", ""))
+        files = self.context_tools._workspace_paths(subdir)[:200]
+        output = json.dumps(files, ensure_ascii=False, separators=(",", ":"))
+        nbytes = len(output.encode())
+        summary = f"Listed {len(files)} file(s) under '{subdir}'"
+        return output, summary, nbytes
+
+    def _exec_read(self, args: dict[str, Any], result: DiscoveryResult) -> tuple[str, str, int]:
+        path = str(args.get("path", ""))
+        if not path:
+            return "Error: path is required", "Empty path", 0
+
+        content = self.context_tools.read_file_range(path)
+        nbytes = len(content.encode())
+        result.seen_files[path] = content
+
+        lines = content.count("\n")
+        summary = f"Read {path} ({nbytes:,} bytes, {lines} lines)"
+        return content[:5000], summary, nbytes  # Truncate tool response for model
+
+    def _exec_inspect_binary(
+        self, args: dict[str, Any], result: DiscoveryResult
+    ) -> tuple[str, str, int]:
+        path = str(args.get("path", ""))
+        if not path:
+            return "Error: path is required", "Empty path", 0
+
+        inspection = self.context_tools._inspect_binary_path(path, user_request="")
+        result.binary_inspections[path] = inspection
+        output = json.dumps(inspection, ensure_ascii=False, separators=(",", ":"), default=str)
+        nbytes = len(output.encode())
+        summary = f"Inspected binary {path} ({nbytes:,} bytes)"
+        return output[:5000], summary, nbytes
+
+
+# ── Gemini discovery provider ────────────────────────────────────────
+
 
 def _gemini_tool_declarations():
     """Build google.genai tool declarations from our tool list."""
@@ -161,17 +301,14 @@ def _gemini_tool_declarations():
                     description=tool["description"],
                     parameters=tool["parameters"],
                 )
-                for tool in _DISCOVERY_TOOL_DECLARATIONS
+                for tool in DISCOVERY_TOOL_DECLARATIONS
             ]
         )
     ]
 
 
-# ── Discovery engine ─────────────────────────────────────────────────
-
-
 class EvidenceDiscovery:
-    """Bounded tool-using discovery loop.
+    """Bounded tool-using discovery loop (Gemini-native).
 
     Runs immediately before plan generation. Returns a DiscoveryResult
     that can be used to build the same context shape that build_context()
@@ -189,15 +326,10 @@ class EvidenceDiscovery:
         self.context_tools = context_tools
         self.config = config
         self.analysis = analysis
+        self.tool_executor = DiscoveryToolExecutor(context_tools)
 
     def _is_label_task(self, user_request: str) -> bool:
-        return bool(
-            re.search(
-                r"\b(label|rename|app[ -]?name|display[ -]?name)\b|name of (?:the )?app",
-                user_request,
-                re.IGNORECASE,
-            )
-        )
+        return is_label_task(user_request)
 
     def discover(self, user_request: str) -> DiscoveryResult:
         """Run the bounded discovery loop."""
@@ -236,26 +368,7 @@ class EvidenceDiscovery:
 
     @staticmethod
     def _has_exact_evidence(result: DiscoveryResult, user_request: str) -> bool:
-        """Return whether discovery has host-grounded content ready for planning.
-
-        Search/list results are only leads. A successful file read or structured
-        binary inspection is exact evidence and avoids paying for another model
-        turn whose only purpose would be to summarize data already held locally.
-        AndroidManifest.xml alone is sufficient only for manifest-oriented work.
-        """
-        if result.binary_inspections:
-            return True
-        non_manifest_reads = {path for path in result.seen_files if path != "AndroidManifest.xml"}
-        if non_manifest_reads:
-            return True
-        return bool(
-            result.seen_files
-            and re.search(
-                r"\b(manifest|permission|activity|service|receiver|provider|intent)\b",
-                user_request,
-                re.IGNORECASE,
-            )
-        )
+        return has_exact_evidence(result, user_request)
 
     def _run_discovery_loop(
         self,
@@ -348,7 +461,9 @@ class EvidenceDiscovery:
                 )
                 cached = tool_cache.get(cache_key)
                 if cached is None:
-                    tool_result, summary, nbytes = self._execute_tool(tool_name, args, result)
+                    tool_result, summary, nbytes = self.tool_executor.execute(
+                        tool_name, args, result
+                    )
                     tool_cache[cache_key] = (tool_result, summary, nbytes)
                     charged_bytes = nbytes
                 else:
@@ -400,85 +515,14 @@ class EvidenceDiscovery:
         if not result.stop_reason and not budget.has_room():
             result.stop_reason = "budget_exhausted"
 
+    # Keep old _execute_tool method for backward compatibility with tests
     def _execute_tool(
         self,
         tool_name: str,
         args: dict[str, Any],
         result: DiscoveryResult,
     ) -> tuple[str, str, int]:
-        """Dispatch a tool call to the appropriate workspace primitive.
-
-        Returns (tool_result_text, summary, bytes_used).
-        """
-        try:
-            if tool_name == "search_workspace":
-                return self._exec_search(args, result)
-            elif tool_name == "list_directory":
-                return self._exec_list(args)
-            elif tool_name == "read_file_excerpt":
-                return self._exec_read(args, result)
-            elif tool_name == "inspect_binary":
-                return self._exec_inspect_binary(args, result)
-            else:
-                return f"Unknown tool: {tool_name}", f"Unknown tool: {tool_name}", 0
-        except Exception as exc:
-            error_msg = f"Error: {exc}"
-            return error_msg, error_msg[:200], 0
-
-    def _exec_search(self, args: dict[str, Any], result: DiscoveryResult) -> tuple[str, str, int]:
-        query = str(args.get("query", ""))
-        glob = str(args.get("glob", "*"))
-        if not query:
-            return "Error: query is required", "Empty query", 0
-
-        matches = self.context_tools.workspace.search_text(
-            query, max_results=self.context_tools.MAX_SEARCH_RESULTS, glob=glob
-        )
-
-        if not matches:
-            text = f"No matches found for '{query}'"
-            return text, text, len(text.encode())
-
-        output = json.dumps(matches, ensure_ascii=False, separators=(",", ":"))
-        nbytes = len(output.encode())
-        file_count = len({match["file"] for match in matches})
-        summary = f"Found {len(matches)} match(es) for '{query}' in {file_count} file(s)"
-        return output, summary, nbytes
-
-    def _exec_list(self, args: dict[str, Any]) -> tuple[str, str, int]:
-        subdir = str(args.get("subdir", ""))
-        files = self.context_tools._workspace_paths(subdir)[:200]
-        output = json.dumps(files, ensure_ascii=False, separators=(",", ":"))
-        nbytes = len(output.encode())
-        summary = f"Listed {len(files)} file(s) under '{subdir}'"
-        return output, summary, nbytes
-
-    def _exec_read(self, args: dict[str, Any], result: DiscoveryResult) -> tuple[str, str, int]:
-        path = str(args.get("path", ""))
-        if not path:
-            return "Error: path is required", "Empty path", 0
-
-        content = self.context_tools.read_file_range(path)
-        nbytes = len(content.encode())
-        result.seen_files[path] = content
-
-        lines = content.count("\n")
-        summary = f"Read {path} ({nbytes:,} bytes, {lines} lines)"
-        return content[:5000], summary, nbytes  # Truncate tool response for model
-
-    def _exec_inspect_binary(
-        self, args: dict[str, Any], result: DiscoveryResult
-    ) -> tuple[str, str, int]:
-        path = str(args.get("path", ""))
-        if not path:
-            return "Error: path is required", "Empty path", 0
-
-        inspection = self.context_tools._inspect_binary_path(path, user_request="")
-        result.binary_inspections[path] = inspection
-        output = json.dumps(inspection, ensure_ascii=False, separators=(",", ":"), default=str)
-        nbytes = len(output.encode())
-        summary = f"Inspected binary {path} ({nbytes:,} bytes)"
-        return output[:5000], summary, nbytes
+        return self.tool_executor.execute(tool_name, args, result)
 
 
 def build_discovered_context(

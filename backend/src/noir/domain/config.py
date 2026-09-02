@@ -52,6 +52,16 @@ class NoirConfig(BaseSettings):
         ),
     )
 
+    openrouter_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        exclude=True,
+        validation_alias=AliasChoices(
+            "NOIR_OPENROUTER_API_KEY",
+            "GLM_5.2",
+            "openrouter_api_key",
+        ),
+    )
+
     # ── Directories ──────────────────────────────────────────────────
     data_dir: str = Field(default_factory=_default_data_dir)
     database_url: str = ""
@@ -104,6 +114,12 @@ class NoirConfig(BaseSettings):
     # Set to 2-3 for complex requests that need multiple rounds of exploration.
     discovery_max_rounds: int = Field(default=1, ge=1, le=3)
     discovery_enabled: bool = True  # kill switch — falls back to static selection if False
+    discovery_provider: Literal["openrouter", "gemini", "local"] = "openrouter"
+    discovery_timeout: int = 30  # per-request timeout for discovery provider calls
+    openrouter_discovery_model: str = "google/gemma-3-27b-it:free"
+    # Maximum wall-clock seconds for any single AI provider call before forced failure.
+    # Prevents nested retries from blocking a worker for minutes.
+    ai_stall_timeout: int = 90
 
     def gemini_key_for(self, purpose: Literal["default", "discovery", "generation"]) -> str:
         """Select a Gemini credential without exposing it through normal config output.
@@ -233,6 +249,9 @@ class NoirConfig(BaseSettings):
         )
         data["gemini_generation_api_key"] = (
             "***REDACTED***" if self.gemini_generation_api_key.get_secret_value() else ""
+        )
+        data["openrouter_api_key"] = (
+            "***REDACTED***" if self.openrouter_api_key.get_secret_value() else ""
         )
         for key in list(data.keys()):
             if data[key] and any(s in key.lower() for s in ("key", "password", "secret", "token")):

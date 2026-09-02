@@ -655,3 +655,160 @@ def test_timeout_always_retryable():
 
     assert _is_retryable_availability_error(TimeoutError(), has_fallback=False) is True
     assert _is_retryable_availability_error(ConnectionError(), has_fallback=False) is True
+
+
+# ── Shared utility tests ─────────────────────────────────────────────
+
+
+def test_is_label_task_detects_rename():
+    """Module-level is_label_task should detect label-related requests."""
+    from noir.infrastructure.ai.discovery import is_label_task
+
+    assert is_label_task("Rename app label to MyApp") is True
+    assert is_label_task("change the display name") is True
+    assert is_label_task("give unlimited coins") is False
+    assert is_label_task("add network permission") is False
+
+
+def test_has_exact_evidence_with_file_read():
+    """Module-level has_exact_evidence should detect file reads."""
+    from noir.infrastructure.ai.discovery import DiscoveryResult, has_exact_evidence
+
+    result = DiscoveryResult(seen_files={"smali/com/game/Score.smali": ".class X"})
+    assert has_exact_evidence(result, "change the score") is True
+
+
+def test_has_exact_evidence_empty_result():
+    """Empty discovery result has no exact evidence."""
+    from noir.infrastructure.ai.discovery import DiscoveryResult, has_exact_evidence
+
+    result = DiscoveryResult()
+    assert has_exact_evidence(result, "change something") is False
+
+
+# ── DiscoveryToolExecutor tests ──────────────────────────────────────
+
+
+def test_tool_executor_standalone_search(ws):
+    """DiscoveryToolExecutor works independently of any provider."""
+    from noir.infrastructure.ai.discovery import DiscoveryResult, DiscoveryToolExecutor
+
+    target = ws.decoded_dir / "smali" / "Executor.smali"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("executor test content")
+
+    analysis = _make_analysis(ws, runtimes={"dalvik"})
+    executor = DiscoveryToolExecutor(AiContextTools(ws, analysis))
+    result = DiscoveryResult()
+
+    output, summary, nbytes = executor.execute("search_workspace", {"query": "executor"}, result)
+    assert nbytes > 0
+
+
+def test_tool_executor_standalone_list(ws):
+    """DiscoveryToolExecutor list_directory works independently."""
+    from noir.infrastructure.ai.discovery import DiscoveryResult, DiscoveryToolExecutor
+
+    target = ws.decoded_dir / "res" / "values" / "strings.xml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("<resources/>")
+
+    analysis = _make_analysis(ws, runtimes={"dalvik"})
+    executor = DiscoveryToolExecutor(AiContextTools(ws, analysis))
+    result = DiscoveryResult()
+
+    output, summary, nbytes = executor.execute("list_directory", {"subdir": "res"}, result)
+    assert "strings.xml" in output
+
+
+# ── Local discovery provider tests ───────────────────────────────────
+
+
+def test_local_discovery_provider_returns_static():
+    """LocalDiscoveryProvider always returns static fallback."""
+    from noir.infrastructure.ai.local_discovery import LocalDiscoveryProvider
+
+    config = NoirConfig(
+        _env_file=None,
+        data_dir=str(Path.cwd()),
+        gemini_api_key="test",
+    )
+    provider = LocalDiscoveryProvider(config)
+    result = provider.discover("anything", MagicMock(), MagicMock())
+
+    assert result.used_static_fallback is True
+    assert result.stop_reason == "local_only"
+    assert result.api_calls == 0
+    assert result.transcript == []
+
+
+# ── Discovery provider factory tests ─────────────────────────────────
+
+
+def test_factory_creates_local_provider():
+    """Factory with discovery_provider='local' creates LocalDiscoveryProvider."""
+    from noir.application.ai_service import _create_discovery_provider
+    from noir.infrastructure.ai.local_discovery import LocalDiscoveryProvider
+
+    config = NoirConfig(
+        _env_file=None,
+        data_dir=str(Path.cwd()),
+        gemini_api_key="test",
+        discovery_provider="local",
+    )
+    provider = _create_discovery_provider(config)
+    assert isinstance(provider, LocalDiscoveryProvider)
+
+
+def test_factory_returns_none_for_gemini():
+    """Factory with discovery_provider='gemini' returns None (legacy path)."""
+    from noir.application.ai_service import _create_discovery_provider
+
+    config = NoirConfig(
+        _env_file=None,
+        data_dir=str(Path.cwd()),
+        gemini_api_key="test",
+        discovery_provider="gemini",
+    )
+    provider = _create_discovery_provider(config)
+    assert provider is None
+
+
+def test_factory_openrouter_fallback_on_missing_key():
+    """Factory falls back to local when OpenRouter key is missing."""
+    from noir.application.ai_service import _create_discovery_provider
+    from noir.infrastructure.ai.local_discovery import LocalDiscoveryProvider
+
+    config = NoirConfig(
+        _env_file=None,
+        data_dir=str(Path.cwd()),
+        gemini_api_key="test",
+        openrouter_api_key="",
+        discovery_provider="openrouter",
+    )
+    provider = _create_discovery_provider(config)
+    assert isinstance(provider, LocalDiscoveryProvider)
+
+
+# ── Stall timeout tests ─────────────────────────────────────────────
+
+
+def test_stall_timeout_raises_after_deadline():
+    """Gemini _call_model should raise when stall timeout is exceeded."""
+    import time
+    from types import SimpleNamespace
+
+    from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
+
+    config = NoirConfig(
+        _env_file=None,
+        gemini_api_key="unit-test-only",
+        ai_provider="gemini",
+        ai_model="gemini-test",
+        ai_stall_timeout=0,  # Immediate timeout
+    )
+    provider = GeminiProvider(config=config)
+
+    # The method should fail at the stall check before even calling the SDK
+    with pytest.raises(GeminiProviderError, match="stall timeout"):
+        provider._call_model('{"test": true}')
