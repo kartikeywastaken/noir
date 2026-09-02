@@ -132,9 +132,7 @@ class ValidationService:
                         file_path=relative_path,
                     )
                 )
-        for target in sorted(
-            workspace.decoded_dir.glob("assets/bin/Data/Managed/*.dll")
-        ):
+        for target in sorted(workspace.decoded_dir.glob("assets/bin/Data/Managed/*.dll")):
             relative_path = target.relative_to(workspace.decoded_dir).as_posix()
             if relative_path in verified_paths:
                 continue
@@ -179,9 +177,7 @@ class ValidationService:
             raise ValueError("Historical binary patch has no verifiable postimage snapshot")
         return current
 
-    def _verify_cil_scope(
-        self, workspace, patch_id, operations, target, inspect_assembly
-    ) -> None:
+    def _verify_cil_scope(self, workspace, patch_id, operations, target, inspect_assembly) -> None:
         import json
 
         journal = workspace.changes_dir / "journal" / f"journal_{patch_id}.json"
@@ -275,9 +271,7 @@ class ValidationService:
             try:
                 if len(metadata) != 1:
                     raise ValueError("Expected exactly one global-metadata.dat")
-                target = self._journal_after_path(
-                    workspace, patch.patch_id, op.relative_path
-                )
+                target = self._journal_after_path(workspace, patch.patch_id, op.relative_path)
                 reference = Il2CppMetadata(metadata[0], target).find_method(
                     op.il2cpp_type_full_name or "", op.il2cpp_method_signature or ""
                 )
@@ -327,9 +321,7 @@ class ValidationService:
                 if op.relative_path not in verified_current:
                     verify_elf(current)
                     verified_current.add(op.relative_path)
-                target = self._journal_after_path(
-                    workspace, patch.patch_id, op.relative_path
-                )
+                target = self._journal_after_path(workspace, patch.patch_id, op.relative_path)
                 details = verify_elf(target)
                 disassemble_range(
                     target, op.native_offset or 0, op.native_length or 0, abi=op.native_abi

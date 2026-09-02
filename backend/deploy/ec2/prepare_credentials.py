@@ -18,16 +18,21 @@ def private_json(path: Path, data: dict) -> None:
 
 def main() -> None:
     config = NoirConfig()
-    gemini = config.gemini_api_key.get_secret_value()
-    if not gemini:
-        raise SystemExit("GEMINI_API_KEY is required for deployment.")
+    gemini_discovery = config.gemini_key_for("discovery")
+    gemini_generation = config.gemini_key_for("generation")
+    if not gemini_discovery or not gemini_generation:
+        raise SystemExit(
+            "Gemini credentials are required. Configure GEMINI_API_KEY_1 and "
+            "GEMINI_API_KEY_2, or legacy GEMINI_API_KEY."
+        )
     directory = Path.home() / ".noir/deployments/ec2-stockholm"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     token = secrets.token_urlsafe(48)
     private_json(
         directory / "credentials-upload.json",
         {
-            "gemini-api-key": gemini,
+            "gemini-discovery-api-key": gemini_discovery,
+            "gemini-generation-api-key": gemini_generation,
             "api-token": token,
             "signing-password": secrets.token_urlsafe(48),
             "settings": {

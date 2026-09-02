@@ -31,9 +31,7 @@ def _dependencies():
         import capstone  # type: ignore[import-untyped]
         import lief
     except ImportError as exc:
-        raise NativePatchError(
-            "Native support requires the lief and capstone packages"
-        ) from exc
+        raise NativePatchError("Native support requires the lief and capstone packages") from exc
     return lief, capstone
 
 
@@ -193,9 +191,7 @@ def inspect_elf(path: Path) -> dict[str, Any]:
     )[:2_000]
     exported_by_location: dict[tuple[str, int, int], Any] = {}
     for symbol in raw_exported:
-        exported_by_location.setdefault(
-            (symbol.name, int(symbol.value), int(symbol.size)), symbol
-        )
+        exported_by_location.setdefault((symbol.name, int(symbol.value), int(symbol.size)), symbol)
     exported = list(exported_by_location.values())
     exports = sorted({symbol.name for symbol in exported})
     imports = sorted(symbol.name for symbol in binary.imported_symbols if symbol.name)[:2_000]

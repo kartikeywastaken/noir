@@ -20,12 +20,8 @@ def build_mono() -> None:
     intermediate = Path(tempfile.gettempdir()) / "noir-fixture-obj"
     output = Path(tempfile.gettempdir()) / "noir-fixture-output"
     environment = os.environ.copy()
-    environment.setdefault(
-        "DOTNET_CLI_HOME", str(Path(tempfile.gettempdir()) / "noir-dotnet-home")
-    )
-    environment.setdefault(
-        "NUGET_PACKAGES", str(Path(tempfile.gettempdir()) / "noir-nuget")
-    )
+    environment.setdefault("DOTNET_CLI_HOME", str(Path(tempfile.gettempdir()) / "noir-dotnet-home"))
+    environment.setdefault("NUGET_PACKAGES", str(Path(tempfile.gettempdir()) / "noir-nuget"))
     subprocess.run(
         [
             dotnet,

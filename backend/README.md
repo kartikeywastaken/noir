@@ -38,7 +38,8 @@ ADB is optional. Windows, containers, and running this backend natively inside A
 Edit **backend/.env** (already created, ignored by Git, owner-readable only):
 
 ```dotenv
-GEMINI_API_KEY=your_actual_key_here
+GEMINI_API_KEY_1=your_discovery_key
+GEMINI_API_KEY_2=your_plan_and_patch_key
 NOIR_AI_PROVIDER=gemini
 NOIR_AI_MODEL=gemini-3.6-flash
 NOIR_AI_FALLBACK_MODEL=
@@ -46,8 +47,10 @@ NOIR_AI_FALLBACK_MODEL=
 
 Restart a running API server after editing. Every new CLI invocation reloads configuration.
 The file loads automatically; no sourcing or copying the key into Python files is necessary.
-An exported key takes precedence over the file. If an old export is overriding your edit, run
-`unset GEMINI_API_KEY NOIR_GEMINI_API_KEY` in that terminal.
+Key 1 is used only by evidence discovery/file selection. Key 2 is used for plan generation,
+grounding correction, patch generation and ordinary provider checks. The legacy `GEMINI_API_KEY`
+variable remains supported as a shared fallback. Exported keys take precedence over the file; if
+old exports are overriding your edit, unset the corresponding `GEMINI_API_KEY*` variables.
 
 Check the real API connection:
 

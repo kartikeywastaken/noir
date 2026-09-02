@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import re
+import threading
+from collections import OrderedDict
 from difflib import get_close_matches
+from typing import Any
 
 from noir.analysis.analyzer import AnalysisService
 from noir.application.patch_service import PatchService, PlanService, PlanServiceError
@@ -13,6 +18,85 @@ from noir.infrastructure.ai.gemini import GeminiProvider
 from noir.infrastructure.database.repositories import ApprovalRepository, ProjectRepository
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace, WorkspaceError
 from noir.security.locking import project_lock, require_clean_workspace
+
+logger = logging.getLogger(__name__)
+
+# ── Workflow call budget ─────────────────────────────────────────────
+
+
+class _WorkflowCallBudget:
+    """Tracks logical planning calls across discovery + planning + correction.
+
+    Provider retries are controlled separately by the Gemini retry settings.
+    This budget bounds the calls deliberately initiated by one plan workflow.
+    """
+
+    def __init__(self, config):
+        self.limit = config.ai_max_workflow_calls
+        self.used = 0
+
+    def consume(self, n: int = 1, *, label: str = "AI call") -> None:
+        self.used += n
+        if self.used > self.limit:
+            raise PlanServiceError(
+                f"Workflow call budget exhausted ({self.used}/{self.limit}). "
+                f"Last: {label}. Reduce discovery_max_rounds or ai_max_workflow_calls, "
+                f"or simplify the request."
+            )
+
+
+# ── Plan result cache ────────────────────────────────────────────────
+
+_PLAN_CACHE_MAX = 32
+
+
+class _PlanCache:
+    """LRU cache for plan results, keyed on (project_id, revision, request_hash).
+
+    When the user reopens "Preview changes" with the same request on the same
+    workspace revision, this returns the stored plan instead of re-calling Gemini.
+    A changed request or workspace revision invalidates the entry.
+    """
+
+    def __init__(self):
+        self._cache: OrderedDict[str, Any] = OrderedDict()
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _key(project_id: str, revision: int, request: str) -> str:
+        request_hash = hashlib.sha256(request.encode()).hexdigest()[:16]
+        return f"{project_id}:{revision}:{request_hash}"
+
+    def get(self, project_id: str, revision: int, request: str):
+        key = self._key(project_id, revision, request)
+        with self._lock:
+            plan = self._cache.get(key)
+            if plan is not None:
+                self._cache.move_to_end(key)
+            return plan
+
+    def put(self, project_id: str, revision: int, request: str, plan) -> None:
+        key = self._key(project_id, revision, request)
+        with self._lock:
+            self._cache[key] = plan
+            self._cache.move_to_end(key)
+            while len(self._cache) > _PLAN_CACHE_MAX:
+                self._cache.popitem(last=False)
+
+    def invalidate(self, project_id: str) -> None:
+        """Remove every cached plan for a project after an explicit rejection."""
+        prefix = f"{project_id}:"
+        with self._lock:
+            for key in [key for key in self._cache if key.startswith(prefix)]:
+                del self._cache[key]
+
+
+_plan_cache = _PlanCache()
+
+
+def invalidate_plan_cache(project_id: str) -> None:
+    """Invalidate cached AI plans for a project."""
+    _plan_cache.invalidate(project_id)
 
 
 def _invalid_plan_paths(
@@ -70,9 +154,20 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
         )
         if not analysis:
             raise PlanServiceError("No analysis available")
+
+        # Check the plan cache before making any API calls.
+        project = ProjectRepository().get(project_id)
+        revision = project.workspace_revision if project else 0
+        cached = _plan_cache.get(project_id, revision, request)
+        if cached is not None:
+            logger.info("Plan cache hit for project=%s revision=%d", project_id, revision)
+            return cached
+
         workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
-        provider = GeminiProvider(config=config)
+        discovery_provider = GeminiProvider(config=config, purpose="discovery")
+        generation_provider = GeminiProvider(config=config, purpose="generation")
+        budget = _WorkflowCallBudget(config)
 
         # Phase C: evidence-driven discovery before plan generation.
         discovery_transcript: list[dict] = []
@@ -85,23 +180,25 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
             )
 
             discovery = EvidenceDiscovery(
-                provider, context_tools, config, analysis
+                discovery_provider, context_tools, config, analysis
             ).discover(request)
             discovery_transcript = [r.to_dict() for r in discovery.transcript]
             discovery_api_calls = discovery.api_calls
             discovery_stop_reason = discovery.stop_reason
+            budget.consume(discovery_api_calls, label="discovery")
 
             if not discovery.used_static_fallback:
-                context = build_discovered_context(
-                    context_tools, discovery, user_request=request
-                )
+                context = build_discovered_context(context_tools, discovery, user_request=request)
             else:
                 context = context_tools.build_context(user_request=request)
+        except PlanServiceError:
+            raise  # budget exhaustion is a real error, not a fallback case
         except Exception:
             # Any discovery failure falls back to static selection (requirement #4).
             context = context_tools.build_context(user_request=request)
 
-        plan = provider.generate_plan(request, analysis, context, project_id=project_id)
+        budget.consume(1, label="plan generation")
+        plan = generation_provider.generate_plan(request, analysis, context, project_id=project_id)
         plan.discovery_transcript = discovery_transcript
         plan.discovery_api_calls = discovery_api_calls
         plan.discovery_stop_reason = discovery_stop_reason
@@ -117,8 +214,11 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
         )
         invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
         if invalid:
+            budget.consume(1, label="grounding correction")
             context["planning_feedback"] = _grounding_feedback(invalid, sorted(allowed_paths))
-            plan = provider.generate_plan(request, analysis, context, project_id=project_id)
+            plan = generation_provider.generate_plan(
+                request, analysis, context, project_id=project_id
+            )
             plan.discovery_transcript = discovery_transcript
             plan.discovery_api_calls = discovery_api_calls
             plan.discovery_stop_reason = discovery_stop_reason
@@ -129,7 +229,9 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
                 "AI proposed files that do not exist after one automatic grounded correction: "
                 f"{missing}. No plan was saved."
             )
-        return PlanService(config).create_plan(plan)
+        result = PlanService(config).create_plan(plan)
+        _plan_cache.put(project_id, revision, request, result)
+        return result
 
 
 def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None):
@@ -154,5 +256,5 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None)
         context = AiContextTools(ProjectWorkspace(project_id, config), analysis).build_context(
             [change.relative_path for change in plan.file_changes], user_request=plan.user_request
         )
-        patch = GeminiProvider(config=config).generate_patch(plan, context)
+        patch = GeminiProvider(config=config, purpose="generation").generate_patch(plan, context)
         return PatchService(config).store_patch(patch, preview=preview)

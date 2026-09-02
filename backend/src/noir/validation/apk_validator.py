@@ -84,6 +84,7 @@ def validate_apk(apk_path: str | Path, config: NoirConfig | None = None) -> dict
 
             # Check for dangerous entries
             total_expanded = 0
+            total_compressed = 0
             for entry in entries:
                 name = entry.filename
 
@@ -111,15 +112,7 @@ def validate_apk(apk_path: str | Path, config: NoirConfig | None = None) -> dict
 
                 # Size tracking
                 total_expanded += entry.file_size
-
-                # Compression ratio check
-                if entry.compress_size > 0:
-                    ratio = entry.file_size / entry.compress_size
-                    if ratio > config.max_compression_ratio:
-                        raise ApkValidationError(
-                            f"Suspicious compression ratio ({ratio:.0f}:1) for {name}",
-                            "compression_bomb",
-                        )
+                total_compressed += entry.compress_size
 
             # Total expanded size
             if total_expanded > config.max_expanded_size:
@@ -127,6 +120,20 @@ def validate_apk(apk_path: str | Path, config: NoirConfig | None = None) -> dict
                     f"Total expanded size too large: {total_expanded} bytes",
                     "expanded_too_large",
                 )
+
+            # Detect archive bombs using aggregate expansion. APKs produced by
+            # Unity and similar engines can legitimately contain an individual
+            # highly-compressible split asset; rejecting one small entry by its
+            # local ratio causes false positives. Aggregate expansion plus the
+            # absolute expanded-size and entry-count caps above preserves the
+            # safety boundary without rejecting those APKs.
+            if total_expanded >= config.compression_ratio_min_expanded_size:
+                archive_ratio = total_expanded / max(total_compressed, 1)
+                if archive_ratio > config.max_compression_ratio:
+                    raise ApkValidationError(
+                        f"Suspicious archive compression ratio ({archive_ratio:.0f}:1)",
+                        "compression_bomb",
+                    )
 
             # Check for AndroidManifest.xml
             entry_names = {e.filename for e in entries}

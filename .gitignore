@@ -12,3 +12,5 @@ backend/.local-test/
 **/*.pass
 backend/tests/fixtures/*.apk
 /output/
+.DS_Store
+backend-private.tar.gz

@@ -52,9 +52,7 @@ def test_verified_signed_artifact_upload_and_presign(tmp_path):
     apk.write_bytes(b"signed-apk")
     digest = "a" * 64
 
-    key = store.store_signed(
-        "alice", "project1", "build1", apk, sha256=digest
-    )
+    key = store.store_signed("alice", "project1", "build1", apk, sha256=digest)
     url = store.signed_download_url(
         "alice",
         "project1",

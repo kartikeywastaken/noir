@@ -13,12 +13,14 @@ from pathlib import Path
 
 def main() -> None:
     credentials = Path(os.environ["CREDENTIALS_DIRECTORY"])
-    gemini = (credentials / "gemini-api-key").read_text().strip()
+    gemini_discovery = (credentials / "gemini-discovery-api-key").read_text().strip()
+    gemini_generation = (credentials / "gemini-generation-api-key").read_text().strip()
     password = (credentials / "signing-password").read_text().strip()
     token = (credentials / "api-token").read_text().strip()
-    if not gemini or not password or not token:
+    if not gemini_discovery or not gemini_generation or not password or not token:
         raise RuntimeError("Missing service credentials")
-    os.environ["GEMINI_API_KEY"] = gemini
+    os.environ["GEMINI_API_KEY_1"] = gemini_discovery
+    os.environ["GEMINI_API_KEY_2"] = gemini_generation
     os.environ["NOIR_KEYSTORE_PASSWORD"] = password
 
     from noir.application.signing_service import SigningService

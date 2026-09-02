@@ -100,6 +100,7 @@ def _upload_lock(upload_id: str) -> threading.RLock:
 @dataclass
 class _PendingCommit:
     """One chunk writer waiting for the group-commit fsync to complete."""
+
     event: threading.Event = field(default_factory=threading.Event)
     error: BaseException | None = None
 
@@ -380,9 +381,7 @@ class ResumableUploadService:
                 with _upload_lock(existing_id):
                     existing = self._load(existing_id, user_id)
                     if existing.filename != filename or existing.size != size:
-                        raise UploadError(
-                            "Idempotency key has different upload metadata", 409
-                        )
+                        raise UploadError("Idempotency key has different upload metadata", 409)
                     return existing
             except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, UploadError):
                 # Index is stale or corrupt — fall through to legacy scan
@@ -440,9 +439,7 @@ class ResumableUploadService:
         with _upload_lock(upload_id):
             return self._load(upload_id, user_id)
 
-    def append(
-        self, *, upload_id: str, user_id: str, offset: int, chunk: bytes
-    ) -> UploadSession:
+    def append(self, *, upload_id: str, user_id: str, offset: int, chunk: bytes) -> UploadSession:
         if not chunk:
             raise UploadError("Upload chunk is empty")
         if len(chunk) > self.config.max_upload_chunk_size:
@@ -460,18 +457,13 @@ class ResumableUploadService:
                 raise UploadError("Upload offset is not chunk-aligned", 409)
             expected_length = min(session.chunk_size, session.size - offset)
             if len(chunk) != expected_length:
-                raise UploadError(
-                    f"Upload chunk length mismatch; expected {expected_length}", 409
-                )
+                raise UploadError(f"Upload chunk length mismatch; expected {expected_length}", 409)
             # Duplicate-chunk check (idempotent success or 409 for different content)
             existing = session.received_chunks.get(str(offset))
-            if existing:
-                if "_pending" not in existing:
-                    if int(existing["length"]) != len(chunk) or existing["sha256"] != digest:
-                        raise UploadError(
-                            "Upload chunk differs from acknowledged content", 409
-                        )
-                    return session
+            if existing and "_pending" not in existing:
+                if int(existing["length"]) != len(chunk) or existing["sha256"] != digest:
+                    raise UploadError("Upload chunk differs from acknowledged content", 409)
+                return session
 
             # Check in-flight set to prevent concurrent duplicate offset writes
             with self._in_flight_lock:

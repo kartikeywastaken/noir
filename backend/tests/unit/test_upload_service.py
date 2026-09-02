@@ -19,14 +19,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
 from noir.domain.config import NoirConfig, reset_config
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -139,7 +137,7 @@ class TestGroupCommit:
         results = {}
 
         def append_chunk(offset):
-            chunk = data[offset:offset + 4]
+            chunk = data[offset : offset + 4]
             result = service.append(
                 upload_id=upload_id, user_id="user1", offset=offset, chunk=chunk
             )
@@ -220,7 +218,7 @@ class TestJournal:
                 upload_id=upload_id,
                 user_id="user1",
                 offset=offset,
-                chunk=data[offset:offset + 4],
+                chunk=data[offset : offset + 4],
             )
 
         # Load via journal replay
@@ -258,7 +256,7 @@ class TestJournal:
                 upload_id=upload_id,
                 user_id="user1",
                 offset=i,
-                chunk=data[i:i + 1],
+                chunk=data[i : i + 1],
             )
 
         # The journal exists and has grown beyond the threshold
@@ -281,7 +279,7 @@ class TestJournal:
 
         # If journal still exists, it should be small (just the post-compaction entries)
         if journal_path.exists():
-            remaining = sum(1 for l in journal_path.read_text().splitlines() if l.strip())
+            remaining = sum(1 for line in journal_path.read_text().splitlines() if line.strip())
             assert remaining < _JOURNAL_COMPACT_THRESHOLD, (
                 f"Journal should be small after compaction, got {remaining} entries"
             )
@@ -369,7 +367,7 @@ class TestConcurrency:
                     upload_id=upload_id,
                     user_id="user1",
                     offset=offset,
-                    chunk=data[offset:offset + 4],
+                    chunk=data[offset : offset + 4],
                 )
             except Exception as e:
                 errors.append((offset, e))
@@ -393,7 +391,7 @@ class TestConcurrency:
         assert sorted(final.public()["received_offsets"]) == list(range(0, total_size, 4))
 
     def test_duplicate_offset_under_concurrency(self, tmp_path):
-        """Same offset submitted twice concurrently: one succeeds, other gets 409 or idempotent success."""
+        """Concurrent duplicate offsets either succeed idempotently or return 409."""
         from noir.application.upload_service import UploadError
 
         config = _make_config(tmp_path, upload_chunk_size=4, max_upload_chunk_size=16)
@@ -474,12 +472,8 @@ class TestIdempotencyLookup:
         service = _make_service(config)
         key = "test-idem-key"
 
-        s1 = service.begin(
-            user_id="user1", idempotency_key=key, filename="a.apk", size=8
-        )
-        s2 = service.begin(
-            user_id="user1", idempotency_key=key, filename="a.apk", size=8
-        )
+        s1 = service.begin(user_id="user1", idempotency_key=key, filename="a.apk", size=8)
+        s2 = service.begin(user_id="user1", idempotency_key=key, filename="a.apk", size=8)
         assert s1.upload_id == s2.upload_id
 
         # Verify the idempotency index file exists
@@ -536,8 +530,6 @@ class TestIdempotencyLookup:
 
     def test_per_user_isolation(self, tmp_path):
         """Different users with same idempotency key get separate sessions."""
-        from noir.application.upload_service import UploadError
-
         config = _make_config(tmp_path, upload_chunk_size=4, max_upload_chunk_size=16)
         service = _make_service(config)
         key = "shared-key"
@@ -564,7 +556,7 @@ class TestIdempotencyLookup:
 class TestTokenCache:
     def test_token_cache_avoids_repeated_lookups(self, tmp_path):
         """Cached token should not hit the DB on subsequent calls."""
-        from noir.api.app import _token_cache, _token_cache_lock, _TOKEN_CACHE_TTL
+        from noir.api.app import _token_cache, _token_cache_lock
         from noir.domain.models import ApiToken
 
         # Clear cache
@@ -572,12 +564,11 @@ class TestTokenCache:
             _token_cache.clear()
 
         token_hash = hashlib.sha256(b"test-token").hexdigest()
-        mock_token = ApiToken(
-            token_id="tid", token_hash=token_hash, name="test", user_id="u1"
-        )
+        mock_token = ApiToken(token_id="tid", token_hash=token_hash, name="test", user_id="u1")
 
         # Pre-populate cache
         import time as _time
+
         with _token_cache_lock:
             _token_cache[token_hash] = (mock_token, _time.monotonic())
 
@@ -589,7 +580,7 @@ class TestTokenCache:
 
     def test_token_cache_ttl_expiry(self, tmp_path):
         """Cache entry should expire after TTL."""
-        from noir.api.app import _token_cache, _token_cache_lock, _TOKEN_CACHE_TTL
+        from noir.api.app import _TOKEN_CACHE_TTL, _token_cache, _token_cache_lock
 
         with _token_cache_lock:
             _token_cache.clear()
@@ -597,12 +588,11 @@ class TestTokenCache:
         token_hash = hashlib.sha256(b"expiry-test").hexdigest()
         from noir.domain.models import ApiToken
 
-        mock_token = ApiToken(
-            token_id="tid2", token_hash=token_hash, name="test2", user_id="u2"
-        )
+        mock_token = ApiToken(token_id="tid2", token_hash=token_hash, name="test2", user_id="u2")
 
         # Insert with an old timestamp
         import time as _time
+
         with _token_cache_lock:
             _token_cache[token_hash] = (mock_token, _time.monotonic() - _TOKEN_CACHE_TTL - 1)
 
@@ -665,7 +655,7 @@ class TestEndToEnd:
                 upload_id=upload_id,
                 user_id="user1",
                 offset=offset,
-                chunk=data[offset:offset + chunk_size],
+                chunk=data[offset : offset + chunk_size],
             )
 
         final = service.status(upload_id=upload_id, user_id="user1")
@@ -693,7 +683,7 @@ class TestEndToEnd:
                 upload_id=upload_id,
                 user_id="user1",
                 offset=offset,
-                chunk=data[offset:offset + chunk_size],
+                chunk=data[offset : offset + chunk_size],
             )
 
         # "Disconnect" — create new service instance
@@ -710,7 +700,7 @@ class TestEndToEnd:
                 upload_id=upload_id,
                 user_id="user1",
                 offset=offset,
-                chunk=data[offset:offset + chunk_size],
+                chunk=data[offset : offset + chunk_size],
             )
 
         final = service2.status(upload_id=upload_id, user_id="user1")
@@ -718,7 +708,9 @@ class TestEndToEnd:
 
         _, part = service2._paths(upload_id)
         assert part.read_bytes()[:total_size] == data
-        assert hashlib.sha256(part.read_bytes()[:total_size]).hexdigest() == hashlib.sha256(data).hexdigest()
+        actual_hash = hashlib.sha256(part.read_bytes()[:total_size]).hexdigest()
+        expected_hash = hashlib.sha256(data).hexdigest()
+        assert actual_hash == expected_hash
 
     def test_large_synthetic_upload_timed(self, tmp_path):
         """Upload ~2MB synthetic file, measure wall-clock time, verify SHA-256."""
@@ -799,9 +791,7 @@ class TestValidation:
         service = _make_service(config)
         session = _begin_session(service, size=4)
         with pytest.raises(UploadError, match="chunk-aligned"):
-            service.append(
-                upload_id=session.upload_id, user_id="user1", offset=-1, chunk=b"aaaa"
-            )
+            service.append(upload_id=session.upload_id, user_id="user1", offset=-1, chunk=b"aaaa")
 
     def test_unaligned_offset_rejected(self, tmp_path):
         from noir.application.upload_service import UploadError
@@ -810,9 +800,7 @@ class TestValidation:
         service = _make_service(config)
         session = _begin_session(service, size=8)
         with pytest.raises(UploadError, match="chunk-aligned"):
-            service.append(
-                upload_id=session.upload_id, user_id="user1", offset=1, chunk=b"aaaa"
-            )
+            service.append(upload_id=session.upload_id, user_id="user1", offset=1, chunk=b"aaaa")
 
     def test_length_mismatch_rejected(self, tmp_path):
         from noir.application.upload_service import UploadError
@@ -821,9 +809,7 @@ class TestValidation:
         service = _make_service(config)
         session = _begin_session(service, size=8)
         with pytest.raises(UploadError, match="mismatch"):
-            service.append(
-                upload_id=session.upload_id, user_id="user1", offset=0, chunk=b"abc"
-            )
+            service.append(upload_id=session.upload_id, user_id="user1", offset=0, chunk=b"abc")
 
     def test_finalized_upload_rejects_append(self, tmp_path):
         """Can't append to a finalized upload."""

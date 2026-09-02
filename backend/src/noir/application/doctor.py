@@ -212,8 +212,7 @@ def _check_native_libraries() -> ToolCheck:
         name="IL2CPP/native patching",
         available=True,
         version=(
-            f"LIEF {lief.__version__}; Capstone "
-            f"{getattr(capstone, '__version__', 'unknown')}"
+            f"LIEF {lief.__version__}; Capstone {getattr(capstone, '__version__', 'unknown')}"
         ),
         required_for="optional_for_binary",
         message=f"ELF/disassembly ready; assembler={assembler}",
@@ -235,18 +234,28 @@ def _check_ai(config: NoirConfig) -> ToolCheck:
             required_for="optional_for_ai",
             message=f"Unsupported AI provider: {config.ai_provider}",
         )
-    if not config.gemini_api_key.get_secret_value():
+    if not config.gemini_key_for("generation"):
         return ToolCheck(
             name="AI Provider",
             available=False,
             required_for="optional_for_ai",
-            message=f"AI provider '{config.ai_provider}' configured but GEMINI_API_KEY not set.",
+            message=(
+                f"AI provider '{config.ai_provider}' configured but no Gemini key is set. "
+                "Configure GEMINI_API_KEY_1 and GEMINI_API_KEY_2, or legacy GEMINI_API_KEY."
+            ),
         )
+    split = bool(
+        config.gemini_discovery_api_key.get_secret_value()
+        and config.gemini_generation_api_key.get_secret_value()
+    )
     return ToolCheck(
         name="AI Provider",
         available=True,
         required_for="optional_for_ai",
-        message=f"Provider: {config.ai_provider}, Model: {config.ai_model} (key configured)",
+        message=(
+            f"Provider: {config.ai_provider}, Model: {config.ai_model} "
+            f"({'separate discovery/generation keys' if split else 'shared fallback key'})"
+        ),
     )
 
 

@@ -230,27 +230,31 @@ def test_chained_cil_method_edits_rebind_staged_token_sensitive_hashes(tmp_path)
         for type_info in after["types"]
         for method in type_info["methods"]
     }
-    assert {
-        key for key in before_hashes if before_hashes[key] != after_hashes[key]
-    } == {
+    assert {key for key in before_hashes if before_hashes[key] != after_hashes[key]} == {
         (
             "Game.Economy.CurrencyManager",
             "System.Boolean CanAfford(System.Int32)",
         ),
         ("Game.Economy.CurrencyManager", "System.Int32 Untouched()"),
     }
-    assert read_method_il(
-        config,
-        target,
-        "Game.Economy.CurrencyManager",
-        "System.Boolean CanAfford(System.Int32)",
-    )["il_source"] == "ldc.i4.1\nret"
-    assert read_method_il(
-        config,
-        target,
-        "Game.Economy.CurrencyManager",
-        "System.Int32 Untouched()",
-    )["il_source"] == "ldc.i4.s 99\nret"
+    assert (
+        read_method_il(
+            config,
+            target,
+            "Game.Economy.CurrencyManager",
+            "System.Boolean CanAfford(System.Int32)",
+        )["il_source"]
+        == "ldc.i4.1\nret"
+    )
+    assert (
+        read_method_il(
+            config,
+            target,
+            "Game.Economy.CurrencyManager",
+            "System.Int32 Untouched()",
+        )["il_source"]
+        == "ldc.i4.s 99\nret"
+    )
 
 
 def test_cil_method_preimage_mismatch_is_rejected(tmp_path):

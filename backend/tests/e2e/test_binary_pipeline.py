@@ -21,21 +21,15 @@ from noir.infrastructure.filesystem.workspace import (
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 REPOSITORY = Path(__file__).resolve().parents[3]
 CIL_TOOL = (
-    REPOSITORY
-    / "tools"
-    / "noir-cil-tool"
-    / "bin"
-    / "Release"
-    / "net8.0"
-    / "noir-cil-tool.dll"
+    REPOSITORY / "tools" / "noir-cil-tool" / "bin" / "Release" / "net8.0" / "noir-cil-tool.dll"
 )
 
 
 def _dotnet() -> str:
     configured = os.environ.get("NOIR_TEST_DOTNET")
     temporary = Path("/private/tmp/noir-dotnet/dotnet")
-    executable = configured or shutil.which("dotnet") or (
-        str(temporary) if temporary.is_file() else ""
+    executable = (
+        configured or shutil.which("dotnet") or (str(temporary) if temporary.is_file() else "")
     )
     if not executable or not CIL_TOOL.is_file():
         pytest.skip("Built NOIR CIL tool and .NET 8 are required")
@@ -129,15 +123,11 @@ def test_all_binary_families_plan_approve_patch_validate_rebuild_sign_verify(tmp
     native_target = workspace.safe_path(native_relative)
     native_inspection = inspect_elf(native_target)
     native_symbol = next(
-        item
-        for item in native_inspection["symbol_details"]
-        if item["name"] == "NoirNopTarget"
+        item for item in native_inspection["symbol_details"] if item["name"] == "NoirNopTarget"
     )
     il2cpp_relative = "lib/x86_64/libil2cpp.so"
     il2cpp_target = workspace.safe_path(il2cpp_relative)
-    metadata = workspace.safe_path(
-        "assets/bin/Data/il2cpp_data/Metadata/global-metadata.dat"
-    )
+    metadata = workspace.safe_path("assets/bin/Data/il2cpp_data/Metadata/global-metadata.dat")
     il2cpp_method = Il2CppMetadata(metadata, il2cpp_target).find_method(
         "Game.Economy.CurrencyManager", "System.Boolean CanAfford(System.Int32)"
     )
@@ -223,9 +213,7 @@ def test_all_binary_families_plan_approve_patch_validate_rebuild_sign_verify(tmp
             ],
         )
     )
-    PatchService(config).approve_patch(
-        project_id, patch.patch_id, patch.compute_hash()
-    )
+    PatchService(config).approve_patch(project_id, patch.patch_id, patch.compute_hash())
     applied = PatchService(config).apply_patch(project_id, patch.patch_id)
     assert applied["validation"]["passed"] is True
 
@@ -276,9 +264,7 @@ def test_all_binary_families_plan_approve_patch_validate_rebuild_sign_verify(tmp
     assert final_il2cpp_instructions[0]["mnemonic"] == "mov"
     assert final_il2cpp_instructions[0]["operands"].endswith(", 1")
 
-    binary_audit = AuditReporter(config).generate(project_id)["patches"][0][
-        "binary_operations"
-    ]
+    binary_audit = AuditReporter(config).generate(project_id)["patches"][0]["binary_operations"]
     assert len(binary_audit) == 3
     assert all(item["whole_file_preimage_hash"] for item in binary_audit)
     assert all(item["whole_file_postimage_hash"] for item in binary_audit)

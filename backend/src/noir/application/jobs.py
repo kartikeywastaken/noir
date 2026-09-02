@@ -36,8 +36,7 @@ def job_runtime(job_id):
             last_db_check = now
             job = JobRepository().get(job_id)
             db_cancelled = bool(
-                job
-                and (job.result_data.get("cancel_requested") or job.state == JobState.CANCELLED)
+                job and (job.result_data.get("cancel_requested") or job.state == JobState.CANCELLED)
             )
         return db_cancelled
 
@@ -196,9 +195,11 @@ class TaskQueue:
                     project = ProjectRepository().get(job.project_id)
                     if not project or project.workspace_revision != payload["revision"]:
                         raise ValueError("Queued build references a stale revision")
-                    result = BuildService(self.config).build(
-                        job.project_id, job=job
-                    ).model_dump(mode="json")
+                    result = (
+                        BuildService(self.config)
+                        .build(job.project_id, job=job)
+                        .model_dump(mode="json")
+                    )
                     if not result["success"]:
                         raise ValueError(result.get("error_message") or "APK rebuild failed")
                 elif job.result_data["operation"] in {"workflow_prepare", "workflow_finish"}:

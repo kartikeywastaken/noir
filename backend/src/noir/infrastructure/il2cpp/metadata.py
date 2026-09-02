@@ -91,11 +91,7 @@ class Il2CppMetadata:
         """Resolve one method only when metadata and a sized ELF symbol agree."""
         method_name = method_signature.split("(", 1)[0].split()[-1]
         type_name = type_full_name.rsplit(".", 1)[-1]
-        metadata_tokens = {
-            token
-            for value in self._strings
-            for token in self._tokens(value)
-        }
+        metadata_tokens = {token for value in self._strings for token in self._tokens(value)}
         requested_tokens = set(self._tokens(f"{type_full_name} {method_signature}"))
         if (
             type_name not in self._strings

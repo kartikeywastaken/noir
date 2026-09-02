@@ -117,13 +117,18 @@ Paste that output in the app's **Config → Advanced → Custom backend / owner 
 The Gemini key stays in the ignored file `backend/.env`:
 
 ```dotenv
-GEMINI_API_KEY=your-gemini-key
+GEMINI_API_KEY_1=your-discovery-key
+GEMINI_API_KEY_2=your-plan-and-patch-key
 NOIR_AI_PROVIDER=gemini
 NOIR_AI_MODEL=gemini-3.6-flash
 NOIR_AI_FALLBACK_MODEL=
 ```
 
-Preserve your other settings. Restart the backend after editing the file. `noir ai check` performs a real provider check; the app's “AI configured” status only checks configuration. Do not put the Gemini key in Flutter, Dart defines, Git, or the mobile token field.
+Key 1 handles discovery/file selection; key 2 handles planning and patch generation. The legacy
+`GEMINI_API_KEY` still works as a shared fallback. Preserve your other settings and restart the
+backend after editing the file. `noir ai check` performs a real provider check; the app's “AI
+configured” status only checks configuration. Do not put either Gemini key in Flutter, Dart
+defines, Git, or the mobile token field.
 
 The user still writes one short plain-English request. NOIR ranks the decoded APK's real paths,
 rejects invented paths, and automatically asks for one grounded correction before showing a plan.

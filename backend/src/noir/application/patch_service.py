@@ -120,6 +120,11 @@ class PlanService:
         plan = self.plan_repo.get(plan_id)
         if not plan or plan.project_id != project_id:
             raise PlanServiceError("Plan not found in this project")
+        # Imported lazily to avoid a module cycle: ai_service depends on this
+        # service, while an explicit rejection must invalidate its result cache.
+        from noir.application.ai_service import invalidate_plan_cache
+
+        invalidate_plan_cache(project_id)
         self.approval_repo.invalidate_for_project(project_id, ApprovalScope.PLAN)
         self.approval_repo.invalidate_for_project(project_id, ApprovalScope.PATCH)
         self.event_repo.create(

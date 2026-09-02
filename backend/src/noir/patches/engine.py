@@ -77,9 +77,7 @@ class PatchEngine:
         self.journal_dir = workspace.changes_dir / "journal"
         self.config = getattr(workspace, "config", None) or get_config()
 
-    def validate_patch(
-        self, patch: PatchSet, *, check_multi_abi: bool = True
-    ) -> list[str]:
+    def validate_patch(self, patch: PatchSet, *, check_multi_abi: bool = True) -> list[str]:
         """Validate all operations without applying.
 
         Returns list of validation errors (empty = valid).
@@ -206,21 +204,15 @@ class PatchEngine:
         if target.is_symlink():
             errors.append(f"{prefix}: Binary target cannot be a symlink")
         if target.stat().st_size > maximum:
-            errors.append(
-                f"{prefix}: Binary target exceeds its {maximum:,}-byte format ceiling"
-            )
+            errors.append(f"{prefix}: Binary target exceeds its {maximum:,}-byte format ceiling")
         if not op.expected_preimage_hash:
             errors.append(f"{prefix}: Whole-file preimage hash is mandatory")
         elif compute_file_hash(target) != op.expected_preimage_hash:
             errors.append(f"{prefix}: Whole-file preimage hash mismatch")
         return errors
 
-    def _validate_cil_operation(
-        self, op: PatchOperation, target: Path, prefix: str
-    ) -> list[str]:
-        errors = self._validate_binary_file(
-            op, target, prefix, self.config.max_assembly_size
-        )
+    def _validate_cil_operation(self, op: PatchOperation, target: Path, prefix: str) -> list[str]:
+        errors = self._validate_binary_file(op, target, prefix, self.config.max_assembly_size)
         if errors:
             return errors
         if target.suffix.lower() != ".dll":
@@ -232,9 +224,7 @@ class PatchEngine:
             "data",
             "managed",
         ):
-            return [
-                f"{prefix}: CIL operations are limited to assets/bin/Data/Managed/*.dll"
-            ]
+            return [f"{prefix}: CIL operations are limited to assets/bin/Data/Managed/*.dll"]
         if not op.assembly_name:
             errors.append(f"{prefix}: assembly_name is required")
         elif op.assembly_name != target.name:
@@ -318,9 +308,7 @@ class PatchEngine:
     def _validate_native_operation(
         self, op: PatchOperation, target: Path, prefix: str
     ) -> list[str]:
-        errors = self._validate_binary_file(
-            op, target, prefix, self.config.max_native_library_size
-        )
+        errors = self._validate_binary_file(op, target, prefix, self.config.max_native_library_size)
         if errors:
             return errors
         if target.suffix.lower() != ".so":
@@ -366,17 +354,13 @@ class PatchEngine:
                 elif op.native_redirect_target_offset not in {
                     symbol["file_offset"] for symbol in inspection["symbol_details"]
                 }:
-                    errors.append(
-                        f"{prefix}: Redirect target must be an exported function start"
-                    )
+                    errors.append(f"{prefix}: Redirect target must be an exported function start")
         except Exception as exc:
             errors.append(f"{prefix}: {exc}")
         return errors
 
     def _metadata_path(self) -> Path:
-        matches: list[Path] = sorted(
-            Path(self.decoded_dir).rglob("global-metadata.dat")
-        )
+        matches: list[Path] = sorted(Path(self.decoded_dir).rglob("global-metadata.dat"))
         if len(matches) != 1:
             raise PatchValidationError(
                 f"Expected exactly one global-metadata.dat, found {len(matches)}"
@@ -400,9 +384,7 @@ class PatchEngine:
     def _validate_il2cpp_operation(
         self, op: PatchOperation, target: Path, prefix: str
     ) -> list[str]:
-        errors = self._validate_binary_file(
-            op, target, prefix, self.config.max_native_library_size
-        )
+        errors = self._validate_binary_file(op, target, prefix, self.config.max_native_library_size)
         if errors:
             return errors
         if target.name != "libil2cpp.so":
@@ -601,22 +583,16 @@ class PatchEngine:
             if item.get("full_name") == op.type_full_name
         ]
         if len(types) != 1:
-            raise PatchValidationError(
-                f"Staged CIL type selector matched {len(types)} types"
-            )
+            raise PatchValidationError(f"Staged CIL type selector matched {len(types)} types")
         if op.operation == PatchOperationType.CIL_REPLACE_FIELD_INIT:
             fields = [
-                field
-                for field in types[0].get("fields", [])
-                if field.get("name") == op.field_name
+                field for field in types[0].get("fields", []) if field.get("name") == op.field_name
             ]
             if len(fields) != 1 or not fields[0].get("constant_hash"):
                 raise PatchValidationError(
                     f"Staged CIL field selector matched {len(fields)} fields"
                 )
-            return op.model_copy(
-                update={"expected_method_il_hash": fields[0]["constant_hash"]}
-            )
+            return op.model_copy(update={"expected_method_il_hash": fields[0]["constant_hash"]})
 
         methods = [
             method
@@ -624,12 +600,8 @@ class PatchEngine:
             if method.get("signature") == op.method_signature
         ]
         if len(methods) != 1 or not methods[0].get("il_hash"):
-            raise PatchValidationError(
-                f"Staged CIL method selector matched {len(methods)} methods"
-            )
-        return op.model_copy(
-            update={"expected_method_il_hash": methods[0]["il_hash"]}
-        )
+            raise PatchValidationError(f"Staged CIL method selector matched {len(methods)} methods")
+        return op.model_copy(update={"expected_method_il_hash": methods[0]["il_hash"]})
 
     @staticmethod
     def _atomic_write(path, content):
@@ -708,9 +680,7 @@ class PatchEngine:
                 if relative in binary_paths and new is not None:
                     after_backup = backup_dir / f"{index}.after"
                     self._atomic_write(after_backup, new)
-                    entry["after_backup"] = str(
-                        after_backup.relative_to(self.journal_dir)
-                    )
+                    entry["after_backup"] = str(after_backup.relative_to(self.journal_dir))
                 entries.append(entry)
             journal = {
                 "version": 2,

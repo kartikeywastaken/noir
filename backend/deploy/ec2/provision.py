@@ -20,7 +20,12 @@ def main() -> None:
     source = Path(__file__).resolve().parent
     upload = Path("/home/ubuntu/noir-deploy/credentials-upload.json")
     bundle = json.loads(upload.read_text())
-    for name in ("gemini-api-key", "api-token", "signing-password"):
+    for name in (
+        "gemini-discovery-api-key",
+        "gemini-generation-api-key",
+        "api-token",
+        "signing-password",
+    ):
         target = Path("/etc/credstore.encrypted") / f"noir-{name}"
         if target.exists():
             # Provisioning must never silently rotate existing service credentials.

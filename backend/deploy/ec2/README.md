@@ -119,27 +119,37 @@ curl --fail https://noir-16-171-197-228.sslip.io/v1/health
 
 Non-secret server settings are in `/etc/noir/backend.env` (root-only). The initial
 deployment preserves the laptop's effective Gemini model and context limits.
-The production key is encrypted in `/etc/credstore.encrypted/noir-gemini-api-key`.
+The discovery and generation keys are encrypted separately in
+`/etc/credstore.encrypted/noir-gemini-discovery-api-key` and
+`/etc/credstore.encrypted/noir-gemini-generation-api-key`.
 Runtime credentials are read from
 systemd's private credentials directory. The bearer token's database record is a SHA-256
 hash; an encrypted copy lets this deployment preserve it across restarts.
 
-To replace the Gemini key, use this in the Ubuntu SSH shell. It prompts without echo
-and does not put the key in shell history. Do this while no AI request is active.
+To replace both Gemini keys, use this in the Ubuntu SSH shell. It prompts without echo
+and does not put either key in shell history. Do this while no AI request is active.
 
 ```bash
-read -rsp 'New Gemini API key: ' NOIR_NEW_GEMINI_KEY
+read -rsp 'New discovery Gemini API key: ' NOIR_NEW_GEMINI_DISCOVERY_KEY
 printf '\n'
-if [ -n "$NOIR_NEW_GEMINI_KEY" ]; then
-  printf '%s' "$NOIR_NEW_GEMINI_KEY" | sudo systemd-creds encrypt \
-    --with-key=host --name=gemini-api-key - \
-    /etc/credstore.encrypted/noir-gemini-api-key.new &&
-  sudo chmod 600 /etc/credstore.encrypted/noir-gemini-api-key.new &&
-  sudo mv /etc/credstore.encrypted/noir-gemini-api-key.new \
-    /etc/credstore.encrypted/noir-gemini-api-key &&
+read -rsp 'New plan/patch Gemini API key: ' NOIR_NEW_GEMINI_GENERATION_KEY
+printf '\n'
+if [ -n "$NOIR_NEW_GEMINI_DISCOVERY_KEY" ] && [ -n "$NOIR_NEW_GEMINI_GENERATION_KEY" ]; then
+  printf '%s' "$NOIR_NEW_GEMINI_DISCOVERY_KEY" | sudo systemd-creds encrypt \
+    --with-key=host --name=gemini-discovery-api-key - \
+    /etc/credstore.encrypted/noir-gemini-discovery-api-key.new &&
+  printf '%s' "$NOIR_NEW_GEMINI_GENERATION_KEY" | sudo systemd-creds encrypt \
+    --with-key=host --name=gemini-generation-api-key - \
+    /etc/credstore.encrypted/noir-gemini-generation-api-key.new &&
+  sudo chmod 600 /etc/credstore.encrypted/noir-gemini-discovery-api-key.new &&
+  sudo chmod 600 /etc/credstore.encrypted/noir-gemini-generation-api-key.new &&
+  sudo mv /etc/credstore.encrypted/noir-gemini-discovery-api-key.new \
+    /etc/credstore.encrypted/noir-gemini-discovery-api-key &&
+  sudo mv /etc/credstore.encrypted/noir-gemini-generation-api-key.new \
+    /etc/credstore.encrypted/noir-gemini-generation-api-key &&
   sudo systemctl restart noir
 fi
-unset NOIR_NEW_GEMINI_KEY
+unset NOIR_NEW_GEMINI_DISCOVERY_KEY NOIR_NEW_GEMINI_GENERATION_KEY
 ```
 
 The laptop's original `backend/.env` remains unchanged. Do not rerun

@@ -55,9 +55,7 @@ class ArtifactStore:
             # New buckets can temporarily redirect the legacy global endpoint.
             # A redirect changes the host and invalidates a SigV4 presigned URL,
             # so sign against the regional endpoint from the outset.
-            kwargs["endpoint_url"] = (
-                f"https://s3.{self.config.s3_region}.amazonaws.com"
-            )
+            kwargs["endpoint_url"] = f"https://s3.{self.config.s3_region}.amazonaws.com"
         self._client = boto3.client("s3", **kwargs)
         return self._client
 
@@ -69,9 +67,7 @@ class ArtifactStore:
             if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", part):
                 raise ArtifactStoreError("Invalid artifact key component")
             safe_parts.append(part)
-        return "/".join(
-            [self.prefix, "users", user, "projects", project, *safe_parts]
-        )
+        return "/".join([self.prefix, "users", user, "projects", project, *safe_parts])
 
     def original_key(self, user_id: str, project_id: str) -> str:
         return self._key(user_id, project_id, "original", "input.apk")
@@ -146,9 +142,7 @@ class ArtifactStore:
         try:
             response = self._s3().head_object(Bucket=self.bucket, Key=key)
         except Exception as exc:
-            code = str(
-                getattr(exc, "response", {}).get("Error", {}).get("Code", "")
-            )
+            code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
             if code in {"404", "NoSuchKey", "NotFound"}:
                 return False
             raise ArtifactStoreError(f"S3 artifact lookup failed: {exc}") from exc

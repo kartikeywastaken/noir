@@ -197,11 +197,7 @@ class AnalysisService:
                         if abi_dir.name not in result.native_abis:
                             result.native_abis.append(abi_dir.name)
 
-        native_names = {
-            library.lower()
-            for abi in result.native_libs
-            for library in abi.libraries
-        }
+        native_names = {library.lower() for abi in result.native_libs for library in abi.libraries}
 
         # Additive capability detection — an app can have multiple runtimes.
         if result.smali_classes:

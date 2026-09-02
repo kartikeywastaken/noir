@@ -221,10 +221,7 @@ class AuditReporter:
                     length = reference.size if length is None else length
                     abi = reference.abi if abi is None else abi
                 except Exception as exc:
-                    correlation_error = (
-                        "Unable to reconstruct the approved IL2CPP range: "
-                        f"{exc}"
-                    )
+                    correlation_error = f"Unable to reconstruct the approved IL2CPP range: {exc}"
             record = {
                 "operation": operation.operation.value,
                 "target": operation.relative_path,
@@ -236,8 +233,7 @@ class AuditReporter:
                 "whole_file_postimage_hash": entry.get("after_hash"),
                 "method_il_preimage_hash": operation.expected_method_il_hash,
                 "native_range_preimage_hash": (
-                    operation.expected_native_bytes_hash
-                    or operation.expected_function_bytes_hash
+                    operation.expected_native_bytes_hash or operation.expected_function_bytes_hash
                 ),
                 "offset": offset,
                 "length": length,
@@ -349,13 +345,9 @@ class AuditReporter:
                     lines.append(f"- **Binary targets:** {', '.join(plan['binary_targets'])}")
                 if plan["binary_risks"]:
                     lines.append(f"- **Binary risks:** {', '.join(plan['binary_risks'])}")
-                lines.append(
-                    f"- **Discovery API calls:** {plan.get('discovery_api_calls', 0)}"
-                )
+                lines.append(f"- **Discovery API calls:** {plan.get('discovery_api_calls', 0)}")
                 if plan.get("discovery_stop_reason"):
-                    lines.append(
-                        f"- **Discovery stop reason:** {plan['discovery_stop_reason']}"
-                    )
+                    lines.append(f"- **Discovery stop reason:** {plan['discovery_stop_reason']}")
                 discovery = plan.get("discovery_transcript", [])
                 if discovery:
                     lines.append("")

@@ -204,16 +204,12 @@ class EvidenceDiscovery:
         # Kill switch
         if not self.config.discovery_enabled:
             logger.debug("Discovery disabled by config; using static selection")
-            return DiscoveryResult(
-                used_static_fallback=True, stop_reason="discovery_disabled"
-            )
+            return DiscoveryResult(used_static_fallback=True, stop_reason="discovery_disabled")
 
         # Label tasks are already well-served by static selection
         if self._is_label_task(user_request):
             logger.debug("Label task detected; skipping discovery")
-            return DiscoveryResult(
-                used_static_fallback=True, stop_reason="static_fast_path"
-            )
+            return DiscoveryResult(used_static_fallback=True, stop_reason="static_fast_path")
 
         budget = DiscoveryBudget(
             max_rounds=self.config.discovery_max_rounds,
@@ -249,9 +245,7 @@ class EvidenceDiscovery:
         """
         if result.binary_inspections:
             return True
-        non_manifest_reads = {
-            path for path in result.seen_files if path != "AndroidManifest.xml"
-        }
+        non_manifest_reads = {path for path in result.seen_files if path != "AndroidManifest.xml"}
         if non_manifest_reads:
             return True
         return bool(
@@ -280,6 +274,9 @@ class EvidenceDiscovery:
             "files and code relevant to the user's modification request. Use the provided "
             "tools to search, list, and read files. Focus on finding evidence: specific files, "
             "classes, methods, or values that are directly relevant to the request. "
+            "A transparent request to contact a user-supplied server is a supported task. For "
+            "that task, locate an exact lifecycle or user-action integration point, relevant "
+            "network code, and the manifest permission evidence; do not add or infer endpoints. "
             "When you have enough evidence, stop calling tools and provide a brief summary "
             "of what you found and which files are most relevant."
         )
@@ -316,13 +313,13 @@ class EvidenceDiscovery:
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 max_output_tokens=768,
+                tools=tools,
             )
             budget.begin_round()
             response = client.models.generate_content(
                 model=self.provider.model_name,
                 contents=contents,
                 config=config,
-                tools=tools if budget.has_room() else None,
             )
 
             candidates = response.candidates or []
@@ -351,9 +348,7 @@ class EvidenceDiscovery:
                 )
                 cached = tool_cache.get(cache_key)
                 if cached is None:
-                    tool_result, summary, nbytes = self._execute_tool(
-                        tool_name, args, result
-                    )
+                    tool_result, summary, nbytes = self._execute_tool(tool_name, args, result)
                     tool_cache[cache_key] = (tool_result, summary, nbytes)
                     charged_bytes = nbytes
                 else:
@@ -430,9 +425,7 @@ class EvidenceDiscovery:
             error_msg = f"Error: {exc}"
             return error_msg, error_msg[:200], 0
 
-    def _exec_search(
-        self, args: dict[str, Any], result: DiscoveryResult
-    ) -> tuple[str, str, int]:
+    def _exec_search(self, args: dict[str, Any], result: DiscoveryResult) -> tuple[str, str, int]:
         query = str(args.get("query", ""))
         glob = str(args.get("glob", "*"))
         if not query:
@@ -460,9 +453,7 @@ class EvidenceDiscovery:
         summary = f"Listed {len(files)} file(s) under '{subdir}'"
         return output, summary, nbytes
 
-    def _exec_read(
-        self, args: dict[str, Any], result: DiscoveryResult
-    ) -> tuple[str, str, int]:
+    def _exec_read(self, args: dict[str, Any], result: DiscoveryResult) -> tuple[str, str, int]:
         path = str(args.get("path", ""))
         if not path:
             return "Error: path is required", "Empty path", 0
@@ -482,9 +473,7 @@ class EvidenceDiscovery:
         if not path:
             return "Error: path is required", "Empty path", 0
 
-        inspection = self.context_tools._inspect_binary_path(
-            path, user_request=""
-        )
+        inspection = self.context_tools._inspect_binary_path(path, user_request="")
         result.binary_inspections[path] = inspection
         output = json.dumps(inspection, ensure_ascii=False, separators=(",", ":"), default=str)
         nbytes = len(output.encode())
@@ -547,9 +536,7 @@ def build_discovered_context(
             continue
         used += len(encoded)
         context["binary_inspection"][path] = inspection
-        context["file_hashes"][path] = compute_file_hash(
-            context_tools.workspace.safe_path(path)
-        )
+        context["file_hashes"][path] = compute_file_hash(context_tools.workspace.safe_path(path))
         context["file_coverage"][path] = "structured_binary_inspection"
         files_added += 1
 

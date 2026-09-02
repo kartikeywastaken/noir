@@ -267,10 +267,8 @@ def init_db(database_url: str) -> None:
         # only to the local owner; never expose them to newly invited users.
         with _engine.begin() as connection:
             for statement in (
-                "CREATE INDEX IF NOT EXISTS ix_jobs_state_created "
-                "ON jobs (state, created_at)",
-                "CREATE INDEX IF NOT EXISTS ix_jobs_project_state "
-                "ON jobs (project_id, state)",
+                "CREATE INDEX IF NOT EXISTS ix_jobs_state_created ON jobs (state, created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_jobs_project_state ON jobs (project_id, state)",
                 "CREATE INDEX IF NOT EXISTS ix_events_job_time "
                 "ON events (job_id, timestamp, event_id)",
                 "CREATE INDEX IF NOT EXISTS ix_builds_project_revision "

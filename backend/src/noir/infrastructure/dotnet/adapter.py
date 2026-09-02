@@ -17,13 +17,7 @@ class CilToolError(Exception):
 def _default_tool_path() -> Path:
     repository = Path(__file__).resolve().parents[5]
     return (
-        repository
-        / "tools"
-        / "noir-cil-tool"
-        / "bin"
-        / "Release"
-        / "net8.0"
-        / "noir-cil-tool.dll"
+        repository / "tools" / "noir-cil-tool" / "bin" / "Release" / "net8.0" / "noir-cil-tool.dll"
     )
 
 

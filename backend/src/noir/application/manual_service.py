@@ -135,8 +135,7 @@ class ManualService:
             raise ManualEditError(
                 "Manual sessions cannot record binary or >1 MB file mutations. "
                 "Use an approved structured CIL, IL2CPP, or native patch for supported "
-                "code binaries. Unsupported paths: "
-                + ", ".join(unsupported[:10])
+                "code binaries. Unsupported paths: " + ", ".join(unsupported[:10])
             )
 
         # Advance workspace revision

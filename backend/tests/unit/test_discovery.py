@@ -1,10 +1,12 @@
 """Discovery, runtimes, and evidence-gating tests. No remote AI calls."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from noir.application.patch_service import PlanServiceError
 from noir.domain.config import NoirConfig
 from noir.domain.models import AnalysisResult, NativeLibInfo
 from noir.infrastructure.ai.context import AiContextTools
@@ -15,9 +17,7 @@ from noir.infrastructure.filesystem.workspace import ProjectWorkspace
 
 @pytest.fixture
 def ws(tmp_path):
-    config = NoirConfig(
-        _env_file=None, data_dir=str(tmp_path), gemini_api_key="test-only"
-    )
+    config = NoirConfig(_env_file=None, data_dir=str(tmp_path), gemini_api_key="test-only")
     workspace = ProjectWorkspace("testdiscovery", config)
     workspace.create()
     manifest = (
@@ -253,13 +253,13 @@ def test_discovery_happy_path_content_match_not_path_keyword(ws):
     economy_file = ws.decoded_dir / "smali" / "com" / "obfuscated" / "a.smali"
     economy_file.parent.mkdir(parents=True)
     economy_file.write_text(
-        '.class public Lcom/obfuscated/a;\n'
-        '.super Ljava/lang/Object;\n'
-        '.method public getCoinBalance()I\n'
-        '    .registers 2\n'
-        '    const v0, 0x3e8\n'
-        '    return v0\n'
-        '.end method\n'
+        ".class public Lcom/obfuscated/a;\n"
+        ".super Ljava/lang/Object;\n"
+        ".method public getCoinBalance()I\n"
+        "    .registers 2\n"
+        "    const v0, 0x3e8\n"
+        "    return v0\n"
+        ".end method\n"
     )
 
     # Simulate what discovery would produce: the model searched for "coin" and found this file
@@ -314,8 +314,7 @@ def test_discovered_context_respects_max_files(ws):
         f.write_text(f"content of file {i}")
 
     seen = {
-        f"file_{i:03d}.smali": f"content of file {i}"
-        for i in range(AiContextTools.MAX_FILES + 10)
+        f"file_{i:03d}.smali": f"content of file {i}" for i in range(AiContextTools.MAX_FILES + 10)
     }
 
     discovery = DiscoveryResult(seen_files=seen, used_static_fallback=False)
@@ -479,12 +478,13 @@ def test_discovery_never_exceeds_two_api_calls_and_caches_duplicate_tools(ws):
     """Search-only conversations stop at the production cap without duplicate I/O."""
     from noir.infrastructure.ai.discovery import EvidenceDiscovery
 
+    # Explicitly set 2 rounds to test the caching behavior across multiple rounds.
+    ws.config.discovery_max_rounds = 2
+
     target = ws.decoded_dir / "smali" / "Searchable.smali"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("needle")
-    call = SimpleNamespace(
-        name="search_workspace", args={"query": "needle", "glob": "*.smali"}
-    )
+    call = SimpleNamespace(name="search_workspace", args={"query": "needle", "glob": "*.smali"})
     content = SimpleNamespace(parts=[SimpleNamespace(function_call=call)])
     response = SimpleNamespace(candidates=[SimpleNamespace(content=content)])
     client = MagicMock()
@@ -520,9 +520,7 @@ def test_search_workspace_tool_dispatch(ws):
     engine = EvidenceDiscovery(mock_provider, context_tools, ws.config, analysis)
 
     result = DiscoveryResult()
-    output, summary, nbytes = engine._execute_tool(
-        "search_workspace", {"query": "coins"}, result
-    )
+    output, summary, nbytes = engine._execute_tool("search_workspace", {"query": "coins"}, result)
 
     assert "coins" in output.lower() or "coin" in output.lower()
     assert nbytes > 0
@@ -549,3 +547,111 @@ def test_read_file_tool_dispatch(ws):
     assert "test_read.smali" in result.seen_files
     assert result.seen_files["test_read.smali"] == "test content for reading"
     assert nbytes > 0
+
+
+# ── Workflow call budget tests ────────────────────────────────────────
+
+
+def test_workflow_budget_raises_on_overflow():
+    """Budget enforces ai_max_workflow_calls limit."""
+    from noir.application.ai_service import _WorkflowCallBudget
+
+    config = NoirConfig(
+        _env_file=None,
+        data_dir=str(Path.cwd()),
+        gemini_api_key="test",
+        ai_max_workflow_calls=3,
+    )
+    budget = _WorkflowCallBudget(config)
+    budget.consume(2, label="discovery")
+    budget.consume(1, label="plan")
+    with pytest.raises(PlanServiceError, match="Workflow call budget exhausted"):
+        budget.consume(1, label="correction")
+
+
+def test_workflow_budget_allows_within_limit():
+    """Budget doesn't raise when within limit."""
+    from noir.application.ai_service import _WorkflowCallBudget
+
+    config = NoirConfig(
+        _env_file=None,
+        data_dir=str(Path.cwd()),
+        gemini_api_key="test",
+        ai_max_workflow_calls=10,
+    )
+    budget = _WorkflowCallBudget(config)
+    budget.consume(3, label="discovery")
+    budget.consume(1, label="plan")
+    budget.consume(1, label="correction")
+    assert budget.used == 5
+
+
+# ── Plan cache tests ─────────────────────────────────────────────────
+
+
+def test_plan_cache_hit_and_miss():
+    """Cache returns stored plan on exact match, None on any mismatch."""
+    from noir.application.ai_service import _PlanCache
+
+    cache = _PlanCache()
+    plan = {"fake": "plan"}
+    cache.put("proj1", 5, "give unlimited coins", plan)
+
+    # Exact match → hit
+    assert cache.get("proj1", 5, "give unlimited coins") is plan
+
+    # Different request → miss
+    assert cache.get("proj1", 5, "rename app") is None
+
+    # Different revision → miss
+    assert cache.get("proj1", 6, "give unlimited coins") is None
+
+    # Different project → miss
+    assert cache.get("proj2", 5, "give unlimited coins") is None
+
+
+def test_plan_cache_evicts_old_entries():
+    """Cache evicts oldest entries when over limit."""
+    from noir.application.ai_service import _PLAN_CACHE_MAX, _PlanCache
+
+    cache = _PlanCache()
+    for i in range(_PLAN_CACHE_MAX + 5):
+        cache.put(f"proj{i}", 0, "request", {"plan": i})
+
+    # First 5 entries should be evicted
+    for i in range(5):
+        assert cache.get(f"proj{i}", 0, "request") is None
+
+    # Later entries should still be present
+    for i in range(5, _PLAN_CACHE_MAX + 5):
+        assert cache.get(f"proj{i}", 0, "request") is not None
+
+
+# ── Retry logic tests ────────────────────────────────────────────────
+
+
+def test_quota_error_not_retryable_without_fallback():
+    """429/RESOURCE_EXHAUSTED is not retryable when no fallback model configured."""
+    from noir.infrastructure.ai.gemini import _is_retryable_availability_error
+
+    # Simulated quota error
+    quota_exc = Exception("429 RESOURCE_EXHAUSTED: quota exceeded")
+    assert _is_retryable_availability_error(quota_exc, has_fallback=True) is True
+    assert _is_retryable_availability_error(quota_exc, has_fallback=False) is False
+
+
+def test_server_error_always_retryable():
+    """500/503 server errors are retryable regardless of fallback model."""
+    from noir.infrastructure.ai.gemini import _is_retryable_availability_error
+
+    server_exc = Exception("503 UNAVAILABLE: server overloaded")
+    assert _is_retryable_availability_error(server_exc, has_fallback=True) is True
+    assert _is_retryable_availability_error(server_exc, has_fallback=False) is True
+
+
+def test_timeout_always_retryable():
+    """Timeouts are retryable regardless of fallback."""
+    from noir.infrastructure.ai.gemini import _is_retryable_availability_error
+
+    assert _is_retryable_availability_error(TimeoutError(), has_fallback=False) is True
+    assert _is_retryable_availability_error(ConnectionError(), has_fallback=False) is True

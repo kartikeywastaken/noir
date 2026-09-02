@@ -33,6 +33,24 @@ class NoirConfig(BaseSettings):
         exclude=True,
         validation_alias=AliasChoices("GEMINI_API_KEY", "NOIR_GEMINI_API_KEY", "gemini_api_key"),
     )
+    gemini_discovery_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        exclude=True,
+        validation_alias=AliasChoices(
+            "GEMINI_API_KEY_1",
+            "NOIR_GEMINI_DISCOVERY_API_KEY",
+            "gemini_discovery_api_key",
+        ),
+    )
+    gemini_generation_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        exclude=True,
+        validation_alias=AliasChoices(
+            "GEMINI_API_KEY_2",
+            "NOIR_GEMINI_GENERATION_API_KEY",
+            "gemini_generation_api_key",
+        ),
+    )
 
     # ── Directories ──────────────────────────────────────────────────
     data_dir: str = Field(default_factory=_default_data_dir)
@@ -81,10 +99,27 @@ class NoirConfig(BaseSettings):
     ai_max_request_size: int = 100_000
     ai_max_output_size: int = 50_000
     ai_max_workflow_calls: int = 10
-    # Discovery model calls made before the final plan call. Two turns are enough
-    # for the common search -> read/inspect flow; exact evidence stops it earlier.
-    discovery_max_rounds: int = Field(default=2, ge=1, le=3)
+    # Discovery model calls made before the final plan call. One turn is enough
+    # for the common search → read/inspect flow; exact evidence stops it earlier.
+    # Set to 2-3 for complex requests that need multiple rounds of exploration.
+    discovery_max_rounds: int = Field(default=1, ge=1, le=3)
     discovery_enabled: bool = True  # kill switch — falls back to static selection if False
+
+    def gemini_key_for(self, purpose: Literal["default", "discovery", "generation"]) -> str:
+        """Select a Gemini credential without exposing it through normal config output.
+
+        Dual-key installations route discovery to key 1 and plan/patch generation to
+        key 2. The legacy single-key variable remains a supported fallback so existing
+        local and EC2 deployments keep working during migration.
+        """
+        legacy = self.gemini_api_key.get_secret_value()
+        discovery = self.gemini_discovery_api_key.get_secret_value()
+        generation = self.gemini_generation_api_key.get_secret_value()
+        if purpose == "discovery":
+            return discovery or legacy or generation
+        if purpose == "generation":
+            return generation or legacy or discovery
+        return generation or legacy or discovery
 
     @classmethod
     def settings_customise_sources(
@@ -111,6 +146,7 @@ class NoirConfig(BaseSettings):
     max_archive_entries: int = 50_000
     max_expanded_size: int = 2 * 1024 * 1024 * 1024  # 2 GB
     max_compression_ratio: float = 100.0
+    compression_ratio_min_expanded_size: int = 64 * 1024 * 1024  # 64 MiB
     max_upload_size: int = 500 * 1024 * 1024  # 500 MB
     upload_chunk_size: int = 8 * 1024 * 1024  # 8 MiB, acknowledged independently
     max_upload_chunk_size: int = 16 * 1024 * 1024  # hard server-side request cap
@@ -192,6 +228,12 @@ class NoirConfig(BaseSettings):
         data = self.model_dump()
         # Never expose API keys or passwords
         data["gemini_api_key"] = "***REDACTED***" if self.gemini_api_key.get_secret_value() else ""
+        data["gemini_discovery_api_key"] = (
+            "***REDACTED***" if self.gemini_discovery_api_key.get_secret_value() else ""
+        )
+        data["gemini_generation_api_key"] = (
+            "***REDACTED***" if self.gemini_generation_api_key.get_secret_value() else ""
+        )
         for key in list(data.keys()):
             if data[key] and any(s in key.lower() for s in ("key", "password", "secret", "token")):
                 data[key] = "***REDACTED***"

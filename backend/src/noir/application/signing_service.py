@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import secrets
@@ -43,6 +44,8 @@ from noir.infrastructure.database.repositories import (
 from noir.infrastructure.filesystem.workspace import compute_file_hash
 from noir.infrastructure.processes.runner import run_tool
 from noir.security.locking import locked_project, require_clean_workspace
+
+logger = logging.getLogger(__name__)
 
 
 class SigningServiceError(Exception):
@@ -286,13 +289,32 @@ class SigningService:
             build.signed_apk_hash = compute_file_hash(signed_apk)
 
             # Upload only after local signature verification has succeeded.
-            object_key = ArtifactStore(self.config).store_signed(
-                AccessService().project_owner(project_id),
-                project_id,
-                build_id,
-                signed_apk,
-                sha256=build.signed_apk_hash,
-            )
+            # A storage failure (wrong bucket, IAM permission, network) must NOT
+            # abort the build — the APK signed fine locally.
+            object_key = None
+            try:
+                object_key = ArtifactStore(self.config).store_signed(
+                    AccessService().project_owner(project_id),
+                    project_id,
+                    build_id,
+                    signed_apk,
+                    sha256=build.signed_apk_hash,
+                )
+            except ArtifactStoreError as store_exc:
+                logger.warning(
+                    "Durable artifact upload failed (build is still valid locally): %s",
+                    store_exc,
+                )
+                self.event_repo.create(
+                    AuditEvent(
+                        project_id=project_id,
+                        stage=WorkflowStage.SIGNING,
+                        severity=EventSeverity.WARNING,
+                        message=f"Signed APK upload to S3 failed: {store_exc}",
+                        metadata={"build_id": build_id},
+                    )
+                )
+
             self.build_repo.update(build)
 
             # Update project
@@ -304,7 +326,8 @@ class SigningService:
                     project_id=project_id,
                     stage=WorkflowStage.SIGNING,
                     severity=EventSeverity.INFO,
-                    message=f"APK signed with profile '{profile_name}'",
+                    message=f"APK signed with profile '{profile_name}'"
+                    + (" (S3 upload failed)" if object_key is None else ""),
                     metadata={
                         "build_id": build_id,
                         "profile": profile_name,
@@ -317,7 +340,7 @@ class SigningService:
 
             return build
 
-        except (ZipalignError, ApksignerError, ArtifactStoreError) as e:
+        except (ZipalignError, ApksignerError) as e:
             self.event_repo.create(
                 AuditEvent(
                     project_id=project_id,
