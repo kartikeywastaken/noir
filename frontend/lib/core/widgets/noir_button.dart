@@ -1,11 +1,10 @@
-/// Primary and ghost button variants with glow effects.
+/// Material Design 3 Electric Lime primary and ghost buttons with stadium shape.
 library;
 
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
-import '../theme/noir_typography.dart';
 
-/// Solid white button with black text — primary actions.
+/// Electric Lime stadium button with dark text — primary actions.
 class NoirPrimaryButton extends StatelessWidget {
   const NoirPrimaryButton({
     super.key,
@@ -13,60 +12,83 @@ class NoirPrimaryButton extends StatelessWidget {
     this.icon,
     this.onPressed,
     this.loading = false,
+    this.expand = false,
   });
 
   final String label;
   final IconData? icon;
   final VoidCallback? onPressed;
   final bool loading;
+  final bool expand;
 
   @override
   Widget build(BuildContext context) {
+    final isEnabled = onPressed != null && !loading;
+
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 200),
       decoration: BoxDecoration(
-        boxShadow: onPressed != null
+        borderRadius: BorderRadius.circular(9999),
+        boxShadow: isEnabled
             ? [
                 BoxShadow(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  blurRadius: 20,
+                  color: NoirColors.primaryFixed.withValues(alpha: 0.25),
+                  blurRadius: 18,
+                  offset: const Offset(0, 4),
                 ),
               ]
             : null,
       ),
-      child: ElevatedButton(
-        onPressed: loading ? null : onPressed,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (loading)
-              const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: NoirColors.black,
+      child: SizedBox(
+        width: expand ? double.infinity : null,
+        child: ElevatedButton(
+          onPressed: loading ? null : onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: NoirColors.primaryFixed,
+            foregroundColor: NoirColors.onPrimaryFixed,
+            disabledBackgroundColor: NoirColors.surfaceContainerHigh,
+            disabledForegroundColor: NoirColors.onSurfaceVariant.withValues(alpha: 0.4),
+            shape: const StadiumBorder(),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            elevation: 0,
+          ),
+          child: Row(
+            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (loading) ...[
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: NoirColors.onPrimaryFixed,
+                  ),
                 ),
-              )
-            else if (icon != null)
-              Icon(icon, size: 20),
-            if (icon != null || loading) const SizedBox(width: 8),
-            Text(
-              label.toUpperCase(),
-              style: NoirTypography.codeSm.copyWith(
-                letterSpacing: 1.6,
-                fontWeight: FontWeight.w700,
+                const SizedBox(width: 10),
+              ] else if (icon != null) ...[
+                Icon(icon, size: 20, color: isEnabled ? NoirColors.onPrimaryFixed : null),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label.toUpperCase(),
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Transparent button with thin white border — secondary actions.
-class NoirGhostButton extends StatefulWidget {
+/// Outlined stadium button with translucent hover background — secondary actions.
+class NoirGhostButton extends StatelessWidget {
   const NoirGhostButton({
     super.key,
     required this.label,
@@ -83,68 +105,45 @@ class NoirGhostButton extends StatefulWidget {
   final bool expand;
 
   @override
-  State<NoirGhostButton> createState() => _NoirGhostButtonState();
-}
-
-class _NoirGhostButtonState extends State<NoirGhostButton> {
-  bool _hovered = false;
-
-  @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: _hovered
-                ? Colors.white.withValues(alpha: 0.6)
-                : Colors.white.withValues(alpha: 0.3),
-          ),
-          borderRadius: BorderRadius.circular(2),
-          color: _hovered
-              ? Colors.white.withValues(alpha: 0.05)
-              : Colors.transparent,
+    return SizedBox(
+      width: expand ? double.infinity : null,
+      child: OutlinedButton(
+        onPressed: loading ? null : onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: NoirColors.onSurface,
+          side: const BorderSide(color: NoirColors.outlineVariant),
+          shape: const StadiumBorder(),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: widget.loading ? null : widget.onPressed,
-            borderRadius: BorderRadius.circular(2),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: Row(
-                mainAxisSize: widget.expand
-                    ? MainAxisSize.max
-                    : MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (widget.loading)
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        color: NoirColors.primary,
-                      ),
-                    )
-                  else if (widget.icon != null)
-                    Icon(widget.icon, size: 18, color: NoirColors.primary),
-                  if (widget.icon != null || widget.loading)
-                    const SizedBox(width: 8),
-                  Text(
-                    widget.label.toUpperCase(),
-                    style: NoirTypography.codeSm.copyWith(
-                      color: NoirColors.primary,
-                      letterSpacing: 1.6,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+        child: Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (loading) ...[
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: NoirColors.onSurface,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ] else if (icon != null) ...[
+              Icon(icon, size: 18, color: NoirColors.onSurface),
+              const SizedBox(width: 8),
+            ],
+            Text(
+              label.toUpperCase(),
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
               ),
             ),
-          ),
+          ],
         ),
       ),
     );

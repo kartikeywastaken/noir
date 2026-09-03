@@ -66,18 +66,18 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('YOUR APP. YOUR CHANGES.'), findsOneWidget);
+      expect(find.text('DECODE & MODIFY'), findsOneWidget);
       expect(find.text('PROJECTS'), findsNothing);
       expect(find.bySemanticsLabel('NOIR Phantom'), findsOneWidget);
       final select = tester.widget<NoirPrimaryButton>(
-        find.widgetWithText(NoirPrimaryButton, 'CHOOSE INSTALLED APP'),
+        find.widgetWithText(NoirPrimaryButton, 'SELECT APK'),
       );
       expect(select.onPressed, isNull);
       await expectLater(
         find.byType(NoirApp),
         matchesGoldenFile('goldens/home_phone.png'),
       );
-      await tester.tap(find.text('CONFIG'));
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       expect(find.text('YOUR WORKSPACE'), findsOneWidget);
       await tester.ensureVisible(find.text('Custom backend / owner access'));

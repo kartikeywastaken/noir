@@ -298,7 +298,6 @@ class _BuildScreenState extends State<BuildScreen> {
             loading: ctrl.validating,
             onPressed: () => ctrl.validate(widget.projectId),
           ),
-          const SizedBox(width: 12),
           NoirPrimaryButton(
             label: 'Build',
             icon: Icons.build,
@@ -308,14 +307,12 @@ class _BuildScreenState extends State<BuildScreen> {
                 : null,
           ),
         ],
-        if (ctrl.currentJob?.state == 'succeeded') ...[
-          const SizedBox(width: 12),
+        if (ctrl.currentJob?.state == 'succeeded')
           NoirPrimaryButton(
             label: 'Sign & Export',
             icon: Icons.vpn_key,
             onPressed: () => context.push('/project/${widget.projectId}/sign'),
           ),
-        ],
       ],
     );
   }

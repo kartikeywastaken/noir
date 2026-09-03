@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NOIR Workspace</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-high": "#2a2a2a",
+                        "on-error": "#690005",
+                        "secondary": "#c5c7c9",
+                        "tertiary-fixed": "#a5eeff",
+                        "secondary-container": "#444749",
+                        "tertiary": "#ffffff",
+                        "background": "#131313",
+                        "tertiary-container": "#a5eeff",
+                        "surface-dim": "#131313",
+                        "on-primary-fixed-variant": "#3d4d00",
+                        "on-primary": "#293500",
+                        "tertiary-fixed-dim": "#00daf8",
+                        "on-tertiary-fixed-variant": "#004e5a",
+                        "outline": "#8e9378",
+                        "surface-tint": "#aed500",
+                        "on-secondary": "#2e3133",
+                        "on-secondary-fixed": "#191c1e",
+                        "surface-container-low": "#1c1b1b",
+                        "on-surface": "#e5e2e1",
+                        "inverse-surface": "#e5e2e1",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-highest": "#353534",
+                        "outline-variant": "#444933",
+                        "on-tertiary-container": "#006f7f",
+                        "surface-container-lowest": "#0e0e0e",
+                        "surface-bright": "#3a3939",
+                        "primary-container": "#c7f300",
+                        "primary-fixed": "#c7f300",
+                        "on-secondary-container": "#b3b5b8",
+                        "on-primary-container": "#576c00",
+                        "primary": "#ffffff",
+                        "inverse-primary": "#526600",
+                        "inverse-on-surface": "#313030",
+                        "on-primary-fixed": "#171e00",
+                        "on-surface-variant": "#c5c9ac",
+                        "error": "#ffb4ab",
+                        "secondary-fixed": "#e1e3e5",
+                        "surface-variant": "#353534",
+                        "on-tertiary": "#00363f",
+                        "surface-container": "#201f1f",
+                        "on-background": "#e5e2e1",
+                        "on-tertiary-fixed": "#001f25",
+                        "primary-fixed-dim": "#aed500",
+                        "error-container": "#93000a",
+                        "surface": "#131313",
+                        "on-secondary-fixed-variant": "#444749",
+                        "secondary-fixed-dim": "#c5c7c9"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "base": "8px",
+                        "margin-desktop": "24px",
+                        "lg": "24px",
+                        "xs": "4px",
+                        "sm": "8px",
+                        "md": "16px",
+                        "xl": "32px",
+                        "gutter": "16px",
+                        "margin-mobile": "16px"
+                    },
+                    "fontFamily": {
+                        "code-sm": ["JetBrains Mono"],
+                        "headline-sm": ["Inter"],
+                        "body-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "label-md": ["Inter"],
+                        "title-lg": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "code-lg": ["JetBrains Mono"],
+                        "headline-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "code-sm": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+                        "headline-sm": ["24px", { "lineHeight": "32px", "fontWeight": "500" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "letterSpacing": "0.25px", "fontWeight": "400" }],
+                        "display-lg": ["57px", { "lineHeight": "64px", "letterSpacing": "-0.25px", "fontWeight": "700" }],
+                        "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.5px", "fontWeight": "500" }],
+                        "title-lg": ["22px", { "lineHeight": "28px", "fontWeight": "500" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "letterSpacing": "0.5px", "fontWeight": "400" }],
+                        "code-lg": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+        }
+        
+        .code-keyword { color: theme('colors.primary-container'); }
+        .code-string { color: theme('colors.tertiary-container'); }
+        .code-comment { color: theme('colors.on-surface-variant'); opacity: 0.7; }
+        .code-variable { color: theme('colors.secondary'); }
+        .code-method { color: theme('colors.primary-fixed-dim'); }
+
+        .glass-panel {
+            background: rgba(42, 42, 42, 0.4);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .scroll-hidden::-webkit-scrollbar {
+            display: none;
+        }
+        .scroll-hidden {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="flex flex-col min-h-screen font-body-md">
+<!-- TopAppBar -->
+<header class="bg-surface-dim dark:bg-surface-dim docked full-width top-0 bg-surface-dim/80 backdrop-blur-xl flat no shadows flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop h-16 sticky z-40">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed" data-icon="terminal">terminal</span>
+<span class="font-headline-lg text-headline-lg font-black tracking-tighter text-primary dark:text-primary-fixed">NOIR</span>
+</div>
+<!-- Desktop Nav -->
+<nav class="hidden md:flex items-center gap-lg">
+<a class="flex items-center gap-xs font-label-md text-label-md text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant/50 transition-colors px-3 py-2 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="grid_view">grid_view</span>
+                Home
+            </a>
+<a class="flex items-center gap-xs font-label-md text-label-md text-primary dark:text-primary-fixed bg-surface-variant/30 px-3 py-2 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="layers" style="font-variation-settings: 'FILL' 1;">layers</span>
+                Workspace
+            </a>
+<a class="flex items-center gap-xs font-label-md text-label-md text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant/50 transition-colors px-3 py-2 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="developer_mode">developer_mode</span>
+                Tools
+            </a>
+<a class="flex items-center gap-xs font-label-md text-label-md text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant/50 transition-colors px-3 py-2 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="settings">settings</span>
+                Settings
+            </a>
+</nav>
+<button class="font-label-md text-label-md text-on-surface bg-surface-container-high px-4 py-2 rounded-full hover:bg-surface-variant/50 transition-colors border border-outline-variant flex items-center gap-2">
+            Ready
+            <div class="w-2 h-2 rounded-full bg-primary-container animate-pulse"></div>
+</button>
+</header>
+<!-- Main Workspace Area -->
+<main class="flex-1 flex flex-col md:flex-row overflow-hidden pb-20 md:pb-0 h-[calc(100vh-64px)]">
+<!-- Left Sidebar: File Browser (Desktop) / Modal (Mobile) -->
+<aside class="w-full md:w-[320px] shrink-0 bg-surface-container border-r border-surface-container-highest flex flex-col h-full hidden md:flex">
+<div class="p-md flex items-center justify-between border-b border-surface-container-highest">
+<span class="font-title-lg text-title-lg text-on-surface">Explorer</span>
+<div class="flex gap-2">
+<button class="p-1 rounded hover:bg-surface-container-highest text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="note_add">note_add</span>
+</button>
+<button class="p-1 rounded hover:bg-surface-container-highest text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="create_new_folder">create_new_folder</span>
+</button>
+<button class="p-1 rounded hover:bg-surface-container-highest text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="refresh">refresh</span>
+</button>
+</div>
+</div>
+<div class="p-3">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-[18px]" data-icon="search">search</span>
+<input class="w-full bg-surface-container-high border border-outline-variant rounded-lg pl-10 pr-3 py-2 font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all" placeholder="Search files..." type="text"/>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto scroll-hidden p-2">
+<!-- File Tree -->
+<ul class="space-y-0.5">
+<li>
+<div class="flex items-center gap-2 p-2 rounded hover:bg-surface-container-high cursor-pointer text-on-surface group transition-colors">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant group-hover:text-primary-container transition-colors" data-icon="folder_open">folder_open</span>
+<span class="font-body-md text-body-md">smali</span>
+</div>
+<ul class="pl-6 space-y-0.5 mt-0.5 border-l border-surface-container-highest ml-3">
+<li>
+<div class="flex items-center gap-2 p-2 rounded hover:bg-surface-container-high cursor-pointer text-on-surface group transition-colors">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant group-hover:text-primary-container transition-colors" data-icon="folder">folder</span>
+<span class="font-body-md text-body-md">com</span>
+</div>
+</li>
+<li>
+<div class="flex items-center gap-2 p-2 rounded bg-surface-container-high cursor-pointer text-primary-container border-l-2 border-primary-container -ml-[1px]">
+<span class="material-symbols-outlined text-[18px] text-primary-container" data-icon="description" style="font-variation-settings: 'FILL' 1;">description</span>
+<span class="font-body-md text-body-md font-medium">MainActivity.smali</span>
+</div>
+</li>
+<li>
+<div class="flex items-center gap-2 p-2 rounded hover:bg-surface-container-high cursor-pointer text-on-surface group transition-colors">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant group-hover:text-primary-container transition-colors" data-icon="description">description</span>
+<span class="font-body-md text-body-md">AuthInterceptor.smali</span>
+</div>
+</li>
+</ul>
+</li>
+<li>
+<div class="flex items-center gap-2 p-2 rounded hover:bg-surface-container-high cursor-pointer text-on-surface group transition-colors mt-1">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant group-hover:text-primary-container transition-colors" data-icon="folder">folder</span>
+<span class="font-body-md text-body-md">res</span>
+</div>
+</li>
+<li>
+<div class="flex items-center gap-2 p-2 rounded hover:bg-surface-container-high cursor-pointer text-on-surface group transition-colors mt-1">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant group-hover:text-primary-container transition-colors" data-icon="code">code</span>
+<span class="font-body-md text-body-md">AndroidManifest.xml</span>
+</div>
+</li>
+</ul>
+</div>
+<!-- Contextual Metadata HUD (Sidebar Bottom) -->
+<div class="p-md bg-surface-container-low border-t border-surface-container-highest">
+<div class="flex justify-between items-center mb-2">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">File Metadata</span>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="info">info</span>
+</div>
+<div class="grid grid-cols-2 gap-2 font-code-sm text-code-sm">
+<div class="text-on-surface-variant">Size:</div>
+<div class="text-on-surface text-right">4.2 KB</div>
+<div class="text-on-surface-variant">Modified:</div>
+<div class="text-on-surface text-right">2 mins ago</div>
+<div class="text-on-surface-variant">Type:</div>
+<div class="text-on-surface text-right text-primary-fixed-dim">SMALI</div>
+</div>
+</div>
+</aside>
+<!-- Center Editor Area -->
+<section class="flex-1 flex flex-col min-w-0 bg-background relative">
+<!-- Editor Tabs -->
+<div class="flex items-center bg-surface-container-lowest border-b border-surface-container-highest overflow-x-auto scroll-hidden">
+<div class="flex items-center gap-2 px-4 py-3 bg-surface border-t-2 border-primary-container text-on-surface min-w-max cursor-pointer">
+<span class="material-symbols-outlined text-[18px] text-primary-container" data-icon="description" style="font-variation-settings: 'FILL' 1;">description</span>
+<span class="font-body-md text-body-md">MainActivity.smali</span>
+<button class="ml-2 hover:bg-surface-container-highest rounded p-0.5 text-on-surface-variant"><span class="material-symbols-outlined text-[14px]" data-icon="close">close</span></button>
+</div>
+<div class="flex items-center gap-2 px-4 py-3 bg-surface-container-lowest hover:bg-surface-container-high text-on-surface-variant border-t-2 border-transparent min-w-max cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[18px]" data-icon="code">code</span>
+<span class="font-body-md text-body-md">AndroidManifest.xml</span>
+<button class="ml-2 hover:bg-surface-container-highest rounded p-0.5 opacity-0 hover:opacity-100 transition-opacity"><span class="material-symbols-outlined text-[14px]" data-icon="close">close</span></button>
+</div>
+</div>
+<!-- Editor Action Bar -->
+<div class="flex items-center justify-between p-2 bg-surface-container-low border-b border-surface-container-highest glass-panel z-10 sticky top-0">
+<div class="flex items-center gap-2 ml-2">
+<span class="font-label-md text-label-md text-on-surface-variant bg-surface-container-high px-2 py-1 rounded border border-outline-variant">smali/com/</span>
+<span class="font-code-sm text-code-sm text-on-surface">MainActivity.smali</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="flex items-center gap-2 px-3 py-1.5 rounded-lg font-label-md text-label-md text-on-surface-variant border border-outline-variant hover:bg-surface-variant/50 transition-colors">
+<span class="material-symbols-outlined text-[18px]" data-icon="search">search</span>
+<span class="hidden sm:inline">Search</span>
+</button>
+<button class="flex items-center gap-2 px-3 py-1.5 rounded-lg font-label-md text-label-md text-on-surface-variant border border-outline-variant hover:bg-surface-variant/50 transition-colors">
+<span class="material-symbols-outlined text-[18px]" data-icon="refresh">refresh</span>
+<span class="hidden sm:inline">Refresh</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-lg font-label-md text-label-md bg-primary-container text-on-primary-container hover:bg-primary-fixed-dim transition-colors shadow-[0_0_15px_rgba(199,243,0,0.2)] ml-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="save">save</span>
+<span>Apply Changes</span>
+</button>
+</div>
+</div>
+<!-- Code Content -->
+<div class="flex-1 overflow-auto bg-surface-dim relative font-code-lg text-code-lg leading-relaxed">
+<!-- Line Numbers (Absolute for visual separation, actual implementation might vary) -->
+<div class="absolute left-0 top-0 bottom-0 w-12 bg-surface-container-lowest border-r border-surface-container-highest text-right pt-4 text-on-surface-variant opacity-50 select-none">
+<div class="pr-2 h-6">1</div>
+<div class="pr-2 h-6">2</div>
+<div class="pr-2 h-6">3</div>
+<div class="pr-2 h-6">4</div>
+<div class="pr-2 h-6">5</div>
+<div class="pr-2 h-6">6</div>
+<div class="pr-2 h-6">7</div>
+<div class="pr-2 h-6">8</div>
+<div class="pr-2 h-6">9</div>
+<div class="pr-2 h-6">10</div>
+<div class="pr-2 h-6">11</div>
+<div class="pr-2 h-6">12</div>
+<div class="pr-2 h-6">13</div>
+<div class="pr-2 h-6">14</div>
+<div class="pr-2 h-6">15</div>
+</div>
+<!-- Code Pre block -->
+<pre class="pl-16 pr-4 pt-4 pb-8 whitespace-pre-wrap"><code class="language-smali">
+<span class="code-keyword">.class public</span> <span class="code-keyword">L</span>com/example/app/MainActivity;
+<span class="code-keyword">.super</span> <span class="code-keyword">L</span>androidx/appcompat/app/AppCompatActivity;
+
+<span class="code-comment"># instance fields</span>
+<span class="code-keyword">.field private</span> <span class="code-variable">authManager</span>:<span class="code-keyword">L</span>com/example/app/AuthManager;
+
+<span class="code-comment"># direct methods</span>
+<span class="code-keyword">.method public constructor</span> <span class="code-method">&lt;init&gt;</span>()V
+    <span class="code-keyword">.registers</span> 1
+
+    <span class="code-keyword">invoke-direct</span> {p0}, <span class="code-keyword">L</span>androidx/appcompat/app/AppCompatActivity;<span class="code-keyword">-&gt;</span><span class="code-method">&lt;init&gt;</span>()V
+
+    <span class="code-keyword">return-void</span>
+<span class="code-keyword">.end method</span>
+
+<span class="code-keyword">.method protected</span> <span class="code-method">onCreate</span>(<span class="code-keyword">L</span>android/os/Bundle;)V
+    <span class="code-keyword">.registers</span> 4
+    <span class="code-keyword">.param p1</span>, <span class="code-string">"savedInstanceState"</span>    <span class="code-comment"># Landroid/os/Bundle;</span>
+
+    <span class="code-keyword">invoke-super</span> {p0, p1}, <span class="code-keyword">L</span>androidx/appcompat/app/AppCompatActivity;<span class="code-keyword">-&gt;</span><span class="code-method">onCreate</span>(<span class="code-keyword">L</span>android/os/Bundle;)V
+
+    <span class="code-comment"># MODIFIED: Bypass Auth Check</span>
+    <span class="code-keyword">const/4</span> v0, <span class="code-string">0x1</span>
+    
+    <span class="code-keyword">if-eqz</span> v0, <span class="code-keyword">:cond_0</span>
+    
+    <span class="code-keyword">const-string</span> v1, <span class="code-string">"Auth bypassed via mod"</span>
+    
+    <span class="code-keyword">invoke-static</span> {v1}, <span class="code-keyword">L</span>android/util/Log;<span class="code-keyword">-&gt;</span><span class="code-method">d</span>(<span class="code-keyword">L</span>java/lang/String;)I
+    
+    <span class="code-keyword">:cond_0</span>
+    <span class="code-keyword">const</span> v1, <span class="code-string">0x7f0b001c</span>
+    
+    <span class="code-keyword">invoke-virtual</span> {p0, v1}, <span class="code-keyword">L</span>com/example/app/MainActivity;<span class="code-keyword">-&gt;</span><span class="code-method">setContentView</span>(I)V
+
+    <span class="code-keyword">return-void</span>
+<span class="code-keyword">.end method</span>
+                </code></pre>
+</div>
+<!-- Quick HUD Overlay (Floating in Editor) -->
+<div class="absolute bottom-6 right-6 glass-panel rounded-xl p-4 w-64 shadow-lg hidden md:block">
+<div class="flex items-center gap-2 mb-3">
+<span class="material-symbols-outlined text-primary-container" data-icon="analytics">analytics</span>
+<span class="font-title-lg text-title-lg text-on-surface text-[16px]">Mod Analysis</span>
+</div>
+<div class="space-y-2 font-code-sm text-code-sm">
+<div class="flex justify-between items-center bg-surface-container-high px-2 py-1.5 rounded border border-outline-variant/30">
+<span class="text-on-surface-variant">Methods</span>
+<span class="text-tertiary-container">2</span>
+</div>
+<div class="flex justify-between items-center bg-surface-container-high px-2 py-1.5 rounded border border-outline-variant/30">
+<span class="text-on-surface-variant">Fields</span>
+<span class="text-tertiary-container">1</span>
+</div>
+<div class="flex justify-between items-center bg-primary-container/10 px-2 py-1.5 rounded border border-primary-container/30">
+<span class="text-primary-container">Diff Lines</span>
+<span class="text-primary-container">+4 / -1</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="md:hidden bg-surface-container dark:bg-surface-container docked full-width bottom-0 rounded-t-xl bg-surface-container/90 backdrop-blur-lg border-t border-white/10 shadow-lg fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 h-20">
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-70 hover:bg-surface-container-highest transition-all rounded-xl px-4 py-1" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1" data-icon="grid_view">grid_view</span>
+<span class="font-label-md text-label-md">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-xl px-4 py-1 Active: scale-90 duration-200" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1" data-icon="layers" style="font-variation-settings: 'FILL' 1;">layers</span>
+<span class="font-label-md text-label-md font-bold">Workspace</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-70 hover:bg-surface-container-highest transition-all rounded-xl px-4 py-1" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1" data-icon="developer_mode">developer_mode</span>
+<span class="font-label-md text-label-md">Tools</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-70 hover:bg-surface-container-highest transition-all rounded-xl px-4 py-1" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1" data-icon="settings">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+</body></html>

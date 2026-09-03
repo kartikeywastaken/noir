@@ -1,9 +1,8 @@
-/// Bottom navigation bar with glow-dot active indicator.
+/// Bottom navigation bar with Electric Lime active pill indicator.
 library;
 
 import 'package:flutter/material.dart';
 import '../theme/noir_colors.dart';
-import '../theme/noir_typography.dart';
 
 class NoirBottomNav extends StatelessWidget {
   const NoirBottomNav({
@@ -16,63 +15,72 @@ class NoirBottomNav extends StatelessWidget {
   final ValueChanged<int> onTap;
 
   static const _items = [
-    _NavItem(Icons.grid_view, 'HOME'),
-    _NavItem(Icons.history, 'HISTORY'),
-    _NavItem(Icons.settings, 'CONFIG'),
+    _NavItem(Icons.grid_view, 'Home'),
+    _NavItem(Icons.layers, 'Workspace'),
+    _NavItem(Icons.developer_mode, 'Tools'),
+    _NavItem(Icons.settings, 'Settings'),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 64 + MediaQuery.of(context).padding.bottom,
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+      height: 72 + MediaQuery.of(context).padding.bottom,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).padding.bottom + 6,
+        top: 6,
+        left: 12,
+        right: 12,
+      ),
       decoration: BoxDecoration(
-        color: NoirColors.surface.withValues(alpha: 0.6),
+        color: NoirColors.surfaceContainer.withValues(alpha: 0.95),
         border: Border(
-          top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
         ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: List.generate(_items.length, (i) {
           final active = i == currentIndex;
+          final item = _items[i];
           return GestureDetector(
             onTap: () => onTap(i),
             behavior: HitTestBehavior.opaque,
-            child: SizedBox(
-              width: 64,
-              height: 64,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: EdgeInsets.symmetric(
+                horizontal: active ? 18 : 12,
+                vertical: 6,
+              ),
+              decoration: BoxDecoration(
+                color: active ? NoirColors.primaryFixed : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: active
+                    ? [
+                        BoxShadow(
+                          color: NoirColors.primaryFixed.withValues(alpha: 0.25),
+                          blurRadius: 12,
+                        ),
+                      ]
+                    : null,
+              ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    _items[i].icon,
-                    color: active
-                        ? NoirColors.primary
-                        : NoirColors.onSurfaceVariant.withValues(alpha: 0.5),
-                    size: 24,
+                    item.icon,
+                    color: active ? NoirColors.onPrimaryFixed : NoirColors.onSurfaceVariant,
+                    size: 22,
                   ),
-                  if (active)
-                    Container(
-                      margin: const EdgeInsets.only(top: 4),
-                      width: 4,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: NoirColors.primary,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: NoirColors.glowStrong,
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    const SizedBox(height: 8),
+                  const SizedBox(height: 2),
                   Text(
-                    _items[i].label,
-                    style: NoirTypography.labelCaps.copyWith(fontSize: 8),
+                    item.label,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 11,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                      color: active ? NoirColors.onPrimaryFixed : NoirColors.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),

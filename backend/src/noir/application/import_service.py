@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
@@ -176,31 +178,37 @@ class ImportService:
             project.status = ProjectStatus.IMPORTING
             self.project_repo.update(project)
 
-            # Preserve a durable, private copy before expensive decoding begins.
-            from noir.application.access_service import AccessService
-            from noir.infrastructure.artifacts import ArtifactStore
+            # Kick off durable S3 backup in background — IO-bound, safe to
+            # overlap with the CPU-bound apktool decode that follows.
+            # The APK is already on local EBS, so S3 failure is non-fatal.
+            import logging as _log
 
-            artifact_store = ArtifactStore(self.config)
-            object_key = artifact_store.store_original(
-                AccessService().project_owner(project.id),
-                project.id,
-                stored_apk,
-                sha256=sha256,
-            )
+            _s3_result: list = []  # [object_key] on success, [None, exc] on failure
+            _s3_done = threading.Event()
 
-            self._emit_event(
-                project.id,
-                job.job_id,
-                WorkflowStage.VALIDATING_INPUT,
-                EventSeverity.INFO,
-                f"Input APK validated: {sha256[:16]}...",
-                sha256=sha256,
-                size=file_size,
-                classification=validation.get("classification", "unknown"),
-                durable_object_key=object_key,
-            )
+            def _s3_upload():
+                from noir.application.access_service import AccessService
+                from noir.infrastructure.artifacts import ArtifactStore
 
-            # Step 3: Decode with APKTool
+                try:
+                    key = ArtifactStore(self.config).store_original(
+                        AccessService().project_owner(project.id),
+                        project.id,
+                        stored_apk,
+                        sha256=sha256,
+                    )
+                    _s3_result.append(key)
+                except Exception as exc:  # noqa: BLE001
+                    _log.getLogger(__name__).warning(
+                        "S3 backup upload failed (non-fatal, APK is safe on EBS): %s", exc
+                    )
+                    _s3_result.extend([None, exc])
+                finally:
+                    _s3_done.set()
+
+            threading.Thread(target=_s3_upload, daemon=True, name="s3-backup").start()
+
+            # Step 3: Decode with APKTool — runs in parallel with S3 upload above.
             job.stage = WorkflowStage.DECODING
             self.job_repo.update(job)
 
@@ -222,6 +230,22 @@ class ImportService:
                     workspace.decoded_dir,
                     framework_dir=framework_dir,
                 )
+
+            # Wait for S3 backup (should be done by now since decode took ~16 s)
+            _s3_done.wait(timeout=60)
+            object_key = _s3_result[0] if _s3_result else None
+
+            self._emit_event(
+                project.id,
+                job.job_id,
+                WorkflowStage.VALIDATING_INPUT,
+                EventSeverity.INFO,
+                f"Input APK validated: {sha256[:16]}...",
+                sha256=sha256,
+                size=file_size,
+                classification=validation.get("classification", "unknown"),
+                durable_object_key=object_key,
+            )
 
             self._emit_event(
                 project.id,

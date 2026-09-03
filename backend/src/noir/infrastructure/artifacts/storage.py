@@ -12,6 +12,18 @@ import re
 from pathlib import Path
 from typing import Any
 
+try:
+    from boto3.s3.transfer import TransferConfig as S3TransferConfig
+
+    _TRANSFER_CFG = S3TransferConfig(
+        multipart_threshold=16 * 1024 * 1024,  # 16 MiB before switching to multipart
+        multipart_chunksize=16 * 1024 * 1024,
+        max_concurrency=4,  # parallel part uploads
+        use_threads=True,
+    )
+except ImportError:  # boto3 not available in local/test environments
+    _TRANSFER_CFG = None  # type: ignore[assignment]
+
 
 class ArtifactStoreError(RuntimeError):
     """Raised when configured durable artifact storage is unavailable."""
@@ -103,6 +115,7 @@ class ArtifactStore:
                         "artifact-type": artifact_type,
                     },
                 },
+                Config=_TRANSFER_CFG,
             )
         except Exception as exc:
             raise ArtifactStoreError(f"S3 upload failed for {artifact_type}: {exc}") from exc
