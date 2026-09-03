@@ -25,11 +25,11 @@ from noir.security.xml import parse
 class AiContextTools:
     """Provides constrained workspace context for AI providers."""
 
-    MAX_FILE_SIZE = 50_000  # bytes; optional planning/discovery reads only
+    MAX_FILE_SIZE = 300_000  # bytes; covers large manifests & Smali files up to 300 KB
     MAX_PATCH_FILE_BYTES = 1_000_000  # Same bounded-text ceiling as the patch engine.
     MAX_FILES = 20
-    MAX_CONTEXT_BYTES = 45_000
-    MAX_INVENTORY_BYTES = 45_000
+    MAX_CONTEXT_BYTES = 300_000
+    MAX_INVENTORY_BYTES = 150_000
     MAX_SEARCH_RESULTS = 50
     MAX_DISASSEMBLY_BYTES = 256
     MAX_BINARY_INSPECTION_BYTES = 20_000
@@ -128,9 +128,20 @@ class AiContextTools:
         return result
 
     def read_file_range(self, relative_path: str, max_chars: int | None = None) -> str:
-        """Read bounded content from a project file."""
+        """Read bounded content from a project file.
+
+        Uses truncate=True so files larger than MAX_FILE_SIZE are gracefully
+        sliced instead of raising WorkspaceError. This ensures large files like
+        AndroidManifest.xml (often 80-120 KB in production apps) are always
+        included in the AI context rather than silently dropped.
+        """
+        from noir.infrastructure.filesystem.workspace import WorkspaceError
+
         limit = min(max_chars or self.MAX_FILE_SIZE, self.MAX_FILE_SIZE)
-        content = self.workspace.read_file(relative_path, max_bytes=limit)
+        try:
+            content = self.workspace.read_file(relative_path, max_bytes=limit, truncate=True)
+        except (FileNotFoundError, OSError, WorkspaceError):
+            raise
         return content[:limit]
 
     def search_text(self, query: str) -> list[dict]:

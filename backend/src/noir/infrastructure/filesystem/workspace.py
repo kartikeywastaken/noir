@@ -276,8 +276,17 @@ class ProjectWorkspace:
                     continue
         return result
 
-    def read_file(self, relative_path: str, max_bytes: int = 1_000_000) -> str:
+    def read_file(
+        self, relative_path: str, max_bytes: int = 1_000_000, truncate: bool = False
+    ) -> str:
         """Read file content from decoded workspace with bounds.
+
+        Args:
+            relative_path: Path relative to the decoded workspace root.
+            max_bytes: Maximum bytes to read.
+            truncate: If True, files exceeding max_bytes are sliced to the limit
+                      rather than raising WorkspaceError. Useful for AI context
+                      loading where partial content is better than no content.
 
         Raises PathSecurityError if path escapes boundary.
         """
@@ -288,7 +297,12 @@ class ProjectWorkspace:
             raise WorkspaceError(f"Not a regular file: {relative_path}")
         size = file_path.stat().st_size
         if size > max_bytes:
-            raise WorkspaceError(f"File too large to read: {size} bytes (max {max_bytes})")
+            if not truncate:
+                raise WorkspaceError(f"File too large to read: {size} bytes (max {max_bytes})")
+            # Graceful truncation: read only up to max_bytes
+            with file_path.open("rb") as fh:
+                raw = fh.read(max_bytes)
+            return raw.decode("utf-8", errors="replace")
         return file_path.read_text(errors="replace")
 
     def search_text(self, query: str, max_results: int = 100, glob: str = "*") -> list[dict]:

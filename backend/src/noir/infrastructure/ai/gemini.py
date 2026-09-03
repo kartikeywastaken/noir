@@ -79,8 +79,14 @@ def _is_structured_output_argument_error(exc: Exception) -> bool:
 
 
 def _requires_textual_schema(model_name: str) -> bool:
-    """Avoid a known rejected schema request and its wasted quota/latency."""
-    return model_name == "gemini-3.6-flash"
+    """Avoid a known rejected schema request and its wasted quota/latency.
+
+    Both gemini-3.6-flash and gemini-2.5-flash reject structured
+    response_json_schema on Google AI Studio's free tier with 400
+    INVALID_ARGUMENT. Routing them directly to the textual-schema path
+    avoids the failure, eliminates the retry, and halves planning latency.
+    """
+    return model_name in {"gemini-3.6-flash", "gemini-2.5-flash"}
 
 
 _SCHEMA_PROMPT_PREFIX = "\n\nREQUIRED JSON SCHEMA:\n"

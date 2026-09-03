@@ -106,7 +106,7 @@ class NoirConfig(BaseSettings):
     ai_retry_limit: int = 2
     ai_response_retry_limit: int = Field(default=1, ge=0, le=2)
     ai_max_output_tokens: int = Field(default=16_384, ge=1, le=65_536)
-    ai_max_request_size: int = 100_000
+    ai_max_request_size: int = 400_000
     ai_max_output_size: int = 50_000
     ai_max_workflow_calls: int = 10
     # Discovery model calls made before the final plan call. One turn is enough

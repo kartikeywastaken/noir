@@ -535,7 +535,7 @@ def build_discovered_context(
 
     Respects MAX_FILES as the final cap on what goes into the planning prompt.
     """
-    from noir.infrastructure.filesystem.workspace import compute_file_hash
+    from noir.infrastructure.filesystem.workspace import WorkspaceError, compute_file_hash
 
     context: dict[str, Any] = {
         "file_snippets": {},
@@ -566,8 +566,11 @@ def build_discovered_context(
         context["file_coverage"]["AndroidManifest.xml"] = "full"
         used += len(manifest_content.encode())
         files_added += 1
-    except (FileNotFoundError, OSError, ValueError):
-        pass
+    except (FileNotFoundError, OSError, ValueError, WorkspaceError):
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "build_discovered_context: AndroidManifest.xml could not be loaded"
+        )
 
     # Add binary inspections from discovery
     for path, inspection in discovery.binary_inspections.items():

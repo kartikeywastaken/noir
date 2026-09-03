@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 try:
     from boto3.s3.transfer import TransferConfig as S3TransferConfig
@@ -59,7 +59,7 @@ class ArtifactStore:
             "config": Config(
                 signature_version="s3v4",
                 retries={"max_attempts": 4, "mode": "standard"},
-                s3={"addressing_style": "virtual", "use_global_endpoint": False},
+                s3=cast(Any, {"addressing_style": "virtual", "use_global_endpoint": False}),
             )
         }
         if self.config.s3_region:
