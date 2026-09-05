@@ -21,6 +21,24 @@ from noir.infrastructure.filesystem.workspace import (
 )
 from noir.security.xml import parse
 
+_LABEL_REQUEST = re.compile(
+    r"\b(label|rename|app[ -]?name|display[ -]?name)\b|name of (?:the )?app",
+    re.IGNORECASE,
+)
+_NON_LABEL_BEHAVIOR = re.compile(
+    r"\b(message|toast|flash|interact|interaction|click|tap|touch|key(?:press)?|"
+    r"permission|network|server|endpoint|request|response|smali|code|logic|behavior|"
+    r"functionality|whenever|every time|on launch|on start|background)\b",
+    re.IGNORECASE,
+)
+
+
+def is_label_only_request(user_request: str) -> bool:
+    """Return true only when a request contains no non-label behavior change."""
+    return bool(_LABEL_REQUEST.search(user_request)) and not bool(
+        _NON_LABEL_BEHAVIOR.search(user_request)
+    )
+
 
 class AiContextTools:
     """Provides constrained workspace context for AI providers."""
@@ -127,7 +145,13 @@ class AiContextTools:
             used += encoded_size
         return result
 
-    def read_file_range(self, relative_path: str, max_chars: int | None = None) -> str:
+    def read_file_range(
+        self,
+        relative_path: str,
+        max_chars: int | None = None,
+        *,
+        start: int = 0,
+    ) -> str:
         """Read bounded content from a project file.
 
         Uses truncate=True so files larger than MAX_FILE_SIZE are gracefully
@@ -137,12 +161,19 @@ class AiContextTools:
         """
         from noir.infrastructure.filesystem.workspace import WorkspaceError
 
+        if start < 0:
+            raise ValueError("start must be non-negative")
         limit = min(max_chars or self.MAX_FILE_SIZE, self.MAX_FILE_SIZE)
+        read_limit = min(start + limit, self.MAX_FILE_SIZE)
         try:
-            content = self.workspace.read_file(relative_path, max_bytes=limit, truncate=True)
+            content = self.workspace.read_file(
+                relative_path,
+                max_bytes=read_limit,
+                truncate=True,
+            )
         except (FileNotFoundError, OSError, WorkspaceError):
             raise
-        return content[:limit]
+        return content[start : start + limit]
 
     def search_text(self, query: str) -> list[dict]:
         """Search for text in project files."""
@@ -670,13 +701,7 @@ class AiContextTools:
             "binary_inspection": {},
         }
 
-        label_task = bool(
-            re.search(
-                r"\b(label|rename|app[ -]?name|display[ -]?name)\b|name of (?:the )?app",
-                user_request,
-                re.IGNORECASE,
-            )
-        )
+        label_task = is_label_only_request(user_request)
         label_paths: list[str] = []
         excerpts: dict[str, str] = {}
         if label_task:
@@ -754,7 +779,10 @@ class AiContextTools:
                     continue
                 coverage = "full"
                 try:
-                    if file_paths is None or path in excerpts:
+                    if path in excerpts:
+                        content = excerpts[path]
+                        coverage = "exact_label_elements_only"
+                    elif file_paths is None:
                         content = self.read_file_range(path)
                     else:
                         # An approved file is required evidence, not a discovery snippet.

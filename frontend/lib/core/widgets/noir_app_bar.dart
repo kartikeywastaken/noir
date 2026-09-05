@@ -64,13 +64,6 @@ class NoirAppBar extends StatelessWidget implements PreferredSizeWidget {
           else if (leading != null)
             leading!
           else ...[
-            Image.asset(
-              'assets/branding/phantom.png',
-              width: 28,
-              height: 28,
-              semanticLabel: 'NOIR Phantom',
-            ),
-            const SizedBox(width: 8),
             const Icon(
               Icons.terminal,
               color: NoirColors.primaryFixed,

@@ -176,8 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
               context.go('/history');
             }
           }
-          if (i == 2) context.go('/history');
-          if (i == 3) context.go('/settings');
+          if (i == 2) context.go('/settings');
         },
       ),
       body: Stack(

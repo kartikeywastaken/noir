@@ -109,14 +109,14 @@ class NoirConfig(BaseSettings):
     ai_max_request_size: int = 400_000
     ai_max_output_size: int = 50_000
     ai_max_workflow_calls: int = 10
-    # Discovery model calls made before the final plan call. One turn is enough
-    # for the common search → read/inspect flow; exact evidence stops it earlier.
-    # Set to 2-3 for complex requests that need multiple rounds of exploration.
-    discovery_max_rounds: int = Field(default=1, ge=1, le=3)
+    # Discovery model calls made before the final plan call. Two turns support
+    # the common search → read/inspect flow; set three for unusually broad work.
+    discovery_max_rounds: int = Field(default=2, ge=1, le=3)
     discovery_enabled: bool = True  # kill switch — falls back to static selection if False
     discovery_provider: Literal["openrouter", "gemini", "local"] = "openrouter"
     discovery_timeout: int = 30  # per-request timeout for discovery provider calls
-    openrouter_discovery_model: str = "google/gemma-3-27b-it:free"
+    openrouter_discovery_model: str = "minimax/minimax-m3:free"
+    openrouter_discovery_fallback_model: str = "z-ai/glm-5.2:free"
     # Maximum wall-clock seconds for any single AI provider call before forced failure.
     # Prevents nested retries from blocking a worker for minutes.
     ai_stall_timeout: int = 90

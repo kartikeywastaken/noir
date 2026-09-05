@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from noir.infrastructure.ai.context import is_label_only_request
+
 if TYPE_CHECKING:
     from noir.domain.config import NoirConfig
     from noir.domain.models import AnalysisResult
@@ -123,7 +125,9 @@ DISCOVERY_TOOL_DECLARATIONS = [
     {
         "name": "read_file_excerpt",
         "description": (
-            "Read up to 50KB of a specific file you've identified as relevant. "
+            "Read a bounded excerpt of a specific file you've identified as relevant. "
+            "The returned text is exactly what counts against the evidence budget. Request "
+            "additional windows with start when the first excerpt does not contain the target. "
             "Use this after search_workspace or list_directory has pointed you at a "
             "specific path."
         ),
@@ -131,6 +135,17 @@ DISCOVERY_TOOL_DECLARATIONS = [
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Relative file path"},
+                "start": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Zero-based character offset; defaults to 0",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 300000,
+                    "description": "Characters to return; defaults to 100000",
+                },
             },
             "required": ["path"],
         },
@@ -159,14 +174,8 @@ _DISCOVERY_TOOL_DECLARATIONS = DISCOVERY_TOOL_DECLARATIONS
 
 
 def is_label_task(user_request: str) -> bool:
-    """Detect label/rename tasks that skip discovery entirely."""
-    return bool(
-        re.search(
-            r"\b(label|rename|app[ -]?name|display[ -]?name)\b|name of (?:the )?app",
-            user_request,
-            re.IGNORECASE,
-        )
-    )
+    """Detect exclusively label/rename tasks that may skip discovery."""
+    return is_label_only_request(user_request)
 
 
 def has_exact_evidence(result: DiscoveryResult, user_request: str) -> bool:
@@ -263,13 +272,29 @@ class DiscoveryToolExecutor:
         if not path:
             return "Error: path is required", "Empty path", 0
 
-        content = self.context_tools.read_file_range(path)
+        try:
+            start = int(args.get("start", 0))
+            max_chars = int(args.get("max_chars", 100_000))
+        except (TypeError, ValueError):
+            return "Error: start and max_chars must be integers", "Invalid excerpt range", 0
+        if start < 0 or not 1 <= max_chars <= self.context_tools.MAX_FILE_SIZE:
+            return "Error: excerpt range is outside allowed bounds", "Invalid excerpt range", 0
+
+        content = self.context_tools.read_file_range(path, max_chars=max_chars, start=start)
         nbytes = len(content.encode())
-        result.seen_files[path] = content
+        # Planning receives the same evidence the discovery model saw. A later,
+        # overlapping window replaces the prior one only when it is larger; distinct
+        # windows are retained with offsets so none of the charged evidence disappears.
+        if path not in result.seen_files or (
+            start == 0 and len(content) >= len(result.seen_files[path])
+        ):
+            result.seen_files[path] = content
+        elif content not in result.seen_files[path]:
+            result.seen_files[path] += f"\n\n[excerpt starting at character {start}]\n{content}"
 
         lines = content.count("\n")
-        summary = f"Read {path} ({nbytes:,} bytes, {lines} lines)"
-        return content[:5000], summary, nbytes  # Truncate tool response for model
+        summary = f"Read {path} from character {start} ({nbytes:,} bytes, {lines} lines)"
+        return content, summary, nbytes
 
     def _exec_inspect_binary(
         self, args: dict[str, Any], result: DiscoveryResult
@@ -283,7 +308,7 @@ class DiscoveryToolExecutor:
         output = json.dumps(inspection, ensure_ascii=False, separators=(",", ":"), default=str)
         nbytes = len(output.encode())
         summary = f"Inspected binary {path} ({nbytes:,} bytes)"
-        return output[:5000], summary, nbytes
+        return output, summary, nbytes
 
 
 # ── Gemini discovery provider ────────────────────────────────────────

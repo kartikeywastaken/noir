@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +16,7 @@ from noir.domain.enums import (
 )
 from noir.domain.models import AuditEvent, JobInfo, ProjectInfo
 from noir.infrastructure.apktool.adapter import ApkToolAdapter, ApkToolError
+from noir.infrastructure.artifacts import ArtifactStore, ArtifactStoreError
 from noir.infrastructure.database.engine import init_db
 from noir.infrastructure.database.repositories import (
     EventRepository,
@@ -178,35 +178,22 @@ class ImportService:
             project.status = ProjectStatus.IMPORTING
             self.project_repo.update(project)
 
-            # Kick off durable S3 backup in background — IO-bound, safe to
-            # overlap with the CPU-bound apktool decode that follows.
-            # The APK is already on local EBS, so S3 failure is non-fatal.
-            import logging as _log
+            # Start durable storage concurrently with APKTool decode. Unlike the
+            # previous daemon-thread implementation, the future is always joined
+            # and failures propagate: a successful import therefore guarantees
+            # that an S3-configured original reached its durable object store.
+            from noir.application.access_service import AccessService
 
-            _s3_result: list = []  # [object_key] on success, [None, exc] on failure
-            _s3_done = threading.Event()
-
-            def _s3_upload():
-                from noir.application.access_service import AccessService
-                from noir.infrastructure.artifacts import ArtifactStore
-
-                try:
-                    key = ArtifactStore(self.config).store_original(
-                        AccessService().project_owner(project.id),
-                        project.id,
-                        stored_apk,
-                        sha256=sha256,
-                    )
-                    _s3_result.append(key)
-                except Exception as exc:  # noqa: BLE001
-                    _log.getLogger(__name__).warning(
-                        "S3 backup upload failed (non-fatal, APK is safe on EBS): %s", exc
-                    )
-                    _s3_result.extend([None, exc])
-                finally:
-                    _s3_done.set()
-
-            threading.Thread(target=_s3_upload, daemon=True, name="s3-backup").start()
+            artifact_store = ArtifactStore(self.config)
+            owner_id = AccessService().project_owner(project.id)
+            executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="artifact-store")
+            artifact_future = executor.submit(
+                artifact_store.store_original,
+                owner_id,
+                project.id,
+                stored_apk,
+                sha256=sha256,
+            )
 
             # Step 3: Decode with APKTool — runs in parallel with S3 upload above.
             job.stage = WorkflowStage.DECODING
@@ -224,16 +211,16 @@ class ImportService:
             from noir.application.jobs import job_runtime
 
             runtime = nullcontext() if not owns_job else job_runtime(job.job_id)
-            with runtime:
-                decode_result = self.apktool.decode(
-                    stored_apk,
-                    workspace.decoded_dir,
-                    framework_dir=framework_dir,
-                )
-
-            # Wait for S3 backup (should be done by now since decode took ~16 s)
-            _s3_done.wait(timeout=60)
-            object_key = _s3_result[0] if _s3_result else None
+            try:
+                with runtime:
+                    decode_result = self.apktool.decode(
+                        stored_apk,
+                        workspace.decoded_dir,
+                        framework_dir=framework_dir,
+                    )
+                object_key = artifact_future.result()
+            finally:
+                executor.shutdown(wait=True, cancel_futures=True)
 
             self._emit_event(
                 project.id,
@@ -319,6 +306,8 @@ class ImportService:
             return self._fail_job(project, job, str(e), "validation_error", owns_job)
         except ApkToolError as e:
             return self._fail_job(project, job, str(e), "decode_error", owns_job)
+        except ArtifactStoreError as e:
+            return self._fail_job(project, job, str(e), "durable_storage_error", owns_job)
         except Exception as e:
             return self._fail_job(project, job, str(e), "internal_error", owns_job)
 

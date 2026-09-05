@@ -54,7 +54,7 @@ def test_required_patch_files_are_not_silently_skipped(ws):
 
 
 def test_required_file_uses_request_budget_not_planning_cap(ws):
-    source = ".class public LExample;\n.super Ljava/lang/Object;\n" + "# detail\n" * 9000
+    source = ".class public LExample;\n.super Ljava/lang/Object;\n" + "# detail\n" * 40_000
     (ws.decoded_dir / "big.smali").write_text(source)
     tools = AiContextTools(ws)
     assert len(source.encode()) > tools.MAX_FILE_SIZE
@@ -72,7 +72,7 @@ def test_required_reads_remain_bounded_by_patch_engine_limit(ws):
 
 
 def test_large_required_file_still_counts_json_escaping_before_network(ws, monkeypatch):
-    (ws.decoded_dir / "escapes.smali").write_text("\\\n" * 40_000)
+    (ws.decoded_dir / "escapes.smali").write_text("\\\n" * 120_000)
     context = AiContextTools(ws).build_context(["escapes.smali"])
     plan = ChangePlan(
         project_id=ws.project_id,

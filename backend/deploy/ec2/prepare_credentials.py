@@ -20,10 +20,16 @@ def main() -> None:
     config = NoirConfig()
     gemini_discovery = config.gemini_key_for("discovery")
     gemini_generation = config.gemini_key_for("generation")
+    openrouter = config.openrouter_api_key.get_secret_value()
     if not gemini_discovery or not gemini_generation:
         raise SystemExit(
             "Gemini credentials are required. Configure GEMINI_API_KEY_1 and "
             "GEMINI_API_KEY_2, or legacy GEMINI_API_KEY."
+        )
+    if config.discovery_provider == "openrouter" and not openrouter:
+        raise SystemExit(
+            "OpenRouter discovery is enabled. Configure NOIR_OPENROUTER_API_KEY "
+            "before preparing deployment credentials."
         )
     directory = Path.home() / ".noir/deployments/ec2-stockholm"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -33,6 +39,7 @@ def main() -> None:
         {
             "gemini-discovery-api-key": gemini_discovery,
             "gemini-generation-api-key": gemini_generation,
+            "openrouter-api-key": openrouter,
             "api-token": token,
             "signing-password": secrets.token_urlsafe(48),
             "settings": {

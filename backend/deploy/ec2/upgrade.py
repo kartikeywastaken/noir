@@ -12,6 +12,53 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.request import urlopen
 
+SECRET_ENVIRONMENT_KEYS = {"NOIR_OPENROUTER_API_KEY"}
+
+
+def _read_environment(path: Path) -> dict[str, str]:
+    return dict(
+        line.split("=", 1)
+        for line in path.read_text().splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+
+
+def _write_environment(path: Path, values: dict[str, str]) -> None:
+    safe_values = {
+        key: value for key, value in values.items() if key not in SECRET_ENVIRONMENT_KEYS
+    }
+    path.write_text("".join(f"{key}={value}\n" for key, value in safe_values.items()))
+    path.chmod(0o600)
+
+
+def _migrate_openrouter_credential(environment: dict[str, str]) -> None:
+    """Move a legacy plaintext OpenRouter key into systemd's encrypted store."""
+    target = Path("/etc/credstore.encrypted/noir-openrouter-api-key")
+    if target.exists():
+        return
+    secret = environment.get("NOIR_OPENROUTER_API_KEY", "").strip()
+    if not secret:
+        raise RuntimeError(
+            "OpenRouter discovery requires /etc/credstore.encrypted/"
+            "noir-openrouter-api-key before this upgrade"
+        )
+    temporary = target.with_suffix(".new")
+    subprocess.run(
+        [
+            "systemd-creds",
+            "encrypt",
+            "--with-key=host",
+            "--name=openrouter-api-key",
+            "-",
+            str(temporary),
+        ],
+        input=secret.encode(),
+        check=True,
+        capture_output=True,
+    )
+    temporary.chmod(0o600)
+    temporary.replace(target)
+
 
 def main() -> None:
     if os.geteuid() != 0:
@@ -28,6 +75,8 @@ def main() -> None:
     backup = Path("/var/backups/noir") / stamp
     backup.mkdir(parents=True, mode=0o700)
     backup.parent.chmod(0o700)
+    current_environment = _read_environment(Path("/etc/noir/backend.env"))
+    _migrate_openrouter_credential(current_environment)
     subprocess.run(["systemctl", "stop", "noir"], check=True)
     try:
         with (
@@ -46,7 +95,7 @@ def main() -> None:
                 ignore=shutil.ignore_patterns("bin", "obj"),
             )
         shutil.copy2("/opt/noir/deployment/service.py", backup / "service.py")
-        shutil.copy2("/etc/noir/backend.env", backup / "backend.env")
+        _write_environment(backup / "backend.env", current_environment)
         shutil.copy2("/etc/systemd/system/noir.service", backup / "noir.service")
         with tarfile.open(source, "r:gz") as archive:
             # Only extract this application; refuse symlinks and path traversal.
@@ -111,23 +160,16 @@ def main() -> None:
         shutil.copy2(
             "/opt/noir/backend/deploy/ec2/noir.service", "/etc/systemd/system/noir.service"
         )
-        current_environment = dict(
-            line.split("=", 1)
-            for line in Path("/etc/noir/backend.env").read_text().splitlines()
-            if line and not line.startswith("#")
-        )
-        desired_environment = dict(
-            line.split("=", 1)
-            for line in Path("/opt/noir/backend/deploy/ec2/backend.env").read_text().splitlines()
-            if line and not line.startswith("#")
+        desired_environment = _read_environment(
+            Path("/opt/noir/backend/deploy/ec2/backend.env")
         )
         for name in (
             "NOIR_AI_PROVIDER",
             "NOIR_AI_MODEL",
             "NOIR_AI_FALLBACK_MODEL",
-            "NOIR_OPENROUTER_API_KEY",
             "NOIR_DISCOVERY_PROVIDER",
             "NOIR_OPENROUTER_DISCOVERY_MODEL",
+            "NOIR_OPENROUTER_DISCOVERY_FALLBACK_MODEL",
             "NOIR_AI_STALL_TIMEOUT",
             "NOIR_DOTNET_TOOL_PATH",
             "NOIR_CIL_TOOL_PATH",
@@ -141,10 +183,7 @@ def main() -> None:
             "NOIR_S3_PRESIGN_EXPIRY",
         ):
             current_environment[name] = desired_environment[name]
-        Path("/etc/noir/backend.env").write_text(
-            "".join(f"{key}={value}\n" for key, value in current_environment.items())
-        )
-        Path("/etc/noir/backend.env").chmod(0o600)
+        _write_environment(Path("/etc/noir/backend.env"), current_environment)
         subprocess.run(
             ["systemd-analyze", "verify", "/etc/systemd/system/noir.service"], check=True
         )

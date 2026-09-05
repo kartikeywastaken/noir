@@ -115,13 +115,16 @@ From either device or laptop, the health endpoint is public and contains no cred
 curl --fail https://noir-16-171-197-228.sslip.io/v1/health
 ```
 
-## Configuration and Gemini key replacement
+## Configuration and AI credential replacement
 
 Non-secret server settings are in `/etc/noir/backend.env` (root-only). The initial
 deployment preserves the laptop's effective Gemini model and context limits.
 The discovery and generation keys are encrypted separately in
 `/etc/credstore.encrypted/noir-gemini-discovery-api-key` and
 `/etc/credstore.encrypted/noir-gemini-generation-api-key`.
+The OpenRouter discovery key is encrypted at
+`/etc/credstore.encrypted/noir-openrouter-api-key`; it must never be placed in
+`backend.env` or committed to Git.
 Runtime credentials are read from
 systemd's private credentials directory. The bearer token's database record is a SHA-256
 hash; an encrypted copy lets this deployment preserve it across restarts.
@@ -150,6 +153,24 @@ if [ -n "$NOIR_NEW_GEMINI_DISCOVERY_KEY" ] && [ -n "$NOIR_NEW_GEMINI_GENERATION_
   sudo systemctl restart noir
 fi
 unset NOIR_NEW_GEMINI_DISCOVERY_KEY NOIR_NEW_GEMINI_GENERATION_KEY
+```
+
+To replace the OpenRouter key, use this in the Ubuntu SSH shell while no AI request is
+active. The prompt does not echo the key or place it in shell history:
+
+```bash
+read -rsp 'New OpenRouter API key: ' NOIR_NEW_OPENROUTER_KEY
+printf '\n'
+if [ -n "$NOIR_NEW_OPENROUTER_KEY" ]; then
+  printf '%s' "$NOIR_NEW_OPENROUTER_KEY" | sudo systemd-creds encrypt \
+    --with-key=host --name=openrouter-api-key - \
+    /etc/credstore.encrypted/noir-openrouter-api-key.new &&
+  sudo chmod 600 /etc/credstore.encrypted/noir-openrouter-api-key.new &&
+  sudo mv /etc/credstore.encrypted/noir-openrouter-api-key.new \
+    /etc/credstore.encrypted/noir-openrouter-api-key &&
+  sudo systemctl restart noir
+fi
+unset NOIR_NEW_OPENROUTER_KEY
 ```
 
 The laptop's original `backend/.env` remains unchanged. Do not rerun

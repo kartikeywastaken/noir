@@ -17,7 +17,6 @@ class NoirBottomNav extends StatelessWidget {
   static const _items = [
     _NavItem(Icons.grid_view, 'Home'),
     _NavItem(Icons.layers, 'Workspace'),
-    _NavItem(Icons.developer_mode, 'Tools'),
     _NavItem(Icons.settings, 'Settings'),
   ];
 

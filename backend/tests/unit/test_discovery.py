@@ -666,6 +666,12 @@ def test_is_label_task_detects_rename():
 
     assert is_label_task("Rename app label to MyApp") is True
     assert is_label_task("change the display name") is True
+    assert (
+        is_label_task(
+            'change the name and flash a message saying "ola it works" whenever I interact'
+        )
+        is False
+    )
     assert is_label_task("give unlimited coins") is False
     assert is_label_task("add network permission") is False
 
@@ -795,8 +801,6 @@ def test_factory_openrouter_fallback_on_missing_key():
 
 def test_stall_timeout_raises_after_deadline():
     """Gemini _call_model should raise when stall timeout is exceeded."""
-    import time
-    from types import SimpleNamespace
 
     from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
 

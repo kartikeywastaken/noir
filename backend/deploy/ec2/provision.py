@@ -23,6 +23,7 @@ def main() -> None:
     for name in (
         "gemini-discovery-api-key",
         "gemini-generation-api-key",
+        "openrouter-api-key",
         "api-token",
         "signing-password",
     ):

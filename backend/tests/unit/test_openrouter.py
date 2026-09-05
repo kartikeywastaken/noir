@@ -1,8 +1,7 @@
 """OpenRouter discovery provider tests. No remote API calls."""
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -17,7 +16,6 @@ from noir.infrastructure.ai.openrouter import (
     _openai_tool_definitions,
 )
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -203,7 +201,7 @@ def test_tool_call_response_reads_file(config, ws):
         ]
     }
 
-    # Second call: model is done (won't be called due to exact evidence)
+    # Second call lets the model assess the exact evidence it just received.
     done_response = {
         "choices": [
             {
@@ -226,9 +224,9 @@ def test_tool_call_response_reads_file(config, ws):
 
     assert "smali/com/game/Score.smali" in result.seen_files
     assert "getScore" in result.seen_files["smali/com/game/Score.smali"]
-    assert result.stop_reason == "exact_evidence_found"
+    assert result.stop_reason == "model_finished"
     assert result.used_static_fallback is False
-    assert result.api_calls == 1  # Stopped after first call found exact evidence
+    assert result.api_calls == 2
 
 
 def test_api_failure_falls_back_to_static(config, ws):
