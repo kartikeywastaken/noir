@@ -38,8 +38,10 @@ Gemini 3.7 can be reconsidered after a successful live probe.
   `/var/lib/noir/data`. Immutable original APKs and verified signed APKs are also
   mirrored to the private `noir-private-artifacts-865675170355-eu-north-1` S3 bucket.
   Downloads use short-lived, owner-authorized presigned URLs; the bucket remains private.
-- Incomplete uploads persist as private, independently acknowledged 256 KiB ranges for
-  24 hours; clients use four concurrent connections and retry only missing ranges.
+- Android clients upload private, checksum-bound 8 MiB multipart ranges directly to
+  S3 with four concurrent connections. EC2 authorizes each range and records resumable
+  progress, but the APK bytes no longer take the phone-to-EC2-to-S3 detour. The existing
+  EC2 proxy upload remains available for local deployments and compatibility fallback.
 - The service restarts on failure and is enabled at boot. No active SSH session is required.
 - Each Apktool JVM is capped at 2 GiB; the API service has a 3.4 GB memory ceiling.
 

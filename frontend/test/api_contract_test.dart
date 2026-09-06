@@ -216,6 +216,8 @@ void main() {
           expect(jsonDecode(request.body), {
             'filename': 'fixture.apk',
             'size': source.length,
+            'sha256': sha256.convert(source).toString(),
+            'upload_mode': 'auto',
           });
           return jsonResponse({
             'upload_id': 'upload',

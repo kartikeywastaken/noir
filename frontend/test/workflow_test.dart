@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -34,10 +35,52 @@ void main() {
       'stage': 'complete',
       'result_data': {'operation': 'import', 'result': <String, Object>{}},
     };
+    final requestedPaths = <String>[];
     final api = NoirApiClient(
       token: 'test',
       client: StreamClient((request) async {
-        if (request.url.path == '/v1/import' && request.method == 'POST') {
+        requestedPaths.add(request.url.path);
+        if (request.url.path == '/v1/uploads' && request.method == 'POST') {
+          await request.finalize().drain<void>();
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'upload_id': 'upload',
+                  'size': 4,
+                  'offset': 0,
+                  'chunk_size': 4,
+                }),
+              ),
+            ),
+            201,
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload' &&
+            request.method == 'PATCH') {
+          expect(request.headers['upload-offset'], '0');
+          expect(await request.finalize().expand((chunk) => chunk).toList(), [
+            1,
+            2,
+            3,
+            4,
+          ]);
+          return http.StreamedResponse(
+            Stream.value(
+              utf8.encode(
+                jsonEncode({
+                  'upload_id': 'upload',
+                  'size': 4,
+                  'offset': 4,
+                  'chunk_size': 4,
+                }),
+              ),
+            ),
+            200,
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload/complete' &&
+            request.method == 'POST') {
           expect(request.url.queryParameters['authorized'], 'true');
           await request.finalize().drain<void>();
           return http.StreamedResponse(
@@ -68,6 +111,7 @@ void main() {
     expect(await copiedApk.exists(), false);
     expect(flow.project?.id, 'project');
     expect(flow.error, isNull);
+    expect(requestedPaths, isNot(contains('/v1/import')));
     flow.dispose();
     api.dispose();
   });
@@ -214,92 +258,221 @@ void main() {
     },
   );
 
-  test(
-    'upload accepts configured parallelism above the former eight-range cap',
-    () async {
-      final source = List<int>.generate(20, (index) => index);
-      final received = <int>{};
-      final progress = <TransferProgress>[];
-      var inFlight = 0;
-      var maximumInFlight = 0;
+  test('resumable upload uses four parallel workers by default', () async {
+    final source = List<int>.generate(20, (index) => index);
+    final received = <int>{};
+    final progress = <TransferProgress>[];
+    var inFlight = 0;
+    var maximumInFlight = 0;
 
-      Map<String, Object> session() {
-        var contiguous = 0;
-        while (received.contains(contiguous)) {
-          contiguous += 2;
-        }
-        return {
-          'upload_id': 'parallel',
-          'size': source.length,
-          'offset': contiguous,
-          'chunk_size': 2,
-          'received_bytes': received.length * 2,
-          'received_offsets': received.toList(),
-        };
+    Map<String, Object> session() {
+      var contiguous = 0;
+      while (received.contains(contiguous)) {
+        contiguous += 2;
       }
+      return {
+        'upload_id': 'parallel',
+        'size': source.length,
+        'offset': contiguous,
+        'chunk_size': 2,
+        'received_bytes': received.length * 2,
+        'received_offsets': received.toList(),
+      };
+    }
 
-      final api = NoirApiClient(
-        token: 'test',
-        retryDelay: (_) async {},
-        uploadParallelism: 10,
-        client: StreamClient((request) async {
-          if (request.url.path == '/v1/uploads' && request.method == 'POST') {
-            await request.finalize().drain<void>();
-            return http.StreamedResponse(
-              Stream.value(utf8.encode(jsonEncode(session()))),
-              201,
-            );
-          }
-          if (request.url.path == '/v1/uploads/parallel' &&
-              request.method == 'PATCH') {
-            final offset = int.parse(request.headers['upload-offset']!);
-            final body = await request.finalize().fold<List<int>>(
-              [],
-              (all, chunk) => all..addAll(chunk),
-            );
-            expect(body, source.sublist(offset, offset + 2));
-            inFlight++;
-            maximumInFlight = inFlight > maximumInFlight
-                ? inFlight
-                : maximumInFlight;
-            await Future<void>.delayed(const Duration(milliseconds: 10));
-            received.add(offset);
-            inFlight--;
-            return http.StreamedResponse(
-              Stream.value(utf8.encode(jsonEncode(session()))),
-              200,
-            );
-          }
-          expect(request.url.path, '/v1/uploads/parallel/complete');
+    final api = NoirApiClient(
+      token: 'test',
+      retryDelay: (_) async {},
+      client: StreamClient((request) async {
+        if (request.url.path == '/v1/uploads' && request.method == 'POST') {
           await request.finalize().drain<void>();
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(session()))),
+            201,
+          );
+        }
+        if (request.url.path == '/v1/uploads/parallel' &&
+            request.method == 'PATCH') {
+          final offset = int.parse(request.headers['upload-offset']!);
+          final body = await request.finalize().fold<List<int>>(
+            [],
+            (all, chunk) => all..addAll(chunk),
+          );
+          expect(body, source.sublist(offset, offset + 2));
+          inFlight++;
+          maximumInFlight = inFlight > maximumInFlight
+              ? inFlight
+              : maximumInFlight;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          received.add(offset);
+          inFlight--;
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(session()))),
+            200,
+          );
+        }
+        expect(request.url.path, '/v1/uploads/parallel/complete');
+        await request.finalize().drain<void>();
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              jsonEncode({'job_id': 'j', 'project_id': 'p', 'state': 'queued'}),
+            ),
+          ),
+          202,
+        );
+      }),
+    );
+
+    await api.importApkResumable(
+      'parallel.apk',
+      source.length,
+      (start, end) => Stream.value(source.sublist(start, end)),
+      idempotencyKey: 'parallel',
+      onProgress: progress.add,
+    );
+    expect(maximumInFlight, 4);
+    expect(received, {0, 2, 4, 6, 8, 10, 12, 14, 16, 18});
+    expect(progress.last.bytes, 20);
+    api.dispose();
+  });
+
+  test('resumable upload sends APK parts directly to private S3', () async {
+    final source = <int>[1, 2, 3, 4, 5, 6];
+    final wholeSha256 = crypto.sha256.convert(source).toString();
+    final partChecksum = base64Encode(crypto.sha256.convert(source).bytes);
+    final progress = <TransferProgress>[];
+    var sawDirectPut = false;
+
+    Map<String, Object> session({bool complete = false}) => {
+      'upload_mode': 's3',
+      'protocol': 's3_multipart_v1',
+      'upload_id': 'upload',
+      'project_id': 'private-project',
+      'size': source.length,
+      'sha256': wholeSha256,
+      'part_size': 5 * 1024 * 1024,
+      'total_parts': 1,
+      'uploaded_bytes': complete ? source.length : 0,
+      'completed_parts': complete
+          ? [
+              {
+                'part_number': 1,
+                'etag': '"0123456789abcdef0123456789abcdef"',
+                'checksum_sha256': partChecksum,
+                'size': source.length,
+              },
+            ]
+          : <Object>[],
+      'state': complete ? 'uploaded' : 'uploading',
+    };
+
+    final api = NoirApiClient(
+      token: 'private-token',
+      retryDelay: (_) async {},
+      client: StreamClient((request) async {
+        if (request.url.path == '/v1/uploads' && request.method == 'POST') {
+          expect(request.headers['authorization'], 'Bearer private-token');
+          final body = await request.finalize().fold<List<int>>(
+            [],
+            (all, chunk) => all..addAll(chunk),
+          );
+          expect(jsonDecode(utf8.decode(body)), {
+            'filename': 'fixture.apk',
+            'size': source.length,
+            'sha256': wholeSha256,
+            'upload_mode': 'auto',
+          });
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(session()))),
+            201,
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload/parts/presign') {
+          expect(request.headers['authorization'], 'Bearer private-token');
+          final body = await request.finalize().fold<List<int>>(
+            [],
+            (all, chunk) => all..addAll(chunk),
+          );
+          expect(jsonDecode(utf8.decode(body)), {
+            'parts': [
+              {'part_number': 1, 'checksum_sha256': partChecksum},
+            ],
+          });
           return http.StreamedResponse(
             Stream.value(
               utf8.encode(
                 jsonEncode({
-                  'job_id': 'j',
-                  'project_id': 'p',
-                  'state': 'queued',
+                  'parts': [
+                    {
+                      'part_number': 1,
+                      'url':
+                          'https://noir-test.s3.ap-south-1.amazonaws.com/noir/input.apk?uploadId=u&partNumber=1&X-Amz-Signature=test',
+                      'headers': {'x-amz-checksum-sha256': partChecksum},
+                    },
+                  ],
                 }),
               ),
             ),
-            202,
+            200,
           );
-        }),
-      );
+        }
+        if (request.url.host == 'noir-test.s3.ap-south-1.amazonaws.com') {
+          sawDirectPut = true;
+          expect(request.method, 'PUT');
+          expect(request.headers.containsKey('authorization'), false);
+          expect(request.headers['x-amz-checksum-sha256'], partChecksum);
+          final body = await request.finalize().fold<List<int>>(
+            [],
+            (all, chunk) => all..addAll(chunk),
+          );
+          expect(body, source);
+          return http.StreamedResponse(
+            const Stream.empty(),
+            200,
+            headers: {'etag': '"0123456789abcdef0123456789abcdef"'},
+          );
+        }
+        if (request.url.path == '/v1/uploads/upload/parts' &&
+            request.method == 'PUT') {
+          expect(request.headers['authorization'], 'Bearer private-token');
+          await request.finalize().drain<void>();
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(session(complete: true)))),
+            200,
+          );
+        }
+        expect(request.url.path, '/v1/uploads/upload/complete');
+        expect(request.url.queryParameters['authorized'], 'true');
+        expect(request.headers['authorization'], 'Bearer private-token');
+        await request.finalize().drain<void>();
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              jsonEncode({
+                'job_id': 'import-job',
+                'project_id': 'private-project',
+                'state': 'queued',
+              }),
+            ),
+          ),
+          202,
+        );
+      }),
+    );
 
-      await api.importApkResumable(
-        'parallel.apk',
-        source.length,
-        (start, end) => Stream.value(source.sublist(start, end)),
-        idempotencyKey: 'parallel',
-        onProgress: progress.add,
-      );
-      expect(maximumInFlight, 10);
-      expect(received, {0, 2, 4, 6, 8, 10, 12, 14, 16, 18});
-      expect(progress.last.bytes, 20);
-      api.dispose();
-    },
-  );
+    final job = await api.importApkResumable(
+      'fixture.apk',
+      source.length,
+      (start, end) => Stream.value(source.sublist(start, end)),
+      idempotencyKey: 'direct-s3',
+      onProgress: progress.add,
+    );
+    expect(sawDirectPut, true);
+    expect(job.projectId, 'private-project');
+    expect(progress.map((value) => value.bytes), [0, source.length]);
+    api.dispose();
+  });
 
   test('download counts chunks and rejects a truncated file', () async {
     for (final total in [4, 8, null]) {

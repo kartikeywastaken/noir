@@ -37,6 +37,10 @@ _UI_REQUEST = re.compile(
     r"\b(ui|screen|button|message|toast|flash|interact(?:ion)?|click|tap|touch|keypress)\b",
     re.IGNORECASE,
 )
+_RESOURCE_TEXT_REQUEST = re.compile(
+    r"\b(label|title|text|string|wording|menu|button|settings|display[ -]?name)\b",
+    re.IGNORECASE,
+)
 
 
 class OpenRouterDiscoveryError(Exception):
@@ -71,6 +75,10 @@ def _build_system_message() -> str:
         "components, then search for concrete callbacks such as onClick/onTouch/onKey, "
         "listener registration, or Compose click lambdas. Do not declare Smali unavailable "
         "until you have searched every decoded smali* tree for those integration points. "
+        "For React Native, use runtime_evidence to distinguish a plain bundle from confirmed "
+        "Hermes bytecode. Never treat a bundle listed under hermes_bytecode as UTF-8 JavaScript "
+        "or claim source-level edits are available; locate a supported Android-side integration "
+        "point or report that exact limitation. "
         "File reads default to 100,000 characters and can return up to 300,000; request a "
         "later start offset when the target lies outside the first excerpt. "
         "A transparent request to contact a user-supplied server is a supported task. For "
@@ -121,6 +129,7 @@ def _build_analysis_summary(analysis: AnalysisResult) -> dict[str, Any]:
     return {
         "package_name": analysis.package_name,
         "runtimes": sorted(analysis.runtimes),
+        "runtime_evidence": analysis.runtime_evidence,
         "application_class": analysis.application_class,
         "manifest_components": [described_component(item) for item in components[:20]],
         "smali_class_count": len(analysis.smali_classes),
@@ -182,6 +191,9 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
         )
         result = DiscoveryResult()
         tool_executor = DiscoveryToolExecutor(context_tools)
+        self._seed_default_string_resources(
+            user_request, budget, result, tool_executor, context_tools
+        )
         self._seed_launcher_evidence(user_request, analysis, budget, result, tool_executor)
 
         try:
@@ -211,6 +223,47 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
 
         result.api_calls = budget.rounds_used
         return result
+
+    @staticmethod
+    def _seed_default_string_resources(
+        user_request: str,
+        budget: DiscoveryBudget,
+        result: DiscoveryResult,
+        tool_executor: DiscoveryToolExecutor,
+        context_tools: AiContextTools,
+    ) -> None:
+        """Preload default Android strings for text-oriented requests.
+
+        This is local evidence collection, so it costs no provider request. It
+        prevents a two-round discovery budget from being spent on
+        ``list res/values`` followed by ``list res`` without ever reading the
+        obvious default string table.
+        """
+        if not _RESOURCE_TEXT_REQUEST.search(user_request):
+            return
+        path = "res/values/strings.xml"
+        try:
+            size = context_tools.workspace.safe_path(path).stat().st_size
+        except (FileNotFoundError, OSError, ValueError):
+            return
+        max_chars = min(size, 100_000)
+        if max_chars <= 0 or budget.bytes_consumed + max_chars > budget.max_total_bytes:
+            return
+        arguments = {"path": path, "start": 0, "max_chars": max_chars}
+        content, tool_summary, nbytes = tool_executor.execute(
+            "read_file_excerpt", arguments, result
+        )
+        if content.startswith("Error:") or not nbytes:
+            return
+        budget.consume_bytes(nbytes)
+        result.transcript.append(
+            ToolCallRecord(
+                tool_name="read_file_excerpt",
+                arguments={**arguments, "source": "default_strings_seed"},
+                bytes_returned=nbytes,
+                result_summary=f"Host-seeded Android string evidence: {tool_summary}",
+            )
+        )
 
     @staticmethod
     def _seed_launcher_evidence(
@@ -270,7 +323,9 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
             "for text the user wants to add. Never search for a new requested literal as though "
             "it should already exist. "
             "When possible, issue search/list and the resulting read/inspect calls together "
-            "in one response. Use binary_candidates directly for Mono, IL2CPP, or native work."
+            "in one response. Use binary_candidates directly for Mono, IL2CPP, or native work. "
+            "A path under runtime_evidence.hermes_bytecode is compiled Hermes bytecode, not "
+            "editable JavaScript."
         )
         if result.seen_files:
             seeded = "\n\n".join(

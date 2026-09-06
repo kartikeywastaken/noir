@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -64,9 +65,9 @@ def _begin_session(service, user_id="user1", key=None, filename="test.apk", size
 
 
 class TestConfigDefaults:
-    def test_chunk_size_raised_to_8mib(self, tmp_path):
+    def test_default_chunk_size_is_2mib(self, tmp_path):
         config = _make_config(tmp_path)
-        assert config.upload_chunk_size == 8 * 1024 * 1024
+        assert config.upload_chunk_size == 2 * 1024 * 1024
 
     def test_max_chunk_size_raised_to_16mib(self, tmp_path):
         config = _make_config(tmp_path)
@@ -830,3 +831,176 @@ class TestValidation:
 
         with pytest.raises(UploadError, match="finalized"):
             service.append(upload_id=upload_id, user_id="user1", offset=0, chunk=b"abcd")
+
+
+# ── Direct-to-S3 multipart protocol ─────────────────────────────────
+
+
+class _FakeDirectStore:
+    enabled = True
+
+    def __init__(self):
+        self.begun = []
+        self.presigned = []
+        self.completed = []
+        self.verified = []
+
+    def begin_multipart_original(self, user_id, project_id, *, sha256, size):
+        self.begun.append((user_id, project_id, sha256, size))
+        return f"noir/users/{user_id}/projects/{project_id}/original/input.apk", "s3-id"
+
+    def presign_multipart_part(
+        self, *, key, upload_id, part_number, checksum_sha256
+    ):
+        self.presigned.append((key, upload_id, part_number, checksum_sha256))
+        return f"https://s3.example/part/{part_number}"
+
+    def complete_multipart_original(self, *, key, upload_id, parts):
+        self.completed.append((key, upload_id, parts))
+
+    def verify_original_object(self, *, key, expected_size, expected_sha256):
+        self.verified.append((key, expected_size, expected_sha256))
+
+    def abort_multipart_upload(self, *, key, upload_id):
+        pass
+
+
+def _part_checksum(seed: int) -> str:
+    return base64.b64encode(bytes([seed]) * 32).decode()
+
+
+def test_s3_multipart_session_is_idempotent_owner_scoped_and_checksum_bound(tmp_path):
+    from noir.application.upload_service import S3MultipartUploadService, UploadError
+
+    config = _make_config(
+        tmp_path,
+        artifact_store="s3",
+        s3_bucket="private-bucket",
+        s3_upload_part_size=5 * 1024 * 1024,
+    )
+    store = _FakeDirectStore()
+    service = S3MultipartUploadService(config, MagicMock(), store=store)
+    size = (5 * 1024 * 1024) + 17
+    digest = "a" * 64
+
+    session = service.begin(
+        user_id="alice",
+        idempotency_key="one-upload",
+        filename="sample.apk",
+        size=size,
+        sha256=digest,
+    )
+    duplicate = service.begin(
+        user_id="alice",
+        idempotency_key="one-upload",
+        filename="sample.apk",
+        size=size,
+        sha256=digest,
+    )
+
+    assert duplicate.upload_id == session.upload_id
+    assert len(store.begun) == 1
+    assert session.public()["upload_mode"] == "s3"
+    assert session.total_parts == 2
+    with pytest.raises(UploadError) as hidden:
+        service.status(upload_id=session.upload_id, user_id="bob")
+    assert hidden.value.status_code == 404
+
+    checksums = [_part_checksum(1), _part_checksum(2)]
+    authorized = service.presign_parts(
+        upload_id=session.upload_id,
+        user_id="alice",
+        parts=[
+            {"part_number": 1, "checksum_sha256": checksums[0]},
+            {"part_number": 2, "checksum_sha256": checksums[1]},
+        ],
+    )
+    assert [part["part_number"] for part in authorized] == [1, 2]
+    assert authorized[0]["headers"]["x-amz-checksum-sha256"] == checksums[0]
+    with pytest.raises(UploadError, match="changed"):
+        service.presign_parts(
+            upload_id=session.upload_id,
+            user_id="alice",
+            parts=[{"part_number": 1, "checksum_sha256": _part_checksum(3)}],
+        )
+
+    resumed = service.report_parts(
+        upload_id=session.upload_id,
+        user_id="alice",
+        parts=[
+            {
+                "part_number": 2,
+                "etag": "2" * 32,
+                "checksum_sha256": checksums[1],
+                "size": 17,
+            }
+        ],
+    )
+    assert resumed.public()["uploaded_bytes"] == 17
+    assert resumed.public()["completed_parts"][0]["part_number"] == 2
+
+
+def test_s3_multipart_completion_queues_s3_import_without_proxy_path(tmp_path):
+    from noir.application.upload_service import S3MultipartUploadService
+    from noir.domain.enums import WorkflowStage
+    from noir.domain.models import JobInfo
+    from noir.infrastructure.database.engine import init_db
+
+    config = _make_config(
+        tmp_path,
+        artifact_store="s3",
+        s3_bucket="private-bucket",
+        s3_upload_part_size=5 * 1024 * 1024,
+    )
+    config.ensure_directories()
+    init_db(config.effective_database_url)
+    store = _FakeDirectStore()
+    queue = MagicMock()
+    service = S3MultipartUploadService(config, queue, store=store)
+    digest = "b" * 64
+    session = service.begin(
+        user_id="alice",
+        idempotency_key="complete-upload",
+        filename="complete.apk",
+        size=23,
+        sha256=digest,
+    )
+    checksum = _part_checksum(4)
+    service.presign_parts(
+        upload_id=session.upload_id,
+        user_id="alice",
+        parts=[{"part_number": 1, "checksum_sha256": checksum}],
+    )
+    service.report_parts(
+        upload_id=session.upload_id,
+        user_id="alice",
+        parts=[
+            {
+                "part_number": 1,
+                "etag": "4" * 32,
+                "checksum_sha256": checksum,
+                "size": 23,
+            }
+        ],
+    )
+    queue.submit.return_value = JobInfo(
+        project_id=session.project_id,
+        stage=WorkflowStage.VALIDATING_INPUT,
+    )
+
+    job = service.complete(upload_id=session.upload_id, user_id="alice")
+
+    assert job == queue.submit.return_value
+    assert len(store.completed) == 1
+    operation, project_id, payload, idempotency = queue.submit.call_args.args
+    assert operation == "import"
+    assert project_id == session.project_id
+    assert payload == {
+        "s3_object_key": session.object_key,
+        "sha256": digest,
+        "size": 23,
+        "original_filename": "complete.apk",
+        "durable_original": True,
+    }
+    assert "path" not in payload
+    assert idempotency == "alice:complete-upload"

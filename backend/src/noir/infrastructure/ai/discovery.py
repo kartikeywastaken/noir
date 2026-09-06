@@ -412,6 +412,10 @@ class EvidenceDiscovery:
             "files and code relevant to the user's modification request. Use the provided "
             "tools to search, list, and read files. Focus on finding evidence: specific files, "
             "classes, methods, or values that are directly relevant to the request. "
+            "For React Native, use runtime_evidence to distinguish a plain bundle from confirmed "
+            "Hermes bytecode. Never treat a bundle listed under hermes_bytecode as UTF-8 "
+            "JavaScript or claim source-level edits are available; locate a supported "
+            "Android-side integration point or report that exact limitation. "
             "A transparent request to contact a user-supplied server is a supported task. For "
             "that task, locate an exact lifecycle or user-action integration point, relevant "
             "network code, and the manifest permission evidence; do not add or infer endpoints. "
@@ -422,6 +426,7 @@ class EvidenceDiscovery:
         analysis_summary = {
             "package_name": self.analysis.package_name,
             "runtimes": sorted(self.analysis.runtimes),
+            "runtime_evidence": self.analysis.runtime_evidence,
             "smali_class_count": len(self.analysis.smali_classes),
             "native_abis": self.analysis.native_abis,
             "managed_assemblies": self.analysis.managed_assemblies[:10],
@@ -441,7 +446,9 @@ class EvidenceDiscovery:
             f"APP ANALYSIS SUMMARY:\n{json.dumps(analysis_summary, indent=2)}\n\n"
             "Find the smallest set of exact files or binaries relevant to this request. "
             "When possible, issue search/list and the resulting read/inspect calls together "
-            "in one response. Use binary_candidates directly for Mono, IL2CPP, or native work."
+            "in one response. Use binary_candidates directly for Mono, IL2CPP, or native work. "
+            "A path under runtime_evidence.hermes_bytecode is compiled Hermes bytecode, not "
+            "editable JavaScript."
         )
 
         contents = [types.Content(role="user", parts=[types.Part.from_text(text=initial_prompt)])]

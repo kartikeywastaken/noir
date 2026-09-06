@@ -162,8 +162,19 @@ class PatchService:
         if patch.workspace_revision != project.workspace_revision:
             raise PlanServiceError("Patch was generated against a stale revision")
         allowed = {(change.relative_path, change.operation) for change in plan.file_changes}
-        if any((op.relative_path, op.operation) not in allowed for op in patch.operations):
-            raise PlanServiceError("Patch operations exceed the approved plan")
+        mismatched = [
+            op for op in patch.operations if (op.relative_path, op.operation) not in allowed
+        ]
+        if mismatched:
+            allowed_by_path: dict[str, list[str]] = {}
+            for path, operation in allowed:
+                allowed_by_path.setdefault(path, []).append(operation.value)
+            details = "; ".join(
+                f"{op.relative_path}: got {op.operation.value}, approved "
+                f"{','.join(sorted(allowed_by_path.get(op.relative_path, []))) or 'none'}"
+                for op in mismatched
+            )
+            raise PlanServiceError(f"Patch operations exceed the approved plan ({details})")
         # Verify plan is approved
         plan_approval = self.approval_repo.find_valid(
             patch.project_id,

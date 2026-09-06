@@ -1,5 +1,6 @@
 """Isolation contracts: no cloud accounts, keys, or user APKs are used here."""
 
+import base64
 import hashlib
 import json
 import os
@@ -431,6 +432,93 @@ def test_resumable_upload_is_owner_scoped_offset_checked_and_idempotent(isolated
     payload = JobRepository().get(job["job_id"]).result_data["payload"]
     assert payload["size"] == 6
     assert payload["sha256"] == hashlib.sha256(b"abcdef").hexdigest()
+
+
+def test_auto_upload_uses_private_s3_multipart_and_legacy_remains_available(isolated):
+    app, config, users = isolated
+    alice, alice_id, *_ = users[0]
+    bob = users[1][0]
+
+    class FakeStore:
+        enabled = True
+
+        def __init__(self):
+            self.completions = []
+
+        def begin_multipart_original(self, user_id, project_id, *, sha256, size):
+            key = f"noir/users/{user_id}/projects/{project_id}/original/input.apk"
+            return key, "remote-upload-id"
+
+        def presign_multipart_part(
+            self, *, key, upload_id, part_number, checksum_sha256
+        ):
+            return f"https://s3.example/{upload_id}/{part_number}"
+
+        def complete_multipart_original(self, *, key, upload_id, parts):
+            self.completions.append((key, upload_id, parts))
+
+        def verify_original_object(self, *, key, expected_size, expected_sha256):
+            return None
+
+        def abort_multipart_upload(self, *, key, upload_id):
+            return None
+
+    fake = FakeStore()
+    config.artifact_store = "s3"
+    app.state.s3_uploads.store = fake
+    digest = hashlib.sha256(b"direct upload fixture").hexdigest()
+    started = alice.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "direct-s3-fixture"},
+        json={
+            "filename": "direct.apk",
+            "size": 21,
+            "sha256": digest,
+            "upload_mode": "auto",
+        },
+    )
+    assert started.status_code == 201, started.text
+    upload = started.json()
+    assert upload["upload_mode"] == "s3"
+    assert bob.get(f"/v1/uploads/{upload['upload_id']}").status_code == 404
+
+    checksum = base64.b64encode(hashlib.sha256(b"direct upload fixture").digest()).decode()
+    presigned = alice.post(
+        f"/v1/uploads/{upload['upload_id']}/parts/presign",
+        json={"parts": [{"part_number": 1, "checksum_sha256": checksum}]},
+    )
+    assert presigned.status_code == 200, presigned.text
+    assert presigned.json()["parts"][0]["headers"] == {
+        "x-amz-checksum-sha256": checksum
+    }
+    completed = alice.post(
+        f"/v1/uploads/{upload['upload_id']}/complete?authorized=true",
+        json={
+            "parts": [
+                {
+                    "part_number": 1,
+                    "etag": "a" * 32,
+                    "checksum_sha256": checksum,
+                    "size": 21,
+                }
+            ]
+        },
+    )
+    assert completed.status_code == 202, completed.text
+    assert AccessService().owns_project(alice_id, completed.json()["project_id"])
+    payload = JobRepository().get(completed.json()["job_id"]).result_data["payload"]
+    assert payload["s3_object_key"] == (
+        f"noir/users/{alice_id}/projects/{upload['project_id']}/original/input.apk"
+    )
+    assert "path" not in payload
+
+    legacy = alice.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "legacy-proxy-fixture"},
+        json={"filename": "legacy.apk", "size": 3, "upload_mode": "proxy"},
+    )
+    assert legacy.status_code == 201
+    assert legacy.json()["upload_mode"] == "proxy"
 
 
 def test_parallel_upload_ranges_leave_event_loop_for_blocking_disk_io(isolated, monkeypatch):

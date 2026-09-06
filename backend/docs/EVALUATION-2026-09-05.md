@@ -1,6 +1,110 @@
-# NOIR four-APK production evaluation — 2026-09-05
+# NOIR seven-APK production evaluation — 2026-09-05
 
-## Executive result
+## Follow-up remediation and expanded evaluation
+
+The two deterministic-engine defects found by the initial run have been fixed and deployed:
+
+- Patch response schemas now bind each exact approved path to only its approved operation type.
+  The strict host-side `(path, operation)` approval check remains in place and now reports the
+  mismatched pair if a provider ever violates the schema.
+- `xml_resource_update`, `xml_resource_add`, and `xml_resource_remove` now mutate one named XML
+  resource element inside the existing `<resources>` document. They no longer replace or delete
+  the whole resource file. Manifest operations can also use exact pre-change attributes to select
+  one repeated element such as an `intent-filter`.
+
+Production reruns then completed successfully:
+
+| APK | AI prepare | Finish/build/sign | S3 download | Result |
+|---|---:|---:|---:|---|
+| Markor 2.16.1 | 43.78 s | 27.88 s | 31.08 s | **Passed** |
+| Acode 1.13.3 | 25.70 s | 38.97 s | 88.51 s | **Passed** |
+
+The Acode rerun also caught the XML-resource whole-file replacement defect before rebuild. The bad
+patch was undone, the orphaned backup file was removed, and the corrected rerun changed only the
+targeted `app_name` resource and HTML title. The signed output verified successfully.
+
+Three additional official open-source APKs were then imported through the public resumable-upload
+API and durably stored in S3:
+
+1. [NewPipe v0.29.1](https://github.com/TeamNewPipe/NewPipe/releases/tag/v0.29.1)
+2. [Shattered Pixel Dungeon v3.3.8](https://github.com/00-Evan/shattered-pixel-dungeon/releases/tag/v3.3.8)
+3. [LocalSend v1.18.2](https://github.com/localsend/localsend/releases/tag/v1.18.2)
+
+| APK | Runtime | Requested change | Upload | AI prepare | Finish | Download | Result |
+|---|---|---|---:|---:|---:|---:|---|
+| NewPipe | Dalvik + native | App label plus exact Settings title | 141.71 s | 46.97 s | 34.07 s | 8.48 s | **Passed** after discovery fix |
+| Shattered Pixel Dungeon | Dalvik + native | Toast in launcher `onCreate` | 222.88 s | 43.94 s | 13.99 s | 46.30 s | **Passed** |
+| LocalSend ARM64 | Flutter + Dalvik + native | Android label; conditional in-app text | 326.45 s | 89.54 s | 14.33 s | interrupted | **Backend passed**; AOT edit correctly unsupported |
+
+- NewPipe: project `adb594d303f84048`, plan `888cf01216524841`, patch
+  `049f5b1a3f4f48b8`, build `ce0e78e2a8964a7e`.
+- Shattered Pixel Dungeon: project `653417db11804e49`, plan `1b8fc580c5344ded`, patch
+  `282c7d5b695d4b1b`, build `5aadfe3390784e31`.
+- LocalSend: project `c4cc3063276743c4`, plan `4e188cdf68404e04`, patch
+  `9526ca7d53fa4d72`, build `8042e5e6fb6c4988`.
+
+NewPipe initially changed only the launcher label because discovery listed resource directories but
+never read `res/values/strings.xml`. NOIR now host-seeds the default Android string table for
+text/title/menu/settings requests. This costs zero provider calls. After reverting the first test
+patch and rerunning from the pristine revision, Gemini produced two exact `replace_block`
+operations for `app_name` and `settings`; rebuild, signing, v2/v3 verification, S3 storage, and
+download all succeeded.
+
+Shattered Pixel Dungeon produced one exact `smali_insert_at_anchor` operation against
+`AndroidLauncher.onCreate(Landroid/os/Bundle;)V`. It inserted the test Toast after the existing
+`Activity.onCreate` call and completed validation, rebuild, signing, verification, S3 storage, and
+download.
+
+LocalSend exposed and verified a runtime-classification defect. Detection of `libflutter.so` or
+`assets/flutter_assets` now adds `flutter`, making it the primary runtime while retaining the
+additive `dalvik` and `native` capabilities. NOIR changed the Android manifest label and correctly
+reported the requested in-app tab text as unsupported because this release stores Dart UI strings
+in the ARM64 AOT binary rather than an editable localization asset. The signed 46,787,622-byte APK
+verified successfully and is present in S3. A full download to the laptop was interrupted after
+the route slowed substantially; a one-byte range request independently confirmed the complete S3
+object length. A server-side `aapt2 dump badging` independently reports application label
+`NOIR Send`; `apksigner` reports valid v2/v3 signatures. The signed APK SHA-256 is
+`ad4099647af2165594e8e5603575fdf9eb85d49fab626bc53f1f17a6b2d7d4b6`.
+
+The first attempt for each new APK stopped at planning because EC2 had accidentally been
+provisioned with the same Gemini key in both encrypted slots and that account's daily quota was
+exhausted. A fresh key was validated against `gemini-3.6-flash`, installed into the encrypted
+generation slot, and all three existing projects resumed without re-uploading.
+
+The expanded run also confirms that four concurrent resumable upload ranges are accepted and
+durably recorded out of order. Transfer time is still dominated by the India-to-Stockholm route;
+no NOIR size or request-rate limit fired. The complete local suite passes with 293 tests passing
+and 4 skipped.
+
+## Final Compose regression run and artifact cleanup
+
+[Read You](https://github.com/Ashinch/ReadYou), a Jetpack Compose application, was run through the
+production workflow after the Android string-table discovery fix. The request changed the app
+label from `Read You` to `NOIR Reader` and the default-English Settings title from `Settings` to
+`Settings — NOIR TEST`. Gemini generated two exact edits in `res/values/strings.xml`; no unrelated
+resource or Smali edit was made.
+
+| APK | AI prepare | Finish/build/sign | S3 download | Total after server-local import | Result |
+|---|---:|---:|---:|---:|---|
+| Read You | 43.436 s | 34.632 s | 42.397 s | 129.754 s | **Passed** |
+
+- Project `772d1d400ccb4bd1`, plan `8d9f8154d5954cd0`, patch `a1791310495447ba`,
+  build `eeebe02f63264827`.
+- Signed APK size: 11,795,811 bytes.
+- Signed APK SHA-256:
+  `7f0c854f7bfb0c09f06867a5b16eee7e5670299df6e3a19e1d05880e17170abb`.
+- Independent `apksigner` verification reported valid v2 and v3 signatures. Independent Android
+  resource inspection confirmed both requested values in the rebuilt artifact.
+
+After the evaluation, all 26 project prefixes were intentionally removed from S3. AWS reported
+44 objects (969.1 MB) deleted with zero failures, and the project prefix was verified empty. All
+remaining project workspaces, project database rows, and stale upload sessions were then removed
+from EC2. Its root filesystem changed from 2.4 GB free (87% used) to 11 GB free (43% used), and
+the live NOIR data directory was reduced to 242 MB. A compressed pre-cleanup database backup
+remains at
+`/var/lib/noir/backups/noir-pre-eval-cleanup-20260905T1810Z.db.gz`.
+
+## Initial four-APK result (before remediation)
 
 Four fresh, source-backed APKs were evaluated against the deployed EC2 backend using the
 same three-step prepare/approve/finish workflow used by the Flutter client. The matrix covered
@@ -323,4 +427,3 @@ It cannot yet reliably claim:
    do not infer native offsets from WireGuard.
 5. Install the successfully signed WireGuard evaluation APK on a disposable test device/emulator
    and verify the Toast plus unchanged tunnel behavior before claiming runtime success.
-

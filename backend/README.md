@@ -250,7 +250,7 @@ rather than silently replayed. AI and signing HTTP requests are synchronous.
 
 The Flutter client uses the resumable API (`POST /v1/uploads`, range-checked raw
 `PATCH /v1/uploads/{id}` chunks, and `POST /v1/uploads/{id}/complete`). Up to four
-256 KiB ranges may arrive out of order; every range is fsynced before its offset is
+2 MiB ranges may arrive out of order; every range is fsynced before its offset is
 acknowledged. Sessions are private to the authenticated workspace, expire after 24
 hours, and finalization is idempotent. The single multipart `/v1/import` route remains
 available for compatible CLI clients.

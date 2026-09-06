@@ -19,8 +19,11 @@ Performance optimizations (vs. the original sequential implementation):
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -30,6 +33,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from noir.application.access_service import AccessService
+from noir.infrastructure.artifacts import ArtifactStore, ArtifactStoreError
 from noir.infrastructure.database.repositories import JobRepository
 
 
@@ -73,6 +77,7 @@ class UploadSession:
 
     def public(self) -> dict:
         return {
+            "upload_mode": "proxy",
             "upload_id": self.upload_id,
             "filename": self.filename,
             "size": self.size,
@@ -568,4 +573,443 @@ class ResumableUploadService:
             session.job_id = job.job_id
             session.updated_at = time.time()
             self._save(session)  # full snapshot + journal compaction
+            return job
+
+
+@dataclass
+class S3MultipartUploadSession:
+    """Durable server-side control record for a client-to-S3 upload."""
+
+    upload_id: str
+    user_id: str
+    idempotency_key: str
+    project_id: str
+    filename: str
+    size: int
+    sha256: str
+    object_key: str
+    s3_upload_id: str
+    part_size: int
+    total_parts: int
+    created_at: float
+    updated_at: float
+    state: str = "uploading"
+    job_id: str | None = None
+    part_checksums: dict[str, str] = field(default_factory=dict)
+    completed_parts: dict[str, dict[str, int | str]] = field(default_factory=dict)
+
+    def public(self) -> dict:
+        return {
+            "upload_mode": "s3",
+            "protocol": "s3_multipart_v1",
+            "upload_id": self.upload_id,
+            "project_id": self.project_id,
+            "filename": self.filename,
+            "size": self.size,
+            "sha256": self.sha256,
+            "part_size": self.part_size,
+            "total_parts": self.total_parts,
+            "state": self.state,
+            "job_id": self.job_id,
+            "completed_parts": [
+                {
+                    "part_number": int(number),
+                    **details,
+                }
+                for number, details in sorted(
+                    self.completed_parts.items(), key=lambda item: int(item[0])
+                )
+            ],
+            "uploaded_bytes": sum(
+                int(details["size"]) for details in self.completed_parts.values()
+            ),
+        }
+
+
+class S3MultipartUploadService:
+    """Coordinate direct, private S3 multipart uploads without proxying APK bytes."""
+
+    def __init__(self, config, queue, *, store: ArtifactStore | None = None):
+        self.config = config
+        self.queue = queue
+        self.store = store or ArtifactStore(config)
+        self.root = Path(config.data_dir) / "uploads" / "s3-sessions"
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.part_size = int(config.s3_upload_part_size)
+        if self.part_size < 5 * 1024 * 1024:
+            raise ValueError("s3_upload_part_size must be at least 5 MiB")
+
+    def _metadata_path(self, upload_id: str) -> Path:
+        if re.fullmatch(r"[a-f0-9]{32}", upload_id) is None:
+            raise UploadError("Upload not found", 404)
+        return self.root / f"{upload_id}.json"
+
+    def _idempotency_path(self, user_id: str, idempotency_key: str) -> Path:
+        lookup = hashlib.sha256(f"{user_id}:{idempotency_key}".encode()).hexdigest()[:32]
+        return self.root / f"idem-{lookup}.json"
+
+    def _save(self, session: S3MultipartUploadSession) -> None:
+        metadata = self._metadata_path(session.upload_id)
+        temporary = metadata.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(asdict(session), separators=(",", ":")))
+        temporary.chmod(0o600)
+        os.replace(temporary, metadata)
+
+    def _load(self, upload_id: str, user_id: str) -> S3MultipartUploadSession:
+        try:
+            session = S3MultipartUploadSession(
+                **json.loads(self._metadata_path(upload_id).read_text())
+            )
+        except (FileNotFoundError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise UploadError("Upload not found", 404) from exc
+        if session.user_id != user_id or session.upload_id != upload_id:
+            raise UploadError("Upload not found", 404)
+        return session
+
+    def _write_idempotency_index(self, path: Path, upload_id: str) -> None:
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps({"upload_id": upload_id}, separators=(",", ":")))
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+
+    def _cleanup_expired(self) -> None:
+        cutoff = time.time() - self.config.upload_session_ttl
+        for metadata in self.root.glob("[a-f0-9]*.json"):
+            try:
+                raw = json.loads(metadata.read_text())
+                session = S3MultipartUploadSession(**raw)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if session.updated_at >= cutoff:
+                continue
+            with _upload_lock(f"s3-{session.upload_id}"):
+                if session.state == "uploading" and not session.job_id:
+                    try:
+                        self.store.abort_multipart_upload(
+                            key=session.object_key,
+                            upload_id=session.s3_upload_id,
+                        )
+                    except ArtifactStoreError:
+                        # The S3 lifecycle rule is the final cleanup backstop.
+                        continue
+                metadata.unlink(missing_ok=True)
+                self._idempotency_path(
+                    session.user_id, session.idempotency_key
+                ).unlink(missing_ok=True)
+
+    @staticmethod
+    def _valid_part_checksum(value: str) -> bool:
+        try:
+            return len(base64.b64decode(value, validate=True)) == 32
+        except (binascii.Error, ValueError):
+            return False
+
+    @staticmethod
+    def _normalize_etag(value: str) -> str:
+        value = value.strip()
+        if not re.fullmatch(r'"?[A-Fa-f0-9]{32}(?:-[0-9]+)?"?', value):
+            raise UploadError("Invalid S3 part ETag")
+        return value if value.startswith('"') else f'"{value}"'
+
+    @staticmethod
+    def _safe_filename(filename: str) -> str:
+        return ResumableUploadService._safe_filename(filename)
+
+    def begin(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        filename: str,
+        size: int,
+        sha256: str,
+    ) -> S3MultipartUploadSession:
+        if not self.store.enabled:
+            raise UploadError("Direct S3 upload is unavailable", 503)
+        if not idempotency_key or len(idempotency_key) > 256:
+            raise UploadError("A valid Idempotency-Key is required")
+        if size <= 0:
+            raise UploadError("APK size must be positive")
+        if size > self.config.max_upload_size:
+            raise UploadError("APK exceeds upload limit", 413)
+        sha256 = sha256.strip().lower()
+        if re.fullmatch(r"[a-f0-9]{64}", sha256) is None:
+            raise UploadError("A valid APK SHA-256 is required")
+        filename = self._safe_filename(filename)
+        total_parts = math.ceil(size / self.part_size)
+        if total_parts > 10_000:
+            raise UploadError("APK requires too many S3 multipart parts", 413)
+        self._cleanup_expired()
+
+        # Serialize only callers sharing this user-scoped idempotency key. This
+        # prevents concurrent retries from creating orphaned multipart uploads.
+        idempotency_lock = hashlib.sha256(
+            f"{user_id}:{idempotency_key}".encode()
+        ).hexdigest()
+        with _upload_lock(f"s3-idem-{idempotency_lock}"):
+            return self._begin_locked(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                filename=filename,
+                size=size,
+                sha256=sha256,
+                total_parts=total_parts,
+            )
+
+    def _begin_locked(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        filename: str,
+        size: int,
+        sha256: str,
+        total_parts: int,
+    ) -> S3MultipartUploadSession:
+        idem_path = self._idempotency_path(user_id, idempotency_key)
+        if idem_path.exists():
+            try:
+                existing_id = str(json.loads(idem_path.read_text())["upload_id"])
+                with _upload_lock(f"s3-{existing_id}"):
+                    existing = self._load(existing_id, user_id)
+                if (
+                    existing.filename != filename
+                    or existing.size != size
+                    or existing.sha256 != sha256
+                ):
+                    raise UploadError("Idempotency key has different upload metadata", 409)
+                return existing
+            except UploadError as exc:
+                if exc.status_code != 404:
+                    raise
+                idem_path.unlink(missing_ok=True)
+            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+                idem_path.unlink(missing_ok=True)
+
+        upload_id = uuid4().hex
+        project_id = uuid4().hex[:16]
+        try:
+            object_key, s3_upload_id = self.store.begin_multipart_original(
+                user_id,
+                project_id,
+                sha256=sha256,
+                size=size,
+            )
+        except ArtifactStoreError as exc:
+            raise UploadError(str(exc), 502) from exc
+        now = time.time()
+        session = S3MultipartUploadSession(
+            upload_id=upload_id,
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            project_id=project_id,
+            filename=filename,
+            size=size,
+            sha256=sha256,
+            object_key=object_key,
+            s3_upload_id=s3_upload_id,
+            part_size=self.part_size,
+            total_parts=total_parts,
+            created_at=now,
+            updated_at=now,
+        )
+        with _upload_lock(f"s3-{upload_id}"):
+            self._save(session)
+            self._write_idempotency_index(idem_path, upload_id)
+        return session
+
+    def status(self, *, upload_id: str, user_id: str) -> S3MultipartUploadSession:
+        with _upload_lock(f"s3-{upload_id}"):
+            return self._load(upload_id, user_id)
+
+    def presign_parts(
+        self,
+        *,
+        upload_id: str,
+        user_id: str,
+        parts: list[dict[str, int | str]],
+    ) -> list[dict]:
+        if not parts or len(parts) > 100:
+            raise UploadError("Request between 1 and 100 upload parts")
+        numbers = [int(part["part_number"]) for part in parts]
+        if len(set(numbers)) != len(numbers):
+            raise UploadError("Duplicate upload part number")
+        with _upload_lock(f"s3-{upload_id}"):
+            session = self._load(upload_id, user_id)
+            if session.state != "uploading" or session.job_id:
+                raise UploadError("Upload is already finalized", 409)
+            for part in parts:
+                number = int(part["part_number"])
+                checksum = str(part["checksum_sha256"])
+                if number < 1 or number > session.total_parts:
+                    raise UploadError("Upload part number is out of range")
+                if not self._valid_part_checksum(checksum):
+                    raise UploadError("Invalid upload part SHA-256")
+                known = session.part_checksums.get(str(number))
+                if known is not None and known != checksum:
+                    raise UploadError("Upload part checksum changed", 409)
+                session.part_checksums[str(number)] = checksum
+            session.updated_at = time.time()
+            self._save(session)
+
+            authorized = []
+            for part in parts:
+                number = int(part["part_number"])
+                checksum = str(part["checksum_sha256"])
+                try:
+                    url = self.store.presign_multipart_part(
+                        key=session.object_key,
+                        upload_id=session.s3_upload_id,
+                        part_number=number,
+                        checksum_sha256=checksum,
+                    )
+                except ArtifactStoreError as exc:
+                    raise UploadError(str(exc), 502) from exc
+                authorized.append(
+                    {
+                        "part_number": number,
+                        "url": url,
+                        "headers": {"x-amz-checksum-sha256": checksum},
+                        "expires_in": self.config.s3_presign_expiry,
+                    }
+                )
+            return authorized
+
+    def report_parts(
+        self,
+        *,
+        upload_id: str,
+        user_id: str,
+        parts: list[dict[str, int | str]],
+    ) -> S3MultipartUploadSession:
+        if not parts or len(parts) > 100:
+            raise UploadError("Report between 1 and 100 completed parts")
+        numbers = [int(part["part_number"]) for part in parts]
+        if len(set(numbers)) != len(numbers):
+            raise UploadError("Duplicate completed part number")
+        with _upload_lock(f"s3-{upload_id}"):
+            session = self._load(upload_id, user_id)
+            if session.state != "uploading" or session.job_id:
+                raise UploadError("Upload is already finalized", 409)
+            for part in parts:
+                number = int(part["part_number"])
+                checksum = str(part["checksum_sha256"])
+                if number < 1 or number > session.total_parts:
+                    raise UploadError("Upload part number is out of range")
+                if session.part_checksums.get(str(number)) != checksum:
+                    raise UploadError("Completed part checksum was not authorized", 409)
+                expected_size = min(
+                    session.part_size,
+                    session.size - ((number - 1) * session.part_size),
+                )
+                size = int(part["size"])
+                if size != expected_size:
+                    raise UploadError(
+                        f"Upload part {number} size mismatch; expected {expected_size}", 409
+                    )
+                details: dict[str, int | str] = {
+                    "etag": self._normalize_etag(str(part["etag"])),
+                    "checksum_sha256": checksum,
+                    "size": size,
+                }
+                previous = session.completed_parts.get(str(number))
+                if previous is not None and previous != details:
+                    raise UploadError("Completed upload part changed", 409)
+                session.completed_parts[str(number)] = details
+            session.updated_at = time.time()
+            self._save(session)
+            return session
+
+    def complete(self, *, upload_id: str, user_id: str):
+        with _upload_lock(f"s3-{upload_id}"):
+            session = self._load(upload_id, user_id)
+            scoped_key = f"{user_id}:{session.idempotency_key}"
+            if session.job_id:
+                job = JobRepository().get(session.job_id)
+                if job:
+                    return job
+            existing = JobRepository().find_by_idempotency(scoped_key, user_id=user_id)
+            if existing:
+                session.job_id = existing.job_id
+                session.state = "queued"
+                session.updated_at = time.time()
+                self._save(session)
+                return existing
+
+            if session.state == "uploading":
+                expected_numbers = {str(number) for number in range(1, session.total_parts + 1)}
+                if set(session.completed_parts) != expected_numbers:
+                    raise UploadError(
+                        f"Upload is incomplete; expected {session.total_parts} completed parts",
+                        409,
+                    )
+                s3_parts = [
+                    {
+                        "PartNumber": number,
+                        "ETag": str(session.completed_parts[str(number)]["etag"]),
+                        "ChecksumSHA256": str(
+                            session.completed_parts[str(number)]["checksum_sha256"]
+                        ),
+                    }
+                    for number in range(1, session.total_parts + 1)
+                ]
+                try:
+                    self.store.complete_multipart_original(
+                        key=session.object_key,
+                        upload_id=session.s3_upload_id,
+                        parts=s3_parts,
+                    )
+                except ArtifactStoreError as exc:
+                    # Completion is not transactional with our local metadata. If
+                    # S3 committed before the response was lost, HEAD proves the
+                    # immutable object exists and the retry may continue safely.
+                    try:
+                        self.store.verify_original_object(
+                            key=session.object_key,
+                            expected_size=session.size,
+                            expected_sha256=session.sha256,
+                        )
+                    except ArtifactStoreError:
+                        raise UploadError(str(exc), 502) from exc
+                session.state = "object_complete"
+                session.updated_at = time.time()
+                self._save(session)
+
+            try:
+                self.store.verify_original_object(
+                    key=session.object_key,
+                    expected_size=session.size,
+                    expected_sha256=session.sha256,
+                )
+            except ArtifactStoreError as exc:
+                raise UploadError(str(exc), 409) from exc
+
+            access = AccessService()
+            if not access.owns_project(user_id, session.project_id):
+                try:
+                    access.claim_project(user_id, session.project_id)
+                except Exception as exc:
+                    raise UploadError(
+                        "Unable to reserve the private project workspace", 409
+                    ) from exc
+            payload = {
+                "s3_object_key": session.object_key,
+                "sha256": session.sha256,
+                "size": session.size,
+                "original_filename": session.filename,
+                "durable_original": True,
+            }
+            try:
+                job = self.queue.submit(
+                    "import",
+                    session.project_id,
+                    payload,
+                    scoped_key,
+                )
+            except ValueError as exc:
+                raise UploadError(str(exc), 409) from exc
+            session.job_id = job.job_id
+            session.state = "queued"
+            session.updated_at = time.time()
+            self._save(session)
             return job

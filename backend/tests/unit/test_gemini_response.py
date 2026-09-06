@@ -211,13 +211,57 @@ def test_cil_patch_schema_requires_complete_method_operation():
         ],
     )
 
-    required = _patch_response_schema(plan)["properties"]["operations"]["items"]["required"]
+    item_schema = _patch_response_schema(plan)["properties"]["operations"]["items"]
+    required = item_schema["required"]
 
     assert "assembly_name" in required
     assert "type_full_name" in required
     assert "method_signature" in required
     assert "new_il_source" in required
     assert "expected_method_il_hash" in required
+
+
+def test_patch_schema_binds_each_operation_to_its_approved_path():
+    from noir.domain.enums import PatchOperationType
+    from noir.domain.models import ChangePlan, PlanFileChange
+    from noir.infrastructure.ai.gemini import _patch_response_schema
+
+    plan = ChangePlan(
+        project_id="pair-binding",
+        workspace_revision=0,
+        user_request="change manifest label and web title",
+        file_changes=[
+            PlanFileChange(
+                relative_path="AndroidManifest.xml",
+                operation=PatchOperationType.MANIFEST_UPDATE,
+            ),
+            PlanFileChange(
+                relative_path="assets/www/index.html",
+                operation=PatchOperationType.REPLACE_BLOCK,
+            ),
+        ],
+    )
+
+    variants = _patch_response_schema(plan)["properties"]["operations"]["items"]["oneOf"]
+    bindings = {
+        (
+            variant["properties"]["relative_path"]["enum"][0],
+            variant["properties"]["operation"]["enum"][0],
+        )
+        for variant in variants
+    }
+
+    assert bindings == {
+        ("AndroidManifest.xml", "manifest_update"),
+        ("assets/www/index.html", "replace_block"),
+    }
+    assert all(
+        not (
+            variant["properties"]["relative_path"]["enum"] == ["AndroidManifest.xml"]
+            and variant["properties"]["operation"]["enum"] == ["replace_block"]
+        )
+        for variant in variants
+    )
 
 
 def test_cil_parser_normalizes_exact_metadata_assembly_stem():
@@ -323,6 +367,49 @@ def test_unsupported_plan_can_return_zero_file_changes(monkeypatch, provider):
 
     assert plan.file_changes == []
     assert plan.unsupported_aspects
+
+
+def test_plan_prompt_marks_confirmed_hermes_bundle_as_non_text(monkeypatch, provider):
+    from noir.domain.models import AnalysisResult
+
+    captured = {}
+
+    def respond(prompt, system, *, response_schema):
+        captured["prompt"] = prompt
+        captured["system"] = system
+        captured["schema"] = response_schema
+        return json.dumps(
+            {
+                "intended_outcome": "The requested JavaScript behavior is unsupported",
+                "file_changes": [],
+                "unsupported_aspects": ["The app bundle is compiled Hermes bytecode"],
+            }
+        )
+
+    monkeypatch.setattr(provider, "_call_model", respond)
+    analysis = AnalysisResult(
+        project_id="hermes-app",
+        runtimes={"dalvik", "native", "react_native", "hermes"},
+        runtime="hermes",
+        runtime_evidence={
+            "react_native": ["assets/index.android.bundle"],
+            "hermes_bytecode": ["assets/index.android.bundle"],
+        },
+    )
+
+    provider.generate_plan(
+        "Change JavaScript behavior",
+        analysis,
+        {
+            "files": ["AndroidManifest.xml", "assets/index.android.bundle"],
+            "file_snippets": {"AndroidManifest.xml": "<manifest />"},
+        },
+        project_id=analysis.project_id,
+    )
+
+    assert '"hermes_bytecode"' in captured["prompt"]
+    assert "assets/index.android.bundle" in captured["prompt"]
+    assert "not JavaScript text" in captured["prompt"]
 
 
 def test_empty_plan_without_unsupported_reason_is_rejected(monkeypatch, provider):
@@ -437,7 +524,7 @@ def test_manifest_update_still_requires_attributes(provider):
 
 
 def test_repeatable_manifest_element_requires_unique_name(provider):
-    with pytest.raises(GeminiProviderError, match="select exactly one"):
+    with pytest.raises(GeminiProviderError, match="select one manifest element"):
         provider._parse_patch_operation(
             {
                 "relative_path": "AndroidManifest.xml",
@@ -447,6 +534,36 @@ def test_repeatable_manifest_element_requires_unique_name(provider):
             },
             0,
         )
+
+
+def test_manifest_intent_filter_accepts_exact_prechange_selector(provider):
+    operation = provider._parse_patch_operation(
+        {
+            "relative_path": "AndroidManifest.xml",
+            "operation": "manifest_update",
+            "xml_element": "intent-filter",
+            "xml_match_attributes": {"android:label": "@string/launcher_name"},
+            "xml_attributes": {"android:label": "NOIR Code Lab"},
+        },
+        0,
+    )
+
+    assert operation.xml_match_attributes == {"android:label": "@string/launcher_name"}
+    assert operation.xml_attributes == {"android:label": "NOIR Code Lab"}
+
+
+def test_empty_manifest_selector_does_not_change_legacy_patch_serialization():
+    from noir.domain.models import PatchOperation
+
+    operation = PatchOperation(
+        relative_path="AndroidManifest.xml",
+        operation="manifest_update",
+        xml_element="application",
+        xml_attributes={"android:label": "NOIR"},
+    )
+
+    assert "xml_match_attributes" not in operation.model_dump()
+    assert "xml_match_attributes" not in operation.model_dump_json()
 
 
 def test_null_replacement_is_not_coerced_to_deletion(provider):
@@ -710,10 +827,20 @@ def test_large_manifest_patch_retry_keeps_only_complete_operations(monkeypatch, 
     )
     schema = calls[0]["config"].response_json_schema
     item = schema["properties"]["operations"]["items"]
-    assert item["properties"]["relative_path"]["enum"] == paths
-    assert item["properties"]["operation"]["enum"] == ["replace_block"]
-    assert "match_content" in item["required"] and "new_content" in item["required"]
-    assert "expected_preimage_hash" not in item["properties"]
+    assert {
+        (
+            variant["properties"]["relative_path"]["enum"][0],
+            variant["properties"]["operation"]["enum"][0],
+        )
+        for variant in item["oneOf"]
+    } == {(path, "replace_block") for path in paths}
+    assert all(
+        "match_content" in variant["required"] and "new_content" in variant["required"]
+        for variant in item["oneOf"]
+    )
+    assert all(
+        "expected_preimage_hash" not in variant["properties"] for variant in item["oneOf"]
+    )
     assert "shortest exact match_content" in calls[0]["contents"]
     assert len(complete.encode()) < 4000
     assert len(patch.operations) == 8

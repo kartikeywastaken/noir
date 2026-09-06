@@ -279,6 +279,68 @@ def test_manifest_preview_and_undo_are_real_xml_changes(workspace):
     assert path.read_text() == original
 
 
+def test_manifest_update_selects_one_unnamed_nested_element_by_preimage(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "AndroidManifest.xml"
+    original = (
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+        "<application><activity>"
+        '<intent-filter android:label="@string/launcher_name" />'
+        '<intent-filter android:label="@string/share_name" />'
+        "</activity></application></manifest>"
+    )
+    path.write_text(original)
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="AndroidManifest.xml",
+            operation=PatchOperationType.MANIFEST_UPDATE,
+            xml_element="intent-filter",
+            xml_match_attributes={"android:label": "@string/launcher_name"},
+            xml_attributes={"android:label": "NOIR Code Lab"},
+        ),
+    )
+
+    engine = PatchEngine(ws)
+    assert not engine.validate_patch(patch)
+    engine.apply_patch(patch)
+    changed = path.read_text()
+    assert 'android:label="NOIR Code Lab"' in changed
+    assert 'android:label="@string/share_name"' in changed
+
+
+def test_xml_resource_update_replaces_only_one_named_element(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "res/values/strings.xml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
+        '    <string name="app_name">Acode</string>\n'
+        '    <string name="keep_me">Untouched</string>\n'
+        "</resources>\n"
+    )
+    path.write_text(original)
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="res/values/strings.xml",
+            operation=PatchOperationType.XML_RESOURCE_UPDATE,
+            new_content='<string name="app_name">NOIR Code Lab</string>',
+        ),
+    )
+
+    engine = PatchEngine(ws)
+    assert not engine.validate_patch(patch)
+    preview = engine.generate_diff(patch)[0]["preview"]
+    assert "NOIR Code Lab" in preview
+    assert '-    <string name="keep_me"' not in preview
+    assert '+    <string name="keep_me"' not in preview
+    engine.apply_patch(patch)
+    changed = path.read_text()
+    assert '<string name="app_name">NOIR Code Lab</string>' in changed
+    assert '<string name="keep_me">Untouched</string>' in changed
+
+
 def test_smali_exact_method_replace_and_insert(workspace):
     _, ws = workspace
     path = ws.decoded_dir / "A.smali"
@@ -507,6 +569,58 @@ def test_queue_passes_one_canonical_job_to_import(workspace, monkeypatch, tmp_pa
     queue.execute(job)
     assert seen == [job.job_id]
     assert [item.job_id for item in JobRepository().list_by_project(ws.project_id)] == [job.job_id]
+
+
+def test_queue_streams_direct_s3_import_once_then_removes_scratch(workspace, monkeypatch):
+    from noir.application.access_service import AccessService
+    from noir.application.import_service import ImportService
+    from noir.application.jobs import TaskQueue
+    from noir.infrastructure.artifacts import ArtifactStore
+
+    cfg, ws = workspace
+    assert AccessService().owns_project("local", ws.project_id)
+    payload_bytes = b"downloaded-once-from-s3"
+    digest = hashlib.sha256(payload_bytes).hexdigest()
+    downloads = []
+    imports = []
+
+    def fake_download(
+        _store, *, key, destination, expected_size, expected_sha256
+    ):
+        downloads.append((key, destination, expected_size, expected_sha256))
+        destination.write_bytes(payload_bytes)
+        return digest, len(payload_bytes)
+
+    def fake_import(_service, path, **kwargs):
+        imports.append((path, kwargs))
+        assert path.read_bytes() == payload_bytes
+        return {"project_id": ws.project_id}
+
+    monkeypatch.setattr(ArtifactStore, "download_verified", fake_download)
+    monkeypatch.setattr(ImportService, "import_apk", fake_import)
+    queue = TaskQueue(cfg)
+    object_key = f"noir/users/local/projects/{ws.project_id}/original/input.apk"
+    job = queue.submit(
+        "import",
+        ws.project_id,
+        {
+            "s3_object_key": object_key,
+            "sha256": digest,
+            "size": len(payload_bytes),
+            "original_filename": "direct.apk",
+            "durable_original": True,
+        },
+    )
+
+    queue.execute(job)
+
+    assert len(downloads) == 1
+    assert downloads[0][0] == object_key
+    assert len(imports) == 1
+    imported_path, kwargs = imports[0]
+    assert kwargs["durable_object_key"] == object_key
+    assert kwargs["move_input"] is True
+    assert not imported_path.exists()
 
 
 def test_build_uses_decoded_workspace_and_cleans_generated_files(workspace, monkeypatch):

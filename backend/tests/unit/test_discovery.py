@@ -91,8 +91,8 @@ def test_hybrid_web_detection_cordova(ws):
     assert "dalvik" in result.runtimes  # doesn't disturb dalvik
 
 
-def test_hybrid_web_detection_react_native(ws):
-    """assets/index.android.bundle correctly adds 'hybrid_web' to runtimes."""
+def test_react_native_bundle_is_not_mislabeled_as_hybrid_web(ws):
+    """A Metro JavaScript bundle identifies React Native, not a WebView wrapper."""
     from noir.analysis.analyzer import AnalysisService
 
     assets_dir = ws.decoded_dir / "assets"
@@ -108,7 +108,65 @@ def test_hybrid_web_detection_react_native(ws):
     service = AnalysisService(ws.config)
     result = service.analyze(ws.project_id, ws, persist=False)
 
-    assert "hybrid_web" in result.runtimes
+    assert "react_native" in result.runtimes
+    assert "hybrid_web" not in result.runtimes
+    assert result.runtime_evidence["react_native"] == ["assets/index.android.bundle"]
+    assert result.primary_runtime == "react_native"
+
+
+def test_hermes_bytecode_and_react_native_libraries_are_detected_additively(ws):
+    """Hermes HBC and RN native markers retain all applicable runtime capabilities."""
+    from noir.analysis.analyzer import AnalysisService
+
+    assets_dir = ws.decoded_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    hermes_magic = (0x1F1903C103BC1FC6).to_bytes(8, byteorder="little")
+    (assets_dir / "index.android.bundle").write_bytes(hermes_magic + b"\x00" * 64)
+
+    lib_dir = ws.decoded_dir / "lib" / "arm64-v8a"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "libreactnative.so").write_bytes(b"\x7fELF" + b"\x00" * 100)
+    (lib_dir / "libhermes.so").write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    smali_dir = ws.decoded_dir / "smali" / "com" / "example"
+    smali_dir.mkdir(parents=True)
+    (smali_dir / "Main.smali").write_text(
+        ".class public Lcom/example/Main;\n.super Ljava/lang/Object;\n"
+    )
+
+    result = AnalysisService(ws.config).analyze(ws.project_id, ws, persist=False)
+
+    assert {"dalvik", "native", "react_native", "hermes"} <= result.runtimes
+    assert "hybrid_web" not in result.runtimes
+    assert result.primary_runtime == "hermes"
+    assert result.runtime_evidence["hermes_bytecode"] == ["assets/index.android.bundle"]
+    assert "assets/index.android.bundle" in result.runtime_evidence["hermes"]
+    assert "lib/arm64-v8a/libhermes.so" in result.runtime_evidence["hermes"]
+    assert "lib/arm64-v8a/libreactnative.so" in result.runtime_evidence["react_native"]
+
+
+def test_flutter_detection_uses_runtime_library_and_assets(ws):
+    """A Flutter package is classified separately from a generic JNI app."""
+    from noir.analysis.analyzer import AnalysisService
+
+    flutter_assets = ws.decoded_dir / "assets" / "flutter_assets"
+    flutter_assets.mkdir(parents=True)
+    (flutter_assets / "AssetManifest.bin").write_bytes(b"flutter-assets")
+
+    lib_dir = ws.decoded_dir / "lib" / "arm64-v8a"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "libflutter.so").write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    smali_dir = ws.decoded_dir / "smali" / "com" / "example"
+    smali_dir.mkdir(parents=True)
+    (smali_dir / "Main.smali").write_text(
+        ".class public Lcom/example/Main;\n.super Ljava/lang/Object;\n"
+    )
+
+    result = AnalysisService(ws.config).analyze(ws.project_id, ws, persist=False)
+
+    assert {"dalvik", "native", "flutter"} <= result.runtimes
+    assert result.primary_runtime == "flutter"
 
 
 def test_ad_sdk_webview_reference_does_not_make_app_hybrid(ws):
@@ -142,6 +200,12 @@ def test_primary_runtime_property():
 
     result3 = AnalysisResult(project_id="test", runtimes={"dalvik"})
     assert result3.primary_runtime == "dalvik"
+
+    result_rn = AnalysisResult(
+        project_id="react-native",
+        runtimes={"dalvik", "native", "react_native", "hermes"},
+    )
+    assert result_rn.primary_runtime == "hermes"
 
     # Legacy data with empty runtimes set falls back to runtime field
     result4 = AnalysisResult(project_id="test", runtime="mono")
@@ -462,7 +526,14 @@ def test_discovery_stops_after_one_api_call_when_exact_file_is_read(ws):
     client.models.generate_content.return_value = response
     provider = MagicMock(model_name="gemini-test")
     provider._get_client.return_value = client
-    analysis = _make_analysis(ws, runtimes={"dalvik"})
+    analysis = _make_analysis(
+        ws,
+        runtimes={"dalvik", "native", "react_native", "hermes"},
+        runtime_evidence={
+            "react_native": ["assets/index.android.bundle"],
+            "hermes_bytecode": ["assets/index.android.bundle"],
+        },
+    )
 
     result = EvidenceDiscovery(
         provider, AiContextTools(ws, analysis), ws.config, analysis
@@ -472,6 +543,10 @@ def test_discovery_stops_after_one_api_call_when_exact_file_is_read(ws):
     assert result.stop_reason == "exact_evidence_found"
     assert result.used_static_fallback is False
     client.models.generate_content.assert_called_once()
+    request = client.models.generate_content.call_args.kwargs
+    initial_prompt = request["contents"][0].parts[0].text
+    assert '"hermes_bytecode"' in initial_prompt
+    assert "compiled Hermes bytecode" in initial_prompt
 
 
 def test_discovery_never_exceeds_two_api_calls_and_caches_duplicate_tools(ws):

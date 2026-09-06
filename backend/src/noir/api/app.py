@@ -11,7 +11,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,6 +90,26 @@ class ImportRequest(BaseModel):
 class UploadCreateRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     size: int = Field(gt=0)
+    sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    upload_mode: Literal["auto", "s3", "proxy"] = "auto"
+
+
+class S3UploadPartAuthorization(BaseModel):
+    part_number: int = Field(ge=1, le=10_000)
+    checksum_sha256: str = Field(min_length=44, max_length=44)
+
+
+class S3UploadPartCompletion(S3UploadPartAuthorization):
+    etag: str = Field(min_length=1, max_length=128)
+    size: int = Field(gt=0)
+
+
+class S3UploadPartAuthorizationRequest(BaseModel):
+    parts: list[S3UploadPartAuthorization] = Field(min_length=1, max_length=100)
+
+
+class S3UploadPartCompletionRequest(BaseModel):
+    parts: list[S3UploadPartCompletion] = Field(default_factory=list, max_length=100)
 
 
 class InviteRedeemRequest(BaseModel):
@@ -186,10 +206,12 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     app.state.config = cfg
     app.state.queue = queue
 
-    from noir.application.upload_service import ResumableUploadService
+    from noir.application.upload_service import ResumableUploadService, S3MultipartUploadService
 
     uploads = ResumableUploadService(cfg, queue)
+    s3_uploads = S3MultipartUploadService(cfg, queue)
     app.state.uploads = uploads
+    app.state.s3_uploads = s3_uploads
 
     def get_cfg() -> NoirConfig:
         return cfg
@@ -309,6 +331,19 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     ):
         try:
+            if req.upload_mode != "proxy" and cfg.artifact_store == "s3":
+                if req.sha256:
+                    return s3_uploads.begin(
+                        user_id=principal.user_id,
+                        idempotency_key=idempotency_key or "",
+                        filename=req.filename,
+                        size=req.size,
+                        sha256=req.sha256,
+                    ).public()
+                if req.upload_mode == "s3":
+                    raise HTTPException(400, "Direct S3 upload requires the APK SHA-256")
+            elif req.upload_mode == "s3":
+                raise HTTPException(503, "Direct S3 upload is unavailable")
             return uploads.begin(
                 user_id=principal.user_id,
                 idempotency_key=idempotency_key or "",
@@ -320,8 +355,56 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
 
     @app.get("/v1/uploads/{upload_id}", dependencies=[Depends(_verify_token)])
     def upload_status(upload_id: str, principal: Principal):
+        from noir.application.upload_service import UploadError
+
         try:
+            try:
+                return s3_uploads.status(
+                    upload_id=upload_id, user_id=principal.user_id
+                ).public()
+            except UploadError as exc:
+                if exc.status_code != 404:
+                    raise
             return uploads.status(upload_id=upload_id, user_id=principal.user_id).public()
+        except Exception as exc:
+            upload_failure(exc)
+
+    @app.post(
+        "/v1/uploads/{upload_id}/parts/presign",
+        dependencies=[Depends(_verify_token)],
+    )
+    def presign_upload_parts(
+        upload_id: str,
+        req: S3UploadPartAuthorizationRequest,
+        principal: Principal,
+    ):
+        try:
+            parts = s3_uploads.presign_parts(
+                upload_id=upload_id,
+                user_id=principal.user_id,
+                parts=[part.model_dump() for part in req.parts],
+            )
+            return {"upload_id": upload_id, "parts": parts}
+        except Exception as exc:
+            upload_failure(exc)
+
+    @app.put(
+        "/v1/uploads/{upload_id}/parts",
+        dependencies=[Depends(_verify_token)],
+    )
+    def report_upload_parts(
+        upload_id: str,
+        req: S3UploadPartCompletionRequest,
+        principal: Principal,
+    ):
+        if not req.parts:
+            raise HTTPException(400, "At least one completed part is required")
+        try:
+            return s3_uploads.report_parts(
+                upload_id=upload_id,
+                user_id=principal.user_id,
+                parts=[part.model_dump() for part in req.parts],
+            ).public()
         except Exception as exc:
             upload_failure(exc)
 
@@ -332,6 +415,15 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
         principal: Principal,
         upload_offset: int = Header(..., alias="Upload-Offset", ge=0),
     ):
+        from noir.application.upload_service import UploadError
+
+        try:
+            s3_uploads.status(upload_id=upload_id, user_id=principal.user_id)
+        except UploadError as exc:
+            if exc.status_code != 404:
+                upload_failure(exc)
+        else:
+            raise HTTPException(409, "This upload sends parts directly to S3")
         content_length = request.headers.get("content-length")
         if not content_length:
             raise HTTPException(411, "Content-Length is required for upload chunks")
@@ -364,11 +456,29 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     def complete_upload(
         upload_id: str,
         principal: Principal,
+        req: S3UploadPartCompletionRequest | None = None,
         authorized: bool = Query(False),
     ):
+        from noir.application.upload_service import UploadError
+
         if not authorized:
             raise HTTPException(400, "Authorization required")
         try:
+            try:
+                s3_uploads.status(upload_id=upload_id, user_id=principal.user_id)
+            except UploadError as exc:
+                if exc.status_code != 404:
+                    raise
+            else:
+                if req and req.parts:
+                    s3_uploads.report_parts(
+                        upload_id=upload_id,
+                        user_id=principal.user_id,
+                        parts=[part.model_dump() for part in req.parts],
+                    )
+                return s3_uploads.complete(
+                    upload_id=upload_id, user_id=principal.user_id
+                ).model_dump(mode="json")
             return uploads.complete(upload_id=upload_id, user_id=principal.user_id).model_dump(
                 mode="json"
             )

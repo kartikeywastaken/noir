@@ -164,7 +164,7 @@ class NoirConfig(BaseSettings):
     max_compression_ratio: float = 100.0
     compression_ratio_min_expanded_size: int = 64 * 1024 * 1024  # 64 MiB
     max_upload_size: int = 500 * 1024 * 1024  # 500 MB
-    upload_chunk_size: int = 8 * 1024 * 1024  # 8 MiB, acknowledged independently
+    upload_chunk_size: int = 2 * 1024 * 1024  # 2 MiB, acknowledged independently
     max_upload_chunk_size: int = 16 * 1024 * 1024  # hard server-side request cap
     upload_session_ttl: int = 24 * 60 * 60
     upload_fsync_interval_ms: int = 75  # max hold time for group-commit window
@@ -178,6 +178,13 @@ class NoirConfig(BaseSettings):
     s3_region: str = ""
     s3_prefix: str = "noir"
     s3_presign_expiry: int = Field(default=900, ge=60, le=3600)
+    # S3 requires every multipart part except the last to be at least 5 MiB.
+    # Eight MiB balances mobile retry cost with request overhead.
+    s3_upload_part_size: int = Field(
+        default=8 * 1024 * 1024,
+        ge=5 * 1024 * 1024,
+        le=64 * 1024 * 1024,
+    )
 
     @field_validator("android_sdk_dir", mode="before")
     @classmethod

@@ -6,6 +6,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from noir.domain.enums import EventSeverity, JobState, WorkflowStage
 from noir.domain.models import AuditEvent, JobInfo
@@ -168,6 +169,7 @@ class TaskQueue:
 
     def execute(self, job):
         repo = JobRepository()
+        cleanup_path: Path | None = None
         if job.state != JobState.RUNNING:
             job.state = JobState.RUNNING
             job.started_at = datetime.now(UTC)
@@ -178,15 +180,47 @@ class TaskQueue:
                 if job.result_data["operation"] == "import":
                     from noir.application.import_service import ImportService
 
+                    import_path = payload.get("path")
+                    durable_object_key = payload.get("s3_object_key")
+                    if durable_object_key:
+                        from noir.application.access_service import AccessService
+                        from noir.infrastructure.artifacts import ArtifactStore
+
+                        store = ArtifactStore(self.config)
+                        owner_id = AccessService().project_owner(job.project_id)
+                        if durable_object_key != store.original_key(owner_id, job.project_id):
+                            raise ValueError(
+                                "Direct-upload object does not belong to this private project"
+                            )
+                        scratch_root = (
+                            self.config.projects_dir.parent / "uploads" / "s3-imports"
+                        )
+                        scratch_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+                        cleanup_path = scratch_root / f"{job.job_id}.apk"
+                        cleanup_path.unlink(missing_ok=True)
+                        store.download_verified(
+                            key=durable_object_key,
+                            destination=cleanup_path,
+                            expected_size=int(payload["size"]),
+                            expected_sha256=str(payload["sha256"]),
+                        )
+                        import_path = cleanup_path
+                    elif import_path:
+                        cleanup_path = Path(import_path)
+                    else:
+                        raise ValueError("Import job has no APK source")
+
                     result = ImportService(self.config).import_apk(
-                        payload["path"],
+                        import_path,
                         authorized=True,
                         project_id=job.project_id,
                         original_filename=payload.get("original_filename"),
                         job=job,
                         input_sha256=payload.get("sha256"),
                         input_size=payload.get("size"),
-                        move_input=payload.get("move_input", False),
+                        move_input=bool(durable_object_key)
+                        or payload.get("move_input", False),
+                        durable_object_key=durable_object_key,
                     )
                 elif job.result_data["operation"] == "build":
                     from noir.application.build_service import BuildService
@@ -219,10 +253,7 @@ class TaskQueue:
         finally:
             job.finished_at = datetime.now(UTC)
             repo.update(job)
-            if job.result_data.get("operation") == "import":
-                from pathlib import Path
-
-                path = Path(job.result_data["payload"]["path"])
+            if job.result_data.get("operation") == "import" and cleanup_path is not None:
                 uploads = (self.config.projects_dir.parent / "uploads").resolve()
-                if path.resolve().is_relative_to(uploads):
-                    path.unlink(missing_ok=True)
+                if cleanup_path.resolve().is_relative_to(uploads):
+                    cleanup_path.unlink(missing_ok=True)

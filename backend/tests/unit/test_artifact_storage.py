@@ -1,3 +1,5 @@
+import hashlib
+import io
 from pathlib import Path
 
 from noir.domain.config import NoirConfig
@@ -9,6 +11,11 @@ class FakeS3:
         self.uploads = []
         self.objects = {}
         self.presigns = []
+        self.multipart_creates = []
+        self.multipart_completions = []
+        self.multipart_aborts = []
+        self.multipart_metadata = {}
+        self.payload = b""
 
     def upload_file(self, path, bucket, key, **kwargs):
         extra_args = kwargs["ExtraArgs"]
@@ -23,6 +30,30 @@ class FakeS3:
         expires_in = kwargs["ExpiresIn"]
         self.presigns.append((operation, params, expires_in))
         return f"https://signed.example/{params['Key']}"
+
+    def create_multipart_upload(self, **kwargs):
+        self.multipart_creates.append(kwargs)
+        self.multipart_metadata[(kwargs["Bucket"], kwargs["Key"])] = kwargs["Metadata"]
+        return {"UploadId": "multipart-id"}
+
+    def complete_multipart_upload(self, **kwargs):
+        self.multipart_completions.append(kwargs)
+        object_id = (kwargs["Bucket"], kwargs["Key"])
+        self.objects[object_id] = {
+            "ContentLength": len(self.payload),
+            "Metadata": self.multipart_metadata[object_id],
+        }
+
+    def abort_multipart_upload(self, **kwargs):
+        self.multipart_aborts.append(kwargs)
+
+    def get_object(self, **kwargs):
+        metadata = self.objects[(kwargs["Bucket"], kwargs["Key"])]["Metadata"]
+        return {
+            "ContentLength": len(self.payload),
+            "Metadata": metadata,
+            "Body": io.BytesIO(self.payload),
+        }
 
 
 def _config(tmp_path: Path, **overrides):
@@ -76,3 +107,51 @@ def test_local_mode_never_constructs_an_s3_client(tmp_path):
     apk.write_bytes(b"apk")
 
     assert store.store_original("alice", "project1", apk, sha256="b" * 64) is None
+
+
+def test_direct_multipart_original_is_private_checksum_bound_and_stream_verified(tmp_path):
+    client = FakeS3()
+    store = ArtifactStore(_config(tmp_path), client=client)
+    client.payload = b"direct-s3-apk"
+    digest = hashlib.sha256(client.payload).hexdigest()
+
+    key, upload_id = store.begin_multipart_original(
+        "alice",
+        "project1",
+        sha256=digest,
+        size=len(client.payload),
+    )
+    checksum = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY="
+    url = store.presign_multipart_part(
+        key=key,
+        upload_id=upload_id,
+        part_number=1,
+        checksum_sha256=checksum,
+    )
+    store.complete_multipart_original(
+        key=key,
+        upload_id=upload_id,
+        parts=[{"PartNumber": 1, "ETag": '"' + ("a" * 32) + '"', "ChecksumSHA256": checksum}],
+    )
+    store.verify_original_object(
+        key=key,
+        expected_size=len(client.payload),
+        expected_sha256=digest,
+    )
+    destination = tmp_path / "scratch" / "input.apk"
+    actual_digest, actual_size = store.download_verified(
+        key=key,
+        destination=destination,
+        expected_size=len(client.payload),
+        expected_sha256=digest,
+    )
+
+    create = client.multipart_creates[0]
+    assert create["ServerSideEncryption"] == "AES256"
+    assert create["ChecksumAlgorithm"] == "SHA256"
+    assert create["Metadata"]["sha256"] == digest
+    assert client.presigns[-1][0] == "upload_part"
+    assert client.presigns[-1][1]["ChecksumSHA256"] == checksum
+    assert url == f"https://signed.example/{key}"
+    assert (actual_digest, actual_size) == (digest, len(client.payload))
+    assert destination.read_bytes() == client.payload

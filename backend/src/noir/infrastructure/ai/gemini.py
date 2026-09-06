@@ -114,18 +114,13 @@ def _allowed_operations_line() -> str:
 
 
 def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
-    """Keep wire output small; host validation and approval still enforce the change scope."""
-    properties: dict[str, Any] = {
-        "relative_path": {
-            "type": "string",
-            "enum": sorted({change.relative_path for change in plan.file_changes}),
-        },
-        "operation": {
-            "type": "string",
-            "enum": sorted({change.operation.value for change in plan.file_changes}),
-        },
-    }
-    for name in (
+    """Bind every generated operation to one exact approved path/operation pair.
+
+    A pair-wise union is deliberate. Separate enums for paths and operation types
+    describe their Cartesian product, which lets a model legally combine an
+    operation approved for one file with a different approved file.
+    """
+    string_fields = {
         "match_content",
         "new_content",
         "class_descriptor",
@@ -145,62 +140,151 @@ def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
         "native_abi",
         "expected_native_bytes_hash",
         "native_skip_reason",
-    ):
-        properties[name] = {"type": "string"}
-    for name in (
+    }
+    integer_fields = {
         "il2cpp_return_constant",
         "native_offset",
         "native_length",
         "native_redirect_target_offset",
-    ):
-        properties[name] = {"type": "integer"}
-    properties["native_skipped_abis"] = {
-        "type": "array",
-        "items": {"type": "string"},
     }
-    properties["xml_attributes"] = {"type": "object", "additionalProperties": {"type": "string"}}
-    required = ["relative_path", "operation"]
-    if all(change.operation == PatchOperationType.REPLACE_BLOCK for change in plan.file_changes):
-        required += ["match_content", "new_content"]
-    smali_operations = {
-        PatchOperationType.SMALI_REPLACE_METHOD,
-        PatchOperationType.SMALI_INSERT_AT_ANCHOR,
-    }
-    if plan.file_changes and all(c.operation in smali_operations for c in plan.file_changes):
-        required += ["class_descriptor", "method_signature", "new_content"]
-        if all(c.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR for c in plan.file_changes):
-            required.append("anchor")
-    operation_types = {change.operation for change in plan.file_changes}
-    if operation_types == {PatchOperationType.CIL_REPLACE_METHOD_BODY}:
-        required += [
+    fields_by_operation: dict[PatchOperationType, tuple[str, ...]] = {
+        PatchOperationType.CREATE_FILE: ("new_content",),
+        PatchOperationType.REPLACE_FILE: ("new_content",),
+        PatchOperationType.REPLACE_BLOCK: ("match_content", "new_content"),
+        PatchOperationType.DELETE_FILE: (),
+        PatchOperationType.MANIFEST_ADD: ("xml_element", "new_content"),
+        PatchOperationType.MANIFEST_UPDATE: ("xml_element", "xml_attributes"),
+        PatchOperationType.MANIFEST_REMOVE: ("xml_element", "xml_attributes"),
+        PatchOperationType.XML_RESOURCE_ADD: ("new_content",),
+        PatchOperationType.XML_RESOURCE_UPDATE: ("new_content",),
+        PatchOperationType.XML_RESOURCE_REMOVE: ("xml_element", "xml_attributes"),
+        PatchOperationType.SMALI_REPLACE_METHOD: (
+            "class_descriptor",
+            "method_signature",
+            "new_content",
+        ),
+        PatchOperationType.SMALI_INSERT_AT_ANCHOR: (
+            "class_descriptor",
+            "method_signature",
+            "anchor",
+            "new_content",
+        ),
+        PatchOperationType.CIL_REPLACE_METHOD_BODY: (
             "assembly_name",
             "type_full_name",
             "method_signature",
             "new_il_source",
             "expected_method_il_hash",
-        ]
-    elif operation_types == {PatchOperationType.CIL_INSERT_METHOD}:
-        required += ["assembly_name", "type_full_name", "method_signature", "new_il_source"]
-    elif operation_types == {PatchOperationType.CIL_REPLACE_FIELD_INIT}:
-        required += [
+        ),
+        PatchOperationType.CIL_INSERT_METHOD: (
+            "assembly_name",
+            "type_full_name",
+            "method_signature",
+            "new_il_source",
+        ),
+        PatchOperationType.CIL_REPLACE_FIELD_INIT: (
             "assembly_name",
             "type_full_name",
             "field_name",
             "new_il_source",
             "expected_method_il_hash",
-        ]
+        ),
+        PatchOperationType.IL2CPP_FORCE_RETURN: (
+            "il2cpp_type_full_name",
+            "il2cpp_method_signature",
+            "il2cpp_return_constant",
+            "expected_function_bytes_hash",
+            "native_abi",
+        ),
+        PatchOperationType.IL2CPP_NOP_RANGE: (
+            "il2cpp_type_full_name",
+            "il2cpp_method_signature",
+            "expected_function_bytes_hash",
+            "native_abi",
+            "native_offset",
+            "native_length",
+        ),
+        PatchOperationType.NATIVE_BYTE_PATCH: (
+            "native_abi",
+            "native_offset",
+            "native_length",
+            "native_new_bytes_hex",
+            "expected_native_bytes_hash",
+        ),
+        PatchOperationType.NATIVE_NOP_RANGE: (
+            "native_abi",
+            "native_offset",
+            "native_length",
+            "expected_native_bytes_hash",
+        ),
+        PatchOperationType.NATIVE_BRANCH_REDIRECT: (
+            "native_abi",
+            "native_offset",
+            "native_length",
+            "native_redirect_target_offset",
+            "expected_native_bytes_hash",
+        ),
+    }
+
+    variants = []
+    approved_pairs = sorted(
+        {(change.relative_path, change.operation) for change in plan.file_changes},
+        key=lambda pair: (pair[0], pair[1].value),
+    )
+    for relative_path, operation in approved_pairs:
+        operation_fields = fields_by_operation[operation]
+        properties: dict[str, Any] = {
+            "relative_path": {"type": "string", "enum": [relative_path]},
+            "operation": {"type": "string", "enum": [operation.value]},
+            "affected_scope": {"type": "string"},
+        }
+        for name in operation_fields:
+            if name in string_fields:
+                properties[name] = {"type": "string"}
+            elif name in integer_fields:
+                properties[name] = {"type": "integer"}
+            elif name == "xml_attributes":
+                properties[name] = {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                }
+        if operation in {
+            PatchOperationType.MANIFEST_UPDATE,
+            PatchOperationType.MANIFEST_REMOVE,
+        }:
+            properties["xml_match_attributes"] = {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            }
+        if operation in {
+            PatchOperationType.NATIVE_BYTE_PATCH,
+            PatchOperationType.NATIVE_NOP_RANGE,
+            PatchOperationType.NATIVE_BRANCH_REDIRECT,
+            PatchOperationType.IL2CPP_FORCE_RETURN,
+            PatchOperationType.IL2CPP_NOP_RANGE,
+        }:
+            properties["native_skipped_abis"] = {
+                "type": "array",
+                "items": {"type": "string"},
+            }
+            properties["native_skip_reason"] = {"type": "string"}
+        variants.append(
+            {
+                "type": "object",
+                "properties": properties,
+                "required": ["relative_path", "operation", *operation_fields],
+                "additionalProperties": False,
+            }
+        )
+
+    item_schema = variants[0] if len(variants) == 1 else {"oneOf": variants}
     return {
         "type": "object",
         "properties": {
             "operations": {
                 "type": "array",
                 "minItems": 1,
-                "items": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                    "additionalProperties": False,
-                },
+                "items": item_schema,
             }
         },
         "required": ["operations"],
@@ -538,12 +622,12 @@ class GeminiProvider(AiProvider):
             "a server owned or controlled by the user. Do not reject such a request merely because "
             "it adds network behavior. The plan must disclose the destination, payload/data "
             "categories, runtime trigger, background behavior, permission changes, and risks. "
-            "Add endpoints when told by the user or a, persistent tracking, identifier collection, or "
+            "Never silently add another endpoint, persistent tracking, identifier collection, or "
             "a hidden background trigger. "
             "You are an Android APK modification planning assistant. "
             "You analyze decoded APK workspaces (Smali code, XML resources, AndroidManifest.xml) "
-            "plus bounded Mono CIL, IL2CPP metadata, and native ELF inspections, and create "
-            "structured modification plans. "
+            "plus React Native bundle/runtime evidence and bounded Mono CIL, IL2CPP metadata, "
+            "and native ELF inspections, and create structured modification plans. "
             "APKTool does NOT recover original Java/Kotlin source code. "
             "The workspace contains Smali bytecode, decoded resources, and the manifest. "
             "You must output valid JSON matching the schema provided. "
@@ -576,6 +660,7 @@ class GeminiProvider(AiProvider):
             "planning_feedback": context.get("planning_feedback", ""),
             "runtime": analysis.runtime,
             "runtimes": sorted(analysis.runtimes),
+            "runtime_evidence": analysis.runtime_evidence,
             "managed_assemblies": analysis.managed_assemblies,
             "il2cpp_metadata_files": analysis.il2cpp_metadata_files,
             "native_abis": analysis.native_abis,
@@ -608,38 +693,21 @@ one complete new method after a unique class-level comment anchor such as # virt
 Both require the exact class descriptor and method signature. Do not add an already defined method.
 Binary operations are permitted only when structured_binary_inspection supplies exact evidence.
 Never invent a type, method, ABI, offset, length, metadata version, byte sequence, or hash.
+For React Native, runtime_evidence.hermes_bytecode contains bundles whose Hermes bytecode magic
+was verified by the host. Those files are not JavaScript text and NOIR has no Hermes bytecode
+patch operation. Do not propose replace_block/replace_file against a confirmed Hermes bytecode
+bundle. Use exact manifest/resource/Smali evidence where it implements the request; otherwise put
+the JavaScript-level portion in unsupported_aspects. A React Native bundle not listed under
+hermes_bytecode still requires an exact supplied text excerpt before proposing a text edit.
 IL2CPP correlation is supported only for unambiguous sized symbols; stripped or ambiguous targets
 must be listed in unsupported_aspects. Every ABI containing the same native library must be patched
 or explicitly named as intentionally skipped with a compatibility risk. Native patches are
 same-length only and must stay within one executable segment.
-Output a JSON object with this exact schema:
-{{
-  "intended_outcome": "description of what the modification will achieve",
-  "file_changes": [
-    {{
-      "relative_path": "path/to/file",
-      "operation": "one of the operation names below",
-      "description": "what this change does"
-    }}
-  ],
-  "manifest_changes": ["description of each manifest change"],
-  "permission_changes": ["description of each permission change"],
-  "component_changes": ["description of each component change"],
-  "smali_integration_points": ["description of Smali integration points"],
-  "behavioral_changes": ["description of behavioral changes"],
-  "network_destinations": ["any network endpoints"],
-  "data_categories": ["categories of data accessed"],
-  "runtime_triggers": ["when the modified code runs"],
-  "background_behavior": ["any background behavior"],
-  "compatibility_concerns": ["compatibility issues"],
-  "risks": ["risks of this modification"],
-  "validation_steps": ["how to verify the modification works"],
-  "expected_test_results": ["what successful validation should show"],
-  "unsupported_aspects": ["what cannot be done"],
-  "native_runtime": "dalvik, mono, il2cpp, native_only, hybrid_web, or empty",
-  "binary_targets": ["exact assembly or ELF paths touched"],
-  "binary_risks": ["binary-format and ABI risks"]
-}}"""
+Return JSON matching the supplied response schema. intended_outcome summarizes the result;
+file_changes names each exact path, operation and purpose. Use the disclosure lists for manifest,
+permissions, components, Smali, behavior, network/data, triggers/background work, compatibility,
+risks, validation, unsupported work and binary targets. native_runtime is dalvik, mono, il2cpp,
+flutter, react_native, hermes, native_only, hybrid_web, or empty."""
 
         prompt = self._prepare_prompt(
             render,
@@ -723,6 +791,13 @@ Output a JSON object with this exact schema:
         if not plan.file_changes:
             raise GeminiProviderError("The approved plan has no file changes")
         response_schema = _patch_response_schema(plan)
+        approved_bindings = "\n".join(
+            f"- {change.relative_path} -> {change.operation.value}"
+            for change in plan.file_changes
+        )
+        approved_operations = {
+            (change.relative_path, change.operation) for change in plan.file_changes
+        }
         for change in plan.file_changes:
             if change.operation != PatchOperationType.CREATE_FILE and (
                 change.relative_path not in context.get("file_snippets", {})
@@ -734,24 +809,34 @@ Output a JSON object with this exact schema:
                 )
 
         def render(context_str: str) -> str:
-            return f"""Generate patch operations for this approved modification plan.
+            template = """Generate patch operations for this approved modification plan.
 
 PLAN:
-{plan.model_dump_json(indent=2)}
+__NOIR_APPROVED_PLAN__
+
+APPROVED PATH-OPERATION BINDINGS:
+__NOIR_APPROVED_BINDINGS__
+
+Every operation must use one exact binding above. Approval of a path and approval of an
+operation on different lines do not authorize combining them.
 
 WORKSPACE CONTEXT:
-{context_str}
+__NOIR_WORKSPACE_CONTEXT__
 
 file_coverage identifies full files versus exact XML excerpts. For excerpt-only files, use
 replace_block with match_content copied exactly from the excerpt. Never replace the whole file.
 For non-XML operations, omit xml_attributes or use an empty object, not null.
 affected_scope is an optional description: omit it or use an empty string when not applicable.
-manifest_update requires a nonempty xml_attributes object. replace_block requires exact
+manifest_update requires a nonempty xml_attributes object. xml_attributes contains only values
+to write. For a repeated or nested manifest element, use xml_match_attributes with exact existing
+pre-change attributes to identify one element; never target an unnamed element by tag alone.
+replace_block requires exact
 match_content and new_content (an empty new_content string is valid when deleting a block).
 For manifest_update or manifest_remove on a repeatable element such as activity, activity-alias,
 service, receiver, provider, uses-permission or meta-data, include its existing android:name in
-xml_attributes so the selector identifies exactly one element. Do not use manifest_update for
-an element that cannot be uniquely identified; use an exact replace_block instead.
+xml_match_attributes (or preserve it in xml_attributes) so the selector identifies exactly one
+element. Do not use manifest_update for an element that cannot be uniquely identified; use an
+exact replace_block instead.
 Use the shortest exact match_content that occurs exactly once in that file, with just enough
 surrounding text to identify the target. Use separate, non-overlapping replace_block operations
 for separate edits in the same file. Never copy an entire manifest or application subtree
@@ -762,7 +847,12 @@ Do not change operation types or omit any requested changes to make the response
 Return compact JSON with a top-level operations array, following the supplied response schema.
 Each operation needs relative_path and operation. Include only fields needed by that operation:
 match_content/new_content for replace_block; new_content for create_file/replace_file;
-xml_element/new_content for manifest_add; xml_element/xml_attributes for manifest_update/remove;
+xml_element/new_content for manifest_add; xml_element/xml_attributes for manifest_update/remove.
+For manifest_update/remove, xml_match_attributes optionally identifies the existing element and
+is never written to the file;
+For xml_resource_add/update, new_content must be exactly one complete resource element.
+xml_resource_update changes only the existing element with the same tag and name; it never
+replaces the resource file. xml_resource_remove requires xml_element and xml_attributes.name;
 Both smali_replace_method and smali_insert_at_anchor require class_descriptor, method_signature
 and new_content. smali_insert_at_anchor also requires a unique exact anchor; insertion is AFTER it.
 For an existing method, use an anchor inside that exact method and insert instructions only.
@@ -786,6 +876,11 @@ intentionally unsupported by this plan.
 Omit unused optional fields, whole-file hashes, commentary, markdown fences, and
 unchanged file contents.
 Escape quotes, backslashes and newlines inside JSON strings correctly."""
+            return (
+                template.replace("__NOIR_APPROVED_PLAN__", plan.model_dump_json(indent=2))
+                .replace("__NOIR_APPROVED_BINDINGS__", approved_bindings)
+                .replace("__NOIR_WORKSPACE_CONTEXT__", context_str)
+            )
 
         prompt = self._prepare_prompt(
             render,
@@ -815,6 +910,17 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
                     raise GeminiProviderError(
                         "Excerpt-only context permits only exact, visible block replacements"
                     )
+            if (path, operation.operation) not in approved_operations:
+                approved_for_path = sorted(
+                    candidate.value
+                    for candidate_path, candidate in approved_operations
+                    if candidate_path == path
+                )
+                expected = ", ".join(approved_for_path) or "no operation"
+                raise GeminiProviderError(
+                    f"AI patch operation {index + 1}: {path!r} used "
+                    f"{operation.operation.value!r}; approved for that path: {expected}"
+                )
             if operation.operation == PatchOperationType.CIL_REPLACE_METHOD_BODY:
                 inspection = context.get("binary_inspection", {}).get(path, {})
                 method_matches = [
@@ -849,6 +955,7 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
         # JSON null is not the same as a missing key to dict.get(default). The domain
         # model remains strict; handle the provider's optional nulls only at this boundary.
         attrs = data.get("xml_attributes")
+        match_attrs = data.get("xml_match_attributes")
         scope = data.get("affected_scope")
         relative_path = data.get("relative_path")
         assembly_name = data.get("assembly_name")
@@ -874,6 +981,7 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
                     "anchor": data.get("anchor"),
                     "xml_element": data.get("xml_element"),
                     "xml_attributes": {} if attrs is None else attrs,
+                    "xml_match_attributes": {} if match_attrs is None else match_attrs,
                     "affected_scope": "" if scope is None else scope,
                     "assembly_name": assembly_name,
                     "type_full_name": data.get("type_full_name"),
@@ -919,19 +1027,43 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
                 "uses-permission",
                 "permission",
                 "meta-data",
+                "intent-filter",
             }
+            named_selector = (
+                operation.xml_match_attributes.get("android:name")
+                or operation.xml_match_attributes.get("name")
+                or operation.xml_attributes.get("android:name")
+                or operation.xml_attributes.get("name")
+            )
             if operation.xml_element in repeatable and not (
-                operation.xml_attributes.get("android:name") or operation.xml_attributes.get("name")
+                operation.xml_match_attributes or named_selector
             ):
                 raise GeminiProviderError(
-                    f"{prefix}: {operation.xml_element} requires its existing android:name "
-                    "to select exactly one manifest element"
+                    f"{prefix}: {operation.xml_element} requires exact existing "
+                    "xml_match_attributes to select one manifest element"
                 )
         if operation.operation == PatchOperationType.REPLACE_BLOCK and (
             not operation.match_content or operation.new_content is None
         ):
             raise GeminiProviderError(
                 f"{prefix}: replace_block requires match_content and new_content"
+            )
+        if operation.operation in {
+            PatchOperationType.XML_RESOURCE_ADD,
+            PatchOperationType.XML_RESOURCE_UPDATE,
+        } and not operation.new_content:
+            raise GeminiProviderError(
+                f"{prefix}: {operation.operation.value} requires one resource element"
+            )
+        if operation.operation == PatchOperationType.XML_RESOURCE_REMOVE and (
+            not operation.xml_element
+            or not (
+                operation.xml_attributes.get("name")
+                or operation.xml_attributes.get("android:name")
+            )
+        ):
+            raise GeminiProviderError(
+                f"{prefix}: xml_resource_remove requires xml_element and its existing name"
             )
         if operation.operation in (
             PatchOperationType.SMALI_REPLACE_METHOD,

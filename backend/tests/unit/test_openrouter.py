@@ -157,6 +157,35 @@ def test_model_finished_response(config, ws):
     assert result.api_calls == 1
 
 
+def test_text_request_preloads_default_strings_without_extra_api_call(config, ws):
+    """Text-oriented work receives exact default resources before discovery."""
+    strings = ws.decoded_dir / "res" / "values" / "strings.xml"
+    strings.parent.mkdir(parents=True)
+    strings.write_text('<resources><string name="settings">Settings</string></resources>')
+    provider = OpenRouterDiscoveryProvider(config)
+    analysis = _make_analysis(ws, runtimes={"dalvik"})
+    context_tools = AiContextTools(ws, analysis)
+    done = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "Found the text resource."},
+                "finish_reason": "stop",
+            }
+        ]
+    }
+
+    with patch.object(provider, "_call_api", return_value=done):
+        result = provider.discover(
+            "Change the Settings screen title and preserve behavior",
+            context_tools,
+            analysis,
+        )
+
+    assert result.api_calls == 1
+    assert result.seen_files["res/values/strings.xml"].endswith("</resources>")
+    assert result.transcript[0].arguments["source"] == "default_strings_seed"
+
+
 def test_tool_call_response_reads_file(config, ws):
     """When model requests a file read, the file content should be captured."""
     # Create a test file
@@ -294,12 +323,19 @@ def test_analysis_summary_structure():
     analysis = AnalysisResult(
         project_id="test",
         package_name="com.example.app",
-        runtimes={"dalvik", "native"},
+        runtimes={"dalvik", "native", "react_native", "hermes"},
+        runtime_evidence={
+            "react_native": ["assets/index.android.bundle"],
+            "hermes_bytecode": ["assets/index.android.bundle"],
+        },
     )
     summary = _build_analysis_summary(analysis)
     assert summary["package_name"] == "com.example.app"
     assert "dalvik" in summary["runtimes"]
     assert "native" in summary["runtimes"]
+    assert summary["runtime_evidence"]["hermes_bytecode"] == [
+        "assets/index.android.bundle"
+    ]
     assert "smali_class_count" in summary
     assert "binary_candidates" in summary
 

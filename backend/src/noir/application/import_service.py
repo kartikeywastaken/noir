@@ -82,6 +82,7 @@ class ImportService:
         input_sha256: str | None = None,
         input_size: int | None = None,
         move_input: bool = False,
+        durable_object_key: str | None = None,
     ) -> dict:
         """Import and decode an APK.
 
@@ -186,14 +187,26 @@ class ImportService:
 
             artifact_store = ArtifactStore(self.config)
             owner_id = AccessService().project_owner(project.id)
-            executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="artifact-store")
-            artifact_future = executor.submit(
-                artifact_store.store_original,
-                owner_id,
-                project.id,
-                stored_apk,
-                sha256=sha256,
-            )
+            executor = None
+            artifact_future = None
+            object_key = durable_object_key
+            if durable_object_key:
+                expected_key = artifact_store.original_key(owner_id, project.id)
+                if durable_object_key != expected_key:
+                    raise ArtifactStoreError(
+                        "Direct-upload object does not belong to this private project"
+                    )
+            else:
+                executor = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="artifact-store"
+                )
+                artifact_future = executor.submit(
+                    artifact_store.store_original,
+                    owner_id,
+                    project.id,
+                    stored_apk,
+                    sha256=sha256,
+                )
 
             # Step 3: Decode with APKTool — runs in parallel with S3 upload above.
             job.stage = WorkflowStage.DECODING
@@ -218,9 +231,11 @@ class ImportService:
                         workspace.decoded_dir,
                         framework_dir=framework_dir,
                     )
-                object_key = artifact_future.result()
+                if artifact_future is not None:
+                    object_key = artifact_future.result()
             finally:
-                executor.shutdown(wait=True, cancel_futures=True)
+                if executor is not None:
+                    executor.shutdown(wait=True, cancel_futures=True)
 
             self._emit_event(
                 project.id,

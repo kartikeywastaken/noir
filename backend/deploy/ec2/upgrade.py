@@ -181,6 +181,7 @@ def main() -> None:
             "NOIR_S3_REGION",
             "NOIR_S3_PREFIX",
             "NOIR_S3_PRESIGN_EXPIRY",
+            "NOIR_S3_UPLOAD_PART_SIZE",
         ):
             current_environment[name] = desired_environment[name]
         _write_environment(Path("/etc/noir/backend.env"), current_environment)

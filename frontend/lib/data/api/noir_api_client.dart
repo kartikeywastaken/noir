@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
 import 'api_exceptions.dart';
@@ -13,18 +14,90 @@ import 'transfer_progress.dart';
 
 typedef UploadChunkReader = Stream<List<int>> Function(int start, int end);
 
+class _CompletedUploadPart {
+  const _CompletedUploadPart({
+    required this.partNumber,
+    required this.etag,
+    required this.checksumSha256,
+    required this.size,
+  });
+
+  factory _CompletedUploadPart.fromJson(Map<String, dynamic> json) =>
+      _CompletedUploadPart(
+        partNumber: json['part_number'] as int? ?? -1,
+        etag: '${json['etag'] ?? ''}',
+        checksumSha256: '${json['checksum_sha256'] ?? ''}',
+        size: json['size'] as int? ?? -1,
+      );
+
+  final int partNumber;
+  final String etag;
+  final String checksumSha256;
+  final int size;
+
+  Map<String, dynamic> toJson() => {
+    'part_number': partNumber,
+    'etag': etag,
+    'checksum_sha256': checksumSha256,
+    'size': size,
+  };
+}
+
+class _PresignedUploadPart {
+  const _PresignedUploadPart({
+    required this.partNumber,
+    required this.url,
+    required this.headers,
+  });
+
+  factory _PresignedUploadPart.fromJson(Map<String, dynamic> json) {
+    final rawHeaders = json['headers'];
+    return _PresignedUploadPart(
+      partNumber: json['part_number'] as int? ?? -1,
+      url: '${json['url'] ?? ''}',
+      headers: rawHeaders is Map
+          ? rawHeaders.map((key, value) => MapEntry('$key', '$value'))
+          : const {},
+    );
+  }
+
+  final int partNumber;
+  final String url;
+  final Map<String, String> headers;
+}
+
+class _PendingS3Part {
+  const _PendingS3Part({
+    required this.partNumber,
+    required this.bytes,
+    required this.checksumSha256,
+  });
+
+  final int partNumber;
+  final Uint8List bytes;
+  final String checksumSha256;
+}
+
 class _UploadSession {
   const _UploadSession({
+    required this.uploadMode,
+    required this.protocol,
     required this.id,
+    required this.projectId,
     required this.size,
     required this.offset,
     required this.chunkSize,
     required this.receivedBytes,
     required this.receivedOffsets,
+    required this.sha256,
+    required this.totalParts,
+    required this.completedParts,
   });
   factory _UploadSession.fromJson(Map<String, dynamic> json) {
+    final uploadMode = '${json['upload_mode'] ?? 'proxy'}';
     final offset = json['offset'] as int? ?? -1;
-    final chunkSize = json['chunk_size'] as int? ?? -1;
+    final chunkSize =
+        json[uploadMode == 's3' ? 'part_size' : 'chunk_size'] as int? ?? -1;
     final explicit = json['received_offsets'];
     final receivedOffsets = explicit is List
         ? explicit.whereType<int>().toSet()
@@ -32,21 +105,50 @@ class _UploadSession {
             if (offset > 0 && chunkSize > 0)
               for (var value = 0; value < offset; value += chunkSize) value,
           };
+    final completedParts = <int, _CompletedUploadPart>{};
+    final rawCompleted = json['completed_parts'];
+    if (rawCompleted is List) {
+      for (final value in rawCompleted) {
+        if (value is! Map) continue;
+        final part = _CompletedUploadPart.fromJson(
+          Map<String, dynamic>.from(value),
+        );
+        completedParts[part.partNumber] = part;
+      }
+    }
     return _UploadSession(
+      uploadMode: uploadMode,
+      protocol: '${json['protocol'] ?? ''}',
       id: '${json['upload_id'] ?? ''}',
+      projectId: '${json['project_id'] ?? ''}',
       size: json['size'] as int? ?? -1,
       offset: offset,
       chunkSize: chunkSize,
-      receivedBytes: json['received_bytes'] as int? ?? offset,
+      receivedBytes:
+          json[uploadMode == 's3' ? 'uploaded_bytes' : 'received_bytes']
+              as int? ??
+          (uploadMode == 's3'
+              ? completedParts.values.fold(0, (sum, part) => sum + part.size)
+              : offset),
       receivedOffsets: receivedOffsets,
+      sha256: '${json['sha256'] ?? ''}',
+      totalParts: json['total_parts'] as int? ?? -1,
+      completedParts: completedParts,
     );
   }
+  final String uploadMode;
+  final String protocol;
   final String id;
+  final String projectId;
   final int size;
   final int offset;
   final int chunkSize;
   final int receivedBytes;
   final Set<int> receivedOffsets;
+  final String sha256;
+  final int totalParts;
+  final Map<int, _CompletedUploadPart> completedParts;
+  bool get usesS3 => uploadMode == 's3';
 }
 
 class NoirApiClient {
@@ -60,7 +162,7 @@ class NoirApiClient {
     String? token,
     http.Client? client,
     Future<void> Function(Duration)? retryDelay,
-    int uploadParallelism = 8,
+    int uploadParallelism = 4,
   }) : _baseUrl = normalizeBaseUrl(baseUrl ?? cloudBaseUrl),
        _token = token,
        _client = client ?? http.Client(),
@@ -293,10 +395,10 @@ class NoirApiClient {
     TransferCallback? onProgress,
   }) async {
     final file = File(filePath);
-    return importApkStream(
+    return importApkResumable(
       file.uri.pathSegments.last,
       await file.length(),
-      file.openRead(),
+      (start, end) => file.openRead(start, end),
       idempotencyKey: idempotencyKey,
       onProgress: onProgress,
     );
@@ -358,11 +460,17 @@ class NoirApiClient {
     String filename,
     int length,
     String idempotencyKey,
+    String sha256,
   ) async => _UploadSession.fromJson(
     await _request(
       'POST',
       '/v1/uploads',
-      body: {'filename': filename, 'size': length},
+      body: {
+        'filename': filename,
+        'size': length,
+        'sha256': sha256,
+        'upload_mode': 'auto',
+      },
       idempotencyKey: idempotencyKey,
     ),
   );
@@ -384,11 +492,157 @@ class NoirApiClient {
       _response(
         await _send(
           request,
-          timeout: const Duration(seconds: 45),
+          timeout: const Duration(minutes: 3),
           mutation: true,
         ),
       ),
     );
+  }
+
+  Future<List<_PresignedUploadPart>> _presignUploadParts(
+    String uploadId,
+    List<_PendingS3Part> parts,
+  ) async {
+    final response = await _request(
+      'POST',
+      '/v1/uploads/$uploadId/parts/presign',
+      body: {
+        'parts': [
+          for (final part in parts)
+            {
+              'part_number': part.partNumber,
+              'checksum_sha256': part.checksumSha256,
+            },
+        ],
+      },
+    );
+    final raw = response['parts'];
+    if (raw is! List) {
+      throw ApiException('Backend returned invalid S3 upload authorization.');
+    }
+    final result = raw
+        .whereType<Map>()
+        .map(
+          (value) =>
+              _PresignedUploadPart.fromJson(Map<String, dynamic>.from(value)),
+        )
+        .toList();
+    if (result.length != parts.length ||
+        result.map((part) => part.partNumber).toSet().length != result.length) {
+      throw ApiException('Backend returned invalid S3 upload authorization.');
+    }
+    return result;
+  }
+
+  Future<_UploadSession> _reportUploadParts(
+    String uploadId,
+    List<_CompletedUploadPart> parts,
+  ) async => _UploadSession.fromJson(
+    await _request(
+      'PUT',
+      '/v1/uploads/$uploadId/parts',
+      body: {
+        'parts': [for (final part in parts) part.toJson()],
+      },
+    ),
+  );
+
+  Future<String> _hashUpload(
+    UploadChunkReader reader,
+    int length,
+    void Function() ensureWorkspace,
+  ) async {
+    var read = 0;
+    Stream<List<int>> checked() async* {
+      await for (final chunk in reader(0, length)) {
+        ensureWorkspace();
+        read += chunk.length;
+        if (read > length) {
+          throw ApiException('Selected APK returned more bytes than expected.');
+        }
+        yield chunk;
+      }
+    }
+
+    final digest = await crypto.sha256.bind(checked()).single;
+    ensureWorkspace();
+    if (read != length) {
+      throw ApiException(
+        'Selected APK changed or became unavailable during upload.',
+      );
+    }
+    return digest.toString();
+  }
+
+  Uri _s3UploadUri(String value) {
+    final uri = _validatedS3Uri(value);
+    if (!uri.queryParameters.containsKey('uploadId') ||
+        !uri.queryParameters.containsKey('partNumber') ||
+        !uri.queryParameters.keys.any(
+          (key) => key.toLowerCase() == 'x-amz-signature',
+        )) {
+      throw ApiException('Backend returned invalid S3 upload authorization.');
+    }
+    return uri;
+  }
+
+  Future<_CompletedUploadPart> _putS3UploadPart(
+    _PresignedUploadPart authorization,
+    _PendingS3Part part,
+    void Function() ensureWorkspace,
+  ) async {
+    if (authorization.partNumber != part.partNumber) {
+      throw ApiException('Backend authorized the wrong S3 upload part.');
+    }
+    final checksum = authorization.headers.entries.where(
+      (entry) => entry.key.toLowerCase() == 'x-amz-checksum-sha256',
+    );
+    if (authorization.headers.length != 1 ||
+        checksum.length != 1 ||
+        checksum.single.value != part.checksumSha256) {
+      throw ApiException('Backend returned unsafe S3 upload headers.');
+    }
+    final target = _s3UploadUri(authorization.url);
+    Object? lastError;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      ensureWorkspace();
+      try {
+        final request = http.Request('PUT', target)
+          ..followRedirects = false
+          ..headers['x-amz-checksum-sha256'] = part.checksumSha256
+          ..bodyBytes = part.bytes;
+        final response = await _client
+            .send(request)
+            .timeout(const Duration(minutes: 5));
+        ensureWorkspace();
+        await response.stream.drain<void>();
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw ApiException(
+            'S3 rejected upload part ${part.partNumber} '
+            '(${response.statusCode}).',
+            statusCode: response.statusCode,
+          );
+        }
+        final etag = response.headers['etag']?.trim() ?? '';
+        if (!RegExp(r'^"?[A-Fa-f0-9]{32}(?:-[0-9]+)?"?$').hasMatch(etag)) {
+          throw ApiException('S3 did not acknowledge the uploaded part.');
+        }
+        return _CompletedUploadPart(
+          partNumber: part.partNumber,
+          etag: etag,
+          checksumSha256: part.checksumSha256,
+          size: part.bytes.length,
+        );
+      } catch (error) {
+        lastError = error;
+        final retryable =
+            _retryableUploadError(error) ||
+            (error is ApiException && error.statusCode == 403 && attempt == 0);
+        if (!retryable || attempt == 3) rethrow;
+        await _retryDelay(Duration(seconds: math.min(1 << attempt, 8)));
+      }
+    }
+    throw lastError!;
   }
 
   Future<Uint8List> _readUploadChunk(
@@ -446,7 +700,60 @@ class NoirApiClient {
     _UploadSession session,
     int expectedSize, {
     String? expectedId,
+    String? expectedSha256,
   }) {
+    final commonInvalid =
+        session.id.isEmpty ||
+        session.size != expectedSize ||
+        session.receivedBytes < 0 ||
+        session.receivedBytes > expectedSize ||
+        (expectedId != null && session.id != expectedId);
+    if (session.usesS3) {
+      final expectedParts = session.chunkSize <= 0
+          ? -1
+          : (expectedSize / session.chunkSize).ceil();
+      var completedBytes = 0;
+      var invalidPart = false;
+      for (final entry in session.completedParts.entries) {
+        final part = entry.value;
+        final expectedPartSize = session.chunkSize <= 0
+            ? -1
+            : math.min(
+                session.chunkSize,
+                expectedSize - ((entry.key - 1) * session.chunkSize),
+              );
+        Uint8List? checksum;
+        try {
+          checksum = base64Decode(part.checksumSha256);
+        } on FormatException {
+          invalidPart = true;
+          break;
+        }
+        if (entry.key != part.partNumber ||
+            entry.key < 1 ||
+            entry.key > session.totalParts ||
+            part.size != expectedPartSize ||
+            part.etag.isEmpty ||
+            checksum.length != 32) {
+          invalidPart = true;
+          break;
+        }
+        completedBytes += part.size;
+      }
+      if (commonInvalid ||
+          session.protocol != 's3_multipart_v1' ||
+          session.projectId.isEmpty ||
+          session.chunkSize < 5 * 1024 * 1024 ||
+          session.totalParts != expectedParts ||
+          session.completedParts.length > session.totalParts ||
+          completedBytes != session.receivedBytes ||
+          invalidPart ||
+          (expectedSha256 != null && session.sha256 != expectedSha256)) {
+        throw ApiException('Backend returned invalid upload-session state.');
+      }
+      return;
+    }
+
     final invalidOffset =
         session.chunkSize <= 0 ||
         session.receivedOffsets.any(
@@ -462,41 +769,25 @@ class NoirApiClient {
             (total, offset) =>
                 total + math.min(session.chunkSize, expectedSize - offset),
           );
-    if (session.id.isEmpty ||
-        session.size != expectedSize ||
+    if (commonInvalid ||
+        session.uploadMode != 'proxy' ||
         session.offset < 0 ||
         session.offset > expectedSize ||
         session.chunkSize <= 0 ||
-        session.receivedBytes < 0 ||
-        session.receivedBytes > expectedSize ||
         session.receivedBytes != computedReceived ||
-        (expectedId != null && session.id != expectedId)) {
+        invalidOffset) {
       throw ApiException('Backend returned invalid upload-session state.');
     }
   }
 
-  /// Uploads repeatable file ranges and advances progress only after EC2 has
-  /// durably acknowledged the corresponding offset.
-  Future<JobInfo> importApkResumable(
-    String filename,
+  Future<JobInfo> _uploadThroughProxy(
+    _UploadSession session,
     int length,
-    UploadChunkReader reader, {
-    required String idempotencyKey,
+    UploadChunkReader reader,
+    String idempotencyKey,
+    void Function() ensureWorkspace,
     TransferCallback? onProgress,
-  }) async {
-    if (token?.isNotEmpty != true) throw UnauthorizedException();
-    if (length <= 0) throw ApiException('Selected APK is empty.');
-    final revision = credentialRevision;
-    void ensureWorkspace() {
-      if (revision != credentialRevision) {
-        throw ApiException('Workspace changed. Upload stopped.');
-      }
-    }
-
-    var session = await _retryUploadRequest(
-      () => _beginUpload(filename, length, idempotencyKey),
-    );
-    _validateUploadSession(session, length);
+  ) async {
     final uploadId = session.id;
     final chunkSize = session.chunkSize;
     final acknowledged = <int>{...session.receivedOffsets};
@@ -504,7 +795,9 @@ class NoirApiClient {
       0,
       (total, offset) => total + math.min(chunkSize, length - offset),
     );
-    onProgress?.call(TransferProgress(acknowledgedBytes(), length));
+    if (acknowledgedBytes() > 0) {
+      onProgress?.call(TransferProgress(acknowledgedBytes(), length));
+    }
     final pending = <int>[
       for (var offset = 0; offset < length; offset += chunkSize)
         if (!acknowledged.contains(offset)) offset,
@@ -569,6 +862,158 @@ class NoirApiClient {
         ),
       ),
     );
+  }
+
+  Future<JobInfo> _uploadDirectlyToS3(
+    _UploadSession session,
+    int length,
+    UploadChunkReader reader,
+    String idempotencyKey,
+    String sha256,
+    void Function() ensureWorkspace,
+    TransferCallback? onProgress,
+  ) async {
+    final completed = <int, _CompletedUploadPart>{...session.completedParts};
+    var uploadedBytes = completed.values.fold<int>(
+      0,
+      (sum, part) => sum + part.size,
+    );
+    if (uploadedBytes > 0) {
+      onProgress?.call(TransferProgress(uploadedBytes, length));
+    }
+    final pendingNumbers = <int>[
+      for (var number = 1; number <= session.totalParts; number++)
+        if (!completed.containsKey(number)) number,
+    ];
+
+    for (
+      var start = 0;
+      start < pendingNumbers.length;
+      start += _uploadParallelism
+    ) {
+      ensureWorkspace();
+      final numbers = pendingNumbers.sublist(
+        start,
+        math.min(start + _uploadParallelism, pendingNumbers.length),
+      );
+      final pending = await Future.wait([
+        for (final number in numbers)
+          () async {
+            final offset = (number - 1) * session.chunkSize;
+            final end = math.min(offset + session.chunkSize, length);
+            final bytes = await _readUploadChunk(reader, offset, end);
+            return _PendingS3Part(
+              partNumber: number,
+              bytes: bytes,
+              checksumSha256: base64Encode(crypto.sha256.convert(bytes).bytes),
+            );
+          }(),
+      ]);
+      final authorized = await _retryUploadRequest(
+        () => _presignUploadParts(session.id, pending),
+      );
+      final authorizationByNumber = {
+        for (final value in authorized) value.partNumber: value,
+      };
+      if (!numbers.every(authorizationByNumber.containsKey)) {
+        throw ApiException('Backend omitted an S3 upload authorization.');
+      }
+      final uploaded = await Future.wait([
+        for (final part in pending)
+          _putS3UploadPart(
+            authorizationByNumber[part.partNumber]!,
+            part,
+            ensureWorkspace,
+          ).then((value) {
+            if (!completed.containsKey(value.partNumber)) {
+              completed[value.partNumber] = value;
+              uploadedBytes += value.size;
+              onProgress?.call(TransferProgress(uploadedBytes, length));
+            }
+            return value;
+          }),
+      ]);
+      final reported = await _retryUploadRequest(
+        () => _reportUploadParts(session.id, uploaded),
+      );
+      _validateUploadSession(
+        reported,
+        length,
+        expectedId: session.id,
+        expectedSha256: sha256,
+      );
+      if (!numbers.every(reported.completedParts.containsKey)) {
+        throw ApiException('Backend did not record every uploaded S3 part.');
+      }
+    }
+    ensureWorkspace();
+    if (uploadedBytes != length || completed.length != session.totalParts) {
+      throw ApiException('S3 upload is incomplete.');
+    }
+    return _retryUploadRequest(
+      () async => JobInfo.fromJson(
+        await _request(
+          'POST',
+          '/v1/uploads/${session.id}/complete',
+          query: {'authorized': 'true'},
+          idempotencyKey: idempotencyKey,
+          body: {
+            'parts': [
+              for (final number in completed.keys.toList()..sort())
+                completed[number]!.toJson(),
+            ],
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Uses direct, checksum-bound S3 multipart uploads when the backend offers
+  /// them. Local deployments transparently retain the durable EC2 proxy path.
+  Future<JobInfo> importApkResumable(
+    String filename,
+    int length,
+    UploadChunkReader reader, {
+    required String idempotencyKey,
+    TransferCallback? onProgress,
+  }) async {
+    if (token?.isNotEmpty != true) throw UnauthorizedException();
+    if (length <= 0) throw ApiException('Selected APK is empty.');
+    final revision = credentialRevision;
+    void ensureWorkspace() {
+      if (revision != credentialRevision) {
+        throw ApiException('Workspace changed. Upload stopped.');
+      }
+    }
+
+    onProgress?.call(TransferProgress(0, length));
+    final sha256 = await _hashUpload(reader, length, ensureWorkspace);
+    var session = await _retryUploadRequest(
+      () => _beginUpload(filename, length, idempotencyKey, sha256),
+    );
+    _validateUploadSession(
+      session,
+      length,
+      expectedSha256: session.usesS3 ? sha256 : null,
+    );
+    return session.usesS3
+        ? _uploadDirectlyToS3(
+            session,
+            length,
+            reader,
+            idempotencyKey,
+            sha256,
+            ensureWorkspace,
+            onProgress,
+          )
+        : _uploadThroughProxy(
+            session,
+            length,
+            reader,
+            idempotencyKey,
+            ensureWorkspace,
+            onProgress,
+          );
   }
 
   Future<List<FileEntry>> listFiles(String id, {String subdir = ''}) async {
@@ -776,7 +1221,7 @@ class NoirApiClient {
           .timeout(const Duration(seconds: 30));
       checkIdentity();
       if (response.statusCode == 307) {
-        final redirect = _artifactRedirect(response.headers['location']);
+        final redirect = _validatedS3Uri(response.headers['location']);
         await response.stream.drain<void>();
         final redirectedRequest = http.Request('GET', redirect)
           ..followRedirects = false;
@@ -824,7 +1269,7 @@ class NoirApiClient {
     }
   }
 
-  Uri _artifactRedirect(String? value) {
+  Uri _validatedS3Uri(String? value) {
     final uri = value == null ? null : Uri.tryParse(value);
     final host = uri?.host.toLowerCase() ?? '';
     final isAmazonS3 = RegExp(
@@ -837,9 +1282,7 @@ class NoirApiClient {
         uri.userInfo.isNotEmpty ||
         (uri.hasPort && uri.port != 443) ||
         !isAmazonS3) {
-      throw ApiException(
-        'The server returned an unsafe artifact download URL.',
-      );
+      throw ApiException('The server returned an unsafe S3 URL.');
     }
     return uri;
   }

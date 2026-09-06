@@ -8,9 +8,12 @@ mirrored here.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 try:
     from boto3.s3.transfer import TransferConfig as S3TransferConfig
@@ -87,6 +90,182 @@ class ArtifactStore:
     def signed_key(self, user_id: str, project_id: str, build_id: str) -> str:
         build = self._identifier(build_id, "build ID")
         return self._key(user_id, project_id, "builds", build, "signed.apk")
+
+    def begin_multipart_original(
+        self,
+        user_id: str,
+        project_id: str,
+        *,
+        sha256: str,
+        size: int,
+    ) -> tuple[str, str]:
+        """Create a private, checksum-aware multipart upload for an original APK."""
+        if not self.enabled:
+            raise ArtifactStoreError("Direct upload requires S3 artifact storage")
+        if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ArtifactStoreError("Invalid APK SHA-256")
+        if size <= 0:
+            raise ArtifactStoreError("Invalid APK size")
+        key = self.original_key(user_id, project_id)
+        try:
+            response = self._s3().create_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                ContentType="application/vnd.android.package-archive",
+                ServerSideEncryption="AES256",
+                ChecksumAlgorithm="SHA256",
+                Metadata={
+                    "sha256": sha256,
+                    "size": str(size),
+                    "project-id": project_id,
+                    "artifact-type": "original_apk",
+                },
+            )
+            upload_id = str(response["UploadId"])
+        except Exception as exc:
+            raise ArtifactStoreError(f"S3 multipart upload creation failed: {exc}") from exc
+        if not upload_id:
+            raise ArtifactStoreError("S3 did not return a multipart upload ID")
+        return key, upload_id
+
+    def presign_multipart_part(
+        self,
+        *,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        checksum_sha256: str,
+    ) -> str:
+        """Authorize one exact S3 multipart part and bind its SHA-256 header."""
+        if not self.enabled:
+            raise ArtifactStoreError("Direct upload requires S3 artifact storage")
+        try:
+            url = self._s3().generate_presigned_url(
+                "upload_part",
+                Params={
+                    "Bucket": self.bucket,
+                    "Key": key,
+                    "UploadId": upload_id,
+                    "PartNumber": part_number,
+                    "ChecksumSHA256": checksum_sha256,
+                },
+                ExpiresIn=self.config.s3_presign_expiry,
+                HttpMethod="PUT",
+            )
+            return str(url)
+        except Exception as exc:
+            raise ArtifactStoreError(f"S3 part authorization failed: {exc}") from exc
+
+    def complete_multipart_original(
+        self,
+        *,
+        key: str,
+        upload_id: str,
+        parts: list[dict[str, Any]],
+    ) -> None:
+        if not self.enabled:
+            raise ArtifactStoreError("Direct upload requires S3 artifact storage")
+        try:
+            self._s3().complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+        except Exception as exc:
+            raise ArtifactStoreError(f"S3 multipart completion failed: {exc}") from exc
+
+    def abort_multipart_upload(self, *, key: str, upload_id: str) -> None:
+        if not self.enabled:
+            return
+        try:
+            self._s3().abort_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+            )
+        except Exception as exc:
+            raise ArtifactStoreError(f"S3 multipart abort failed: {exc}") from exc
+
+    def verify_original_object(
+        self,
+        *,
+        key: str,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        """Verify server-controlled metadata and exact object length before import."""
+        if not self.enabled:
+            raise ArtifactStoreError("Direct upload requires S3 artifact storage")
+        try:
+            response = self._s3().head_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:
+            raise ArtifactStoreError(f"S3 artifact lookup failed: {exc}") from exc
+        metadata = response.get("Metadata") or {}
+        if int(response.get("ContentLength", -1)) != expected_size:
+            raise ArtifactStoreError("S3 APK size does not match the declared upload size")
+        if metadata.get("sha256") != expected_sha256:
+            raise ArtifactStoreError("S3 APK checksum metadata does not match the upload session")
+        if metadata.get("size") not in {None, str(expected_size)}:
+            raise ArtifactStoreError("S3 APK size metadata does not match the upload session")
+
+    def download_verified(
+        self,
+        *,
+        key: str,
+        destination: Path,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> tuple[str, int]:
+        """Stream one private S3 object to disk while verifying exact bytes.
+
+        The response is never accumulated in memory and the destination becomes
+        visible only after length and SHA-256 verification both succeed.
+        """
+        if not self.enabled:
+            raise ArtifactStoreError("S3 download requires S3 artifact storage")
+        destination = destination.resolve()
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if destination.exists():
+            raise ArtifactStoreError("S3 download destination already exists")
+        temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+        body = None
+        try:
+            response = self._s3().get_object(Bucket=self.bucket, Key=key)
+            if int(response.get("ContentLength", -1)) != expected_size:
+                raise ArtifactStoreError("S3 APK size changed before import")
+            metadata = response.get("Metadata") or {}
+            if metadata.get("sha256") != expected_sha256:
+                raise ArtifactStoreError("S3 APK checksum metadata changed before import")
+            body = response["Body"]
+            digest = hashlib.sha256()
+            size = 0
+            with temporary.open("xb") as target:
+                temporary.chmod(0o600)
+                while chunk := body.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > expected_size:
+                        raise ArtifactStoreError("S3 APK exceeds its declared size")
+                    digest.update(chunk)
+                    target.write(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            actual_sha256 = digest.hexdigest()
+            if size != expected_size:
+                raise ArtifactStoreError("S3 APK is incomplete")
+            if actual_sha256 != expected_sha256:
+                raise ArtifactStoreError("S3 APK checksum verification failed")
+            os.replace(temporary, destination)
+            return actual_sha256, size
+        except ArtifactStoreError:
+            raise
+        except Exception as exc:
+            raise ArtifactStoreError(f"S3 APK download failed: {exc}") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+            close = getattr(body, "close", None)
+            if callable(close):
+                close()
 
     def _put_apk(
         self,

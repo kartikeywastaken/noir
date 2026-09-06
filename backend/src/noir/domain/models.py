@@ -107,6 +107,7 @@ class AnalysisResult(BaseModel):
     native_abis: list[str] = Field(default_factory=list)
     runtimes: set[str] = Field(default_factory=set)
     runtime: str = "dalvik"  # backward compat; prefer runtimes set
+    runtime_evidence: dict[str, list[str]] = Field(default_factory=dict)
     managed_assemblies: list[str] = Field(default_factory=list)
     il2cpp_metadata_files: list[str] = Field(default_factory=list)
     apktool_metadata: dict[str, Any] = Field(default_factory=dict)
@@ -121,11 +122,21 @@ class AnalysisResult(BaseModel):
     def primary_runtime(self) -> str:
         """Single display label derived from the runtimes set.
 
-        Priority: il2cpp > mono > native_only > hybrid_web > dalvik.
+        Priority: il2cpp > mono > flutter > hermes > react_native > native_only >
+        hybrid_web > dalvik.
         Nothing should gate evidence collection on this property;
         use ``runtimes`` membership or direct evidence fields instead.
         """
-        for candidate in ("il2cpp", "mono", "native_only", "hybrid_web", "dalvik"):
+        for candidate in (
+            "il2cpp",
+            "mono",
+            "flutter",
+            "hermes",
+            "react_native",
+            "native_only",
+            "hybrid_web",
+            "dalvik",
+        ):
             if candidate in self.runtimes:
                 return candidate
         return self.runtime  # backward compat with legacy serialized data
@@ -212,6 +223,10 @@ class PatchOperation(BaseModel):
     anchor: str | None = None
     xml_element: str | None = None
     xml_attributes: dict[str, str] = Field(default_factory=dict)
+    xml_match_attributes: dict[str, str] = Field(
+        default_factory=dict,
+        exclude_if=lambda value: not value,
+    )
     xml_namespace: str | None = None
     assembly_name: str | None = None
     type_full_name: str | None = None

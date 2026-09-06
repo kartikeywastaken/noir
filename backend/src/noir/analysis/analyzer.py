@@ -6,6 +6,9 @@ without executing any application code.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from pathlib import Path
+
 import yaml
 
 from noir.analysis.manifest_parser import parse_manifest
@@ -19,9 +22,32 @@ from noir.domain.models import AnalysisResult, NativeLibInfo
 from noir.infrastructure.database.repositories import AnalysisRepository
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace
 
+_HERMES_MAGIC = (0x1F1903C103BC1FC6).to_bytes(8, byteorder="little")
+_REACT_NATIVE_LIBRARIES = {"libreactnative.so", "libreactnativejni.so"}
 
-def _has_hybrid_web_evidence(decoded, assets_dir, result) -> bool:
-    """Detect hybrid/web apps (Cordova, React Native, WebView-heavy).
+
+def _has_hermes_bytecode_header(path: Path) -> bool:
+    """Return true only for a bundle with the official Hermes HBC magic."""
+    try:
+        with path.open("rb") as stream:
+            return stream.read(len(_HERMES_MAGIC)) == _HERMES_MAGIC
+    except OSError:
+        return False
+
+
+def _add_runtime_evidence(
+    result: AnalysisResult,
+    runtime: str,
+    paths: Iterable[str],
+) -> None:
+    """Record sorted, de-duplicated workspace paths for a detected runtime."""
+    evidence = result.runtime_evidence.setdefault(runtime, [])
+    evidence.extend(path for path in paths if path not in evidence)
+    evidence.sort()
+
+
+def _has_hybrid_web_evidence(assets_dir: Path | None, result: AnalysisResult) -> bool:
+    """Detect hybrid/web apps (Cordova and WebView-heavy wrappers).
 
     Reuses the already-indexed smali classes rather than re-walking the tree.
     """
@@ -34,11 +60,6 @@ def _has_hybrid_web_evidence(decoded, assets_dir, result) -> bool:
         cordova_config = assets_dir / "config.xml"
         if cordova_config.is_file():
             return True
-        # React Native
-        rn_bundle = assets_dir / "index.android.bundle"
-        if rn_bundle.is_file():
-            return True
-
     # A WebView reference by itself is weak evidence: ad/analytics SDKs embed one
     # in otherwise ordinary native apps. Only classify a WebView wrapper when it
     # also ships a meaningful bundle of editable web assets.
@@ -168,10 +189,10 @@ class AnalysisService:
 
         # Assets
         assets_dir = decoded / "assets"
+        asset_paths: list[Path] = []
         if assets_dir.exists():
-            result.assets = sorted(
-                str(f.relative_to(assets_dir)) for f in assets_dir.rglob("*") if f.is_file()
-            )[:1000]  # Limit
+            asset_paths = sorted(path for path in assets_dir.rglob("*") if path.is_file())
+            result.assets = [str(path.relative_to(assets_dir)) for path in asset_paths[:1000]]
 
             managed_root = assets_dir / "bin" / "Data" / "Managed"
             if managed_root.exists():
@@ -198,6 +219,35 @@ class AnalysisService:
                             result.native_abis.append(abi_dir.name)
 
         native_names = {library.lower() for abi in result.native_libs for library in abi.libraries}
+        native_paths_by_name: dict[str, list[str]] = {}
+        for abi in result.native_libs:
+            for library in abi.libraries:
+                native_paths_by_name.setdefault(library.lower(), []).append(
+                    f"lib/{abi.abi}/{library}"
+                )
+
+        react_native_bundles = [
+            path for path in asset_paths if path.name == "index.android.bundle"
+        ]
+        react_native_bundle_paths = [
+            path.relative_to(decoded).as_posix() for path in react_native_bundles
+        ]
+        react_native_library_paths = [
+            path
+            for name in _REACT_NATIVE_LIBRARIES
+            for path in native_paths_by_name.get(name, [])
+        ]
+        hermes_library_paths = [
+            path
+            for name, paths in native_paths_by_name.items()
+            if name.startswith("libhermes")
+            for path in paths
+        ]
+        hermes_bundle_paths = [
+            path.relative_to(decoded).as_posix()
+            for path in react_native_bundles
+            if _has_hermes_bytecode_header(path)
+        ]
 
         # Additive capability detection — an app can have multiple runtimes.
         if result.smali_classes:
@@ -206,11 +256,29 @@ class AnalysisService:
             result.runtimes.add("il2cpp")
         if result.managed_assemblies or any(name.startswith("libmono") for name in native_names):
             result.runtimes.add("mono")
+        flutter_assets = decoded / "assets" / "flutter_assets"
+        if "libflutter.so" in native_names or flutter_assets.is_dir():
+            result.runtimes.add("flutter")
+        if react_native_bundle_paths or react_native_library_paths:
+            result.runtimes.add("react_native")
+            _add_runtime_evidence(
+                result,
+                "react_native",
+                [*react_native_bundle_paths, *react_native_library_paths],
+            )
+        if hermes_bundle_paths or hermes_library_paths:
+            result.runtimes.add("hermes")
+            _add_runtime_evidence(
+                result,
+                "hermes",
+                [*hermes_bundle_paths, *hermes_library_paths],
+            )
+            _add_runtime_evidence(result, "hermes_bytecode", hermes_bundle_paths)
         if result.native_libs:
             result.runtimes.add("native")
         if not result.smali_classes and result.native_libs:
             result.runtimes.add("native_only")
-        if _has_hybrid_web_evidence(decoded, assets_dir if assets_dir.exists() else None, result):
+        if _has_hybrid_web_evidence(assets_dir if assets_dir.exists() else None, result):
             result.runtimes.add("hybrid_web")
 
         # Backward-compatible single value from the set.

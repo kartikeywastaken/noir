@@ -54,6 +54,11 @@ NATIVE_OPERATIONS = {
     PatchOperationType.NATIVE_NOP_RANGE,
     PatchOperationType.NATIVE_BRANCH_REDIRECT,
 }
+XML_RESOURCE_OPERATIONS = {
+    PatchOperationType.XML_RESOURCE_ADD,
+    PatchOperationType.XML_RESOURCE_UPDATE,
+    PatchOperationType.XML_RESOURCE_REMOVE,
+}
 
 
 class PatchError(Exception):
@@ -145,6 +150,12 @@ class PatchEngine:
                 manifest = self.decoded_dir / "AndroidManifest.xml"
                 if not manifest.exists():
                     errors.append(f"{prefix}: AndroidManifest.xml not found")
+
+            elif op.operation in XML_RESOURCE_OPERATIONS:
+                try:
+                    self._validate_xml_resource_operation(op, target)
+                except PatchError as exc:
+                    errors.append(f"{prefix}: {exc}")
 
             elif op.operation == PatchOperationType.SMALI_REPLACE_METHOD:
                 if not op.class_descriptor or not op.method_signature:
@@ -759,11 +770,7 @@ class PatchEngine:
             self._apply_smali_insert(op, target)
             diff["action"] = "smali_inserted"
 
-        elif op.operation in (
-            PatchOperationType.XML_RESOURCE_ADD,
-            PatchOperationType.XML_RESOURCE_UPDATE,
-            PatchOperationType.XML_RESOURCE_REMOVE,
-        ):
+        elif op.operation in XML_RESOURCE_OPERATIONS:
             self._apply_xml_resource_operation(op, target)
             diff["action"] = f"xml_{op.operation.value}"
 
@@ -916,17 +923,30 @@ class PatchEngine:
         name_attr = f"{{{ANDROID_NS}}}name"
         target_name = op.xml_attributes.get("android:name", "") or op.xml_attributes.get("name", "")
 
+        def expanded_attribute(name: str) -> str:
+            if name.startswith("android:"):
+                return f"{{{ANDROID_NS}}}{name.split(':', 1)[1]}"
+            return name
+
+        selectors = {
+            expanded_attribute(name): value
+            for name, value in op.xml_match_attributes.items()
+        }
+        if target_name and name_attr not in selectors and "name" not in selectors:
+            selectors[name_attr] = target_name
+
         matches = [
             elem
             for elem in root.iter(op.xml_element or "")
-            if not target_name
-            or elem.get(name_attr) == target_name
-            or elem.get("name") == target_name
+            if all(elem.get(name) == value for name, value in selectors.items())
         ]
         if len(matches) != 1:
             selector = f"{op.xml_element or '<missing>'}"
-            if target_name:
-                selector += f" android:name={target_name!r}"
+            if selectors:
+                readable = ", ".join(
+                    f"{name.rsplit('}', 1)[-1]}={value!r}" for name, value in selectors.items()
+                )
+                selector += f" [{readable}]"
             raise PatchError(
                 f"Manifest selector {selector} matched {len(matches)} elements; "
                 "exactly one is required"
@@ -1046,27 +1066,93 @@ class PatchEngine:
                 raise PatchError("New method anchor cannot be inside an annotation")
         target.write_text(content[:insert_at] + "\n" + op.new_content + content[insert_at:])
 
-    def _apply_xml_resource_operation(self, op: PatchOperation, target: Path) -> None:
-        """Apply XML resource file operations."""
+    @staticmethod
+    def _resource_identity(op: PatchOperation) -> tuple[str, str, str | None]:
+        """Return the resource tag/name/type used for one exact child selector."""
+        if op.operation == PatchOperationType.XML_RESOURCE_REMOVE:
+            tag = op.xml_element or ""
+            name = op.xml_attributes.get("name") or op.xml_attributes.get("android:name") or ""
+            resource_type = op.xml_attributes.get("type")
+        else:
+            if not op.new_content:
+                raise PatchValidationError(
+                    f"{op.operation.value} requires one complete resource element"
+                )
+            try:
+                element = fromstring(op.new_content)
+            except Exception as exc:
+                raise PatchValidationError(f"Invalid resource element: {exc}") from exc
+            tag = str(element.tag)
+            name = element.get("name", "")
+            resource_type = element.get("type")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", tag):
+            raise PatchValidationError("Resource operation requires a simple XML element tag")
+        if not name:
+            raise PatchValidationError("Resource operation requires an exact name attribute")
+        return tag, name, resource_type
+
+    @staticmethod
+    def _resource_pattern(tag: str, name: str, resource_type: str | None) -> re.Pattern[str]:
+        attributes = rf"(?=[^>]*\bname\s*=\s*[\"']{re.escape(name)}[\"'])"
+        if resource_type:
+            attributes += rf"(?=[^>]*\btype\s*=\s*[\"']{re.escape(resource_type)}[\"'])"
+        return re.compile(
+            rf"<{re.escape(tag)}\b{attributes}[^>]*(?:/>|>.*?</{re.escape(tag)}\s*>)",
+            re.DOTALL,
+        )
+
+    def _resource_matches(self, op: PatchOperation, target: Path) -> tuple[str, re.Pattern[str]]:
+        if not target.is_file():
+            raise PatchValidationError("XML resource file does not exist")
+        try:
+            root = parse(target).getroot()
+        except Exception as exc:
+            raise PatchValidationError(f"Invalid XML resource file: {exc}") from exc
+        if root.tag != "resources":
+            raise PatchValidationError("XML resource operation requires a <resources> root")
+        tag, name, resource_type = self._resource_identity(op)
+        candidates = [
+            child
+            for child in root
+            if child.tag == tag
+            and child.get("name") == name
+            and (resource_type is None or child.get("type") == resource_type)
+        ]
+        pattern = self._resource_pattern(tag, name, resource_type)
+        content = target.read_text(errors="strict")
+        textual_matches = pattern.findall(content)
+        if len(candidates) != len(textual_matches):
+            raise PatchValidationError("Resource selector could not be bound to exact source text")
         if op.operation == PatchOperationType.XML_RESOURCE_ADD:
-            if not target.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(op.new_content or "")
-            else:
-                # Add element to existing XML
-                tree = parse(target)
-                root = tree.getroot()
-                if op.new_content:
-                    new_elem = fromstring(op.new_content)
-                    root.append(new_elem)
-                tree.write(target, encoding="utf-8", xml_declaration=True)
+            if candidates:
+                raise PatchValidationError(
+                    f"Resource selector {tag}[name={name!r}] already exists"
+                )
+        elif len(candidates) != 1:
+            raise PatchValidationError(
+                f"Resource selector {tag}[name={name!r}] matched {len(candidates)} elements; "
+                "exactly one is required"
+            )
+        return content, pattern
+
+    def _validate_xml_resource_operation(self, op: PatchOperation, target: Path) -> None:
+        self._resource_matches(op, target)
+
+    def _apply_xml_resource_operation(self, op: PatchOperation, target: Path) -> None:
+        """Apply one exact named child edit without replacing the resource file."""
+        content, pattern = self._resource_matches(op, target)
+        if op.operation == PatchOperationType.XML_RESOURCE_ADD:
+            closing = content.rfind("</resources>")
+            if closing < 0:
+                raise PatchError("XML resource file is missing </resources>")
+            insertion = f"    {op.new_content}\n"
+            target.write_text(content[:closing] + insertion + content[closing:])
 
         elif op.operation == PatchOperationType.XML_RESOURCE_UPDATE:
-            if op.new_content:
-                target.write_text(op.new_content)
+            target.write_text(pattern.sub(op.new_content or "", content, count=1))
 
-        elif op.operation == PatchOperationType.XML_RESOURCE_REMOVE and target.exists():
-            target.unlink()
+        elif op.operation == PatchOperationType.XML_RESOURCE_REMOVE:
+            target.write_text(pattern.sub("", content, count=1))
 
     def undo_patch(self, patch: PatchSet) -> dict:
         self.recover()
