@@ -1233,7 +1233,16 @@ def ai_check():
     try:
         provider = create_ai_provider(get_config())
         result = provider._parse_json_response(
-            provider._call_model('{"status":"ok"}', "Return only valid JSON.")
+            provider._call_model(
+                '{"status":"ok"}',
+                "Return exactly the requested connectivity JSON and nothing else.",
+                response_schema={
+                    "type": "object",
+                    "properties": {"status": {"type": "string", "enum": ["ok"]}},
+                    "required": ["status"],
+                    "additionalProperties": False,
+                },
+            )
         )
         if result.get("status") != "ok":
             raise GeminiProviderError("Unexpected Gemini connectivity response")
