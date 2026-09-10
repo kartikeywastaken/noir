@@ -14,6 +14,7 @@ from noir.analysis.analyzer import AnalysisService
 from noir.application.patch_service import PatchService, PlanService, PlanServiceError
 from noir.domain.enums import ApprovalScope, PatchOperationType
 from noir.infrastructure.ai.context import AiContextTools
+from noir.infrastructure.ai.factory import create_ai_provider
 from noir.infrastructure.ai.gemini import GeminiProvider
 from noir.infrastructure.database.repositories import ApprovalRepository, ProjectRepository
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace, WorkspaceError
@@ -99,6 +100,13 @@ def invalidate_plan_cache(project_id: str) -> None:
     _plan_cache.invalidate(project_id)
 
 
+def _create_generation_provider(config):
+    """Keep the legacy Gemini seam while enabling ADK on the test branch."""
+    if config.ai_provider == "adk":
+        return create_ai_provider(config, purpose="generation")
+    return GeminiProvider(config=config, purpose="generation")
+
+
 def _invalid_plan_paths(
     plan, workspace: ProjectWorkspace, allowed_paths: set[str] | None = None
 ) -> list[str]:
@@ -160,6 +168,10 @@ def _create_discovery_provider(config):
     elif provider_name == "gemini":
         # Gemini discovery requires the full EvidenceDiscovery wrapper — handled below.
         return None  # Signal caller to use the legacy Gemini path
+    elif provider_name == "adk":
+        from noir.infrastructure.ai.adk import AdkDiscoveryProvider
+
+        return AdkDiscoveryProvider(config)
     else:
         from noir.infrastructure.ai.local_discovery import LocalDiscoveryProvider
 
@@ -187,7 +199,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
 
         workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
-        generation_provider = GeminiProvider(config=config, purpose="generation")
+        generation_provider = _create_generation_provider(config)
         budget = _WorkflowCallBudget(config)
 
         # Phase C: evidence-driven discovery before plan generation.
@@ -205,6 +217,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
             else:
                 # Legacy Gemini discovery path
                 from noir.infrastructure.ai.discovery import EvidenceDiscovery
+                from noir.infrastructure.ai.gemini import GeminiProvider
 
                 gemini_discovery = GeminiProvider(config=config, purpose="discovery")
                 discovery = EvidenceDiscovery(
@@ -285,5 +298,5 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None)
         context = AiContextTools(ProjectWorkspace(project_id, config), analysis).build_context(
             [change.relative_path for change in plan.file_changes], user_request=plan.user_request
         )
-        patch = GeminiProvider(config=config, purpose="generation").generate_patch(plan, context)
+        patch = _create_generation_provider(config).generate_patch(plan, context)
         return PatchService(config).store_patch(patch, preview=preview)

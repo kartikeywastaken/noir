@@ -234,11 +234,9 @@ class BuildService:
 
         if allow_ai:
             try:
-                from noir.infrastructure.ai.gemini import GeminiProvider
+                from noir.infrastructure.ai.factory import create_ai_provider
 
-                provider = GeminiProvider(
-                    config=self.config,
-                )
+                provider = create_ai_provider(self.config)
                 workspace = ProjectWorkspace(project_id, self.config)
                 from noir.infrastructure.ai.context import AiContextTools
 

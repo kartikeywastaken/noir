@@ -212,7 +212,8 @@ def _check_native_libraries() -> ToolCheck:
         name="IL2CPP/native patching",
         available=True,
         version=(
-            f"LIEF {lief.__version__}; Capstone {getattr(capstone, '__version__', 'unknown')}"
+            f"LIEF {getattr(lief, '__version__', 'unknown')}; "
+            f"Capstone {getattr(capstone, '__version__', 'unknown')}"
         ),
         required_for="optional_for_binary",
         message=f"ELF/disassembly ready; assembler={assembler}",
@@ -227,7 +228,7 @@ def _check_ai(config: NoirConfig) -> ToolCheck:
             required_for="optional_for_ai",
             message="AI provider disabled.",
         )
-    if config.ai_provider.strip().lower() != "gemini":
+    if config.ai_provider not in {"gemini", "adk"}:
         return ToolCheck(
             name="AI Provider",
             available=False,

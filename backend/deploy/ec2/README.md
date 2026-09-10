@@ -16,6 +16,8 @@ with the APK. The following advanced settings are for the existing owner workspa
 - Tap **Save & Test Connection**. No laptop server, ADB reverse, or tunnel is needed.
 
 The Gemini key is configured on the server. Do not enter it as the app's bearer token.
+The ADK evaluation profile routes both evidence discovery and structured plan/patch
+generation through Google ADK while retaining the same Gemini credentials and model.
 The cloud test signer is independent of the laptop's keys. APKs signed with different
 certificates normally cannot update one another; use a clean test install when necessary.
 
