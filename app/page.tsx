@@ -485,6 +485,27 @@ export default function Home() {
           event.currentTarget.style.setProperty("--grid-y", `${event.clientY - bounds.top}px`);
         }}
       >
+        <div className="hero-backdrop" aria-hidden="true">
+          <svg className="circuit-map" viewBox="0 0 1600 820" preserveAspectRatio="none">
+            <path d="M0 168H188L238 218H422L468 172H620" />
+            <path d="M1600 142H1390L1338 194H1190L1142 242H1012" />
+            <path d="M0 628H205L260 574H424L482 632H650" />
+            <path d="M1600 660H1434L1384 610H1220L1168 558H1010" />
+            <path d="M800 0V94L748 146V238" />
+            <path d="M800 820V742L854 688V604" />
+            <circle cx="238" cy="218" r="4" />
+            <circle cx="1338" cy="194" r="4" />
+            <circle cx="260" cy="574" r="4" />
+            <circle cx="1384" cy="610" r="4" />
+          </svg>
+          <div className="calibration-rings"><i /><i /><i /></div>
+          <span className="telemetry telemetry-a">APK / CONTROL PLANE<br />X 04.219 · Y 08.404</span>
+          <span className="telemetry telemetry-b">SHA-256<br />INTEGRITY CHANNEL</span>
+          <span className="telemetry telemetry-c">REVISION 01<br />BOUNDED CHANGESET</span>
+          <span className="telemetry telemetry-d">SIGN / VERIFY<br />OUTPUT SEALED</span>
+          <div className="side-scale side-scale-left">{["00", "16", "32", "48", "64"].map((tick) => <span key={tick}>{tick}</span>)}</div>
+          <div className="side-scale side-scale-right">{["A", "B", "C", "D", "E"].map((tick) => <span key={tick}>{tick}</span>)}</div>
+        </div>
         <div className="hero-layout">
           <div className="hero-object" data-reveal><NoirApkCoreHero /></div>
         </div>
