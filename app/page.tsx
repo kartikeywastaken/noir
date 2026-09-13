@@ -268,7 +268,6 @@ export default function Home() {
       </header>
 
       <section id="top" className="landing-hero">
-        <div className="hero-orbit" aria-hidden="true"><i /><i /><span>N</span></div>
         <div className="hero-copy">
           <p className="eyebrow" data-reveal><ShieldCheck size={14} /> Authorized APK editor</p>
           <h1 data-reveal>Edit apps.<span>In plain English.</span></h1>
@@ -280,7 +279,6 @@ export default function Home() {
             <span>Nothing runs without approval.</span>
           </div>
         </div>
-        <div className="scroll-cue" data-reveal><span /> Scroll to build</div>
       </section>
 
       <section className="workspace-section">
@@ -343,7 +341,6 @@ export default function Home() {
                 ))}
                 <span className="cursor-line"><i /> {working ? "processing" : phase === "complete" ? "complete" : "ready"}</span>
               </div>
-              <div className="console-foot"><span>SHA-256 bound</span><span>Audit retained</span></div>
             </div>
           </div>
         </section>
