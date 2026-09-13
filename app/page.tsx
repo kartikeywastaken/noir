@@ -17,12 +17,10 @@ import {
   CheckCircle2,
   ChevronRight,
   FileArchive,
-  Fingerprint,
   LockKeyhole,
   Radio,
   RotateCcw,
   ShieldCheck,
-  Sparkles,
   Terminal,
   Upload,
 } from "lucide-react";
@@ -35,9 +33,8 @@ type Phase = "empty" | "ready" | "previewing" | "review" | "building" | "complet
 type Log = { time: string; tag: string; message: string };
 
 const openingLogs: Log[] = [
-  { time: "14:08:02", tag: "AUTH", message: "Private workspace connected" },
-  { time: "14:08:04", tag: "INPUT", message: "Awaiting an authorized APK" },
-  { time: "14:08:04", tag: "SAFE", message: "No changes run without exact approval" },
+  { time: "14:08:02", tag: "SAFE", message: "Private workspace ready" },
+  { time: "14:08:04", tag: "WAIT", message: "Drop an authorized APK" },
 ];
 
 const previewSequence = [
@@ -266,38 +263,34 @@ export default function Home() {
           <span className="mark" aria-hidden="true">N</span>
           <span>NOIR</span>
         </a>
-        <nav aria-label="Primary navigation">
-          <a href="#workspace">Workspace</a>
-          <a href="#protocol">Protocol</a>
-          <a href="#security">Security</a>
-        </nav>
-        <div className="nav-status"><span className="pulse-dot" /> Systems online</div>
+        <a className="nav-link" href="#workspace">Workspace</a>
+        <div className="nav-status"><span className="pulse-dot" /> Online</div>
       </header>
 
-      <section id="top" className="hero-grid">
+      <section id="top" className="landing-hero">
+        <div className="hero-orbit" aria-hidden="true"><i /><i /><span>N</span></div>
         <div className="hero-copy">
-          <p className="eyebrow" data-reveal><ShieldCheck size={15} /> Authorized APK workspace</p>
-          <h1 data-reveal>Change the app.<span>Keep control.</span></h1>
-          <p className="hero-intro" data-reveal>
-            NOIR turns a plain-language request into an exact, reviewable APK patch—then rebuilds,
-            signs, and verifies the result.
-          </p>
+          <p className="eyebrow" data-reveal><ShieldCheck size={14} /> Authorized APK editor</p>
+          <h1 data-reveal>Edit apps.<span>In plain English.</span></h1>
+          <p className="hero-intro" data-reveal>Describe the change. Review the diff. Build with proof.</p>
           <div className="hero-actions" data-reveal>
             <Button className="primary-cta" asChild>
-              <a href="#workspace">Open workspace <ArrowDownRight /></a>
+              <a href="#workspace">Enter workspace <ArrowDownRight /></a>
             </Button>
-            <span>Nothing is applied before approval.</span>
-          </div>
-          <div className="trust-row" data-reveal>
-            <div><strong>01</strong><span>Private upload</span></div>
-            <div><strong>02</strong><span>Exact review</span></div>
-            <div><strong>03</strong><span>Verified APK</span></div>
+            <span>Nothing runs without approval.</span>
           </div>
         </div>
+        <div className="scroll-cue" data-reveal><span /> Scroll to build</div>
+      </section>
 
-        <section id="workspace" className="workspace" aria-labelledby="workspace-title" data-reveal>
+      <section className="workspace-section">
+        <div className="workspace-intro" data-scroll-reveal>
+          <p>NOIR / WORKSPACE</p>
+          <h2>Make the change.</h2>
+        </div>
+        <section id="workspace" className="workspace" aria-labelledby="workspace-title" data-scroll-reveal>
           <div className="workspace-head">
-            <div><p>INTERACTIVE PRODUCT PREVIEW</p><h2 id="workspace-title">APK workspace</h2></div>
+            <div><p>INTERACTIVE PREVIEW</p><h2 id="workspace-title">APK workspace</h2></div>
             <span className="secure-chip"><LockKeyhole size={13} /> Private</span>
           </div>
           <div className="workspace-body">
@@ -305,15 +298,15 @@ export default function Home() {
               <label className={`upload-zone ${fileName ? "has-file" : ""}`} htmlFor="apk-input" onDrop={handleDrop} onDragOver={(event) => event.preventDefault()}>
                 <input id="apk-input" type="file" accept=".apk,application/vnd.android.package-archive" onChange={handleFile} />
                 <span className="upload-icon">{fileName ? <Check size={21} /> : <Upload size={21} />}</span>
-                <span><strong>{fileName || "Choose an APK"}</strong><small>{fileMeta || "or drop an authorized file here"}</small></span>
+                <span><strong>{fileName || "Drop APK"}</strong><small>{fileMeta || "or browse files"}</small></span>
                 <FileArchive size={19} />
               </label>
-              {!fileName && <button className="sample-link" onClick={loadSample}>No APK nearby? Load safe sample <ChevronRight size={13} /></button>}
+              {!fileName && <button className="sample-link" onClick={loadSample}>Try a safe sample <ChevronRight size={13} /></button>}
               <div className="request-block">
-                <div className="field-label"><label htmlFor="change-request">Describe the change</label><span>Plain English</span></div>
+                <div className="field-label"><label htmlFor="change-request">Change request</label></div>
                 <Textarea id="change-request" className="request-input" value={request} onChange={(event) => setRequest(event.target.value)} disabled={working || phase === "complete"} />
               </div>
-              <div className="consent-row"><span className="check-box"><Check size={12} /></span><span>I authorize this APK and consent to bounded AI analysis.</span></div>
+              <div className="consent-row"><span className="check-box"><Check size={12} /></span><span>Authorized APK</span></div>
               {phase === "review" && (
                 <div className="review-card">
                   <span>PLAN 7F2A · REV 00</span>
@@ -335,7 +328,7 @@ export default function Home() {
             </div>
 
             <div className="console-column">
-              <div className="console-head"><span><Terminal size={14} /> Live process</span><span className="live-state"><Radio size={12} /> LIVE</span></div>
+              <div className="console-head"><span><Terminal size={14} /> Activity</span><span className="live-state"><Radio size={12} /> Live</span></div>
               <div className="stage-strip" aria-label="Workflow stages">
                 {['Input', 'Review', 'Build', 'Verify'].map((label, index) => (
                   <span key={label} className={index <= stage ? "active" : ""}>{label}{index < 3 && <i />}</span>
@@ -350,37 +343,13 @@ export default function Home() {
                 ))}
                 <span className="cursor-line"><i /> {working ? "processing" : phase === "complete" ? "complete" : "ready"}</span>
               </div>
-              <div className="console-foot"><span>SHA-256 bound</span><span>Revision locked</span><span>Audit retained</span></div>
+              <div className="console-foot"><span>SHA-256 bound</span><span>Audit retained</span></div>
             </div>
           </div>
         </section>
       </section>
 
-      <section id="protocol" className="protocol-section" data-scroll-reveal>
-        <div className="section-kicker"><span>01—03</span> CONTROL PROTOCOL</div>
-        <div className="protocol-title">
-          <h2>One request.<br />Three hard gates.</h2>
-          <p>Every change moves through explicit stages. The model can propose. Only you can authorize.</p>
-        </div>
-        <div className="protocol-grid">
-          <article><span>01</span><Upload /><h3>Bring the APK</h3><p>Upload an authorized standalone APK through resumable, integrity-checked ranges.</p></article>
-          <article><span>02</span><Sparkles /><h3>Review the exact diff</h3><p>Inspect grounded paths, risks, permissions, and deterministic operations before anything changes.</p></article>
-          <article><span>03</span><Fingerprint /><h3>Build with proof</h3><p>Validate, rebuild, align, sign, and verify the resulting artifact against its recorded hash.</p></article>
-        </div>
-      </section>
-
-      <section id="security" className="security-section" data-scroll-reveal>
-        <p className="eyebrow"><LockKeyhole size={15} /> CONTROL IS THE FEATURE</p>
-        <h2>DRAFT<br /><span>AND DECIDE</span></h2>
-        <div className="security-list">
-          <p><span>01</span> Exact preimage hashes</p>
-          <p><span>02</span> Revision-bound approval</p>
-          <p><span>03</span> Bounded file context</p>
-          <p><span>04</span> Signed audit record</p>
-        </div>
-      </section>
-
-      <footer><a className="wordmark" href="#top"><span className="mark">N</span><span>NOIR</span></a><p>Authorized modifications only.</p><span>© 2026</span></footer>
+      <footer><a className="wordmark" href="#top"><span className="mark">N</span><span>NOIR</span></a><p>Draft. Decide. Build.</p><span>© 2026</span></footer>
     </main>
   );
 }
