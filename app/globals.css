@@ -62,11 +62,10 @@ button, textarea, input { font: inherit; }
   overflow: hidden;
   position: relative;
   background:
-    radial-gradient(circle at 50% 17%, rgba(216, 255, 62, .055), transparent 29rem),
     linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),
     #070808;
-  background-size: auto, 64px 64px, 64px 64px, auto;
+  background-size: 64px 64px, 64px 64px, auto;
 }
 
 .scanline { position: fixed; inset: 0; z-index: 20; pointer-events: none; opacity: .05; background: repeating-linear-gradient(0deg, transparent 0 4px, rgba(255,255,255,.03) 5px); }
@@ -79,18 +78,36 @@ button, textarea, input { font: inherit; }
 .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: #d8ff3e; box-shadow: 0 0 14px rgba(216,255,62,.8); animation: pulse 2s ease-in-out infinite; }
 .pulse-dot.offline { background: #777c75; box-shadow: none; }
 
-.landing-hero { min-height: calc(100svh - 72px); padding: 80px 20px 52px; position: relative; display: grid; place-items: center; isolation: isolate; }
-.hero-copy { position: relative; z-index: 2; width: min(1020px, 100%); text-align: center; display: flex; flex-direction: column; align-items: center; }
-.eyebrow { margin: 0; display: flex; align-items: center; gap: 8px; color: #d8ff3e; text-transform: uppercase; letter-spacing: .17em; font: .64rem var(--font-mono); }
-.hero-copy h1 { margin: 26px 0 24px; max-width: 1000px; font-size: clamp(4rem, 9.4vw, 9rem); line-height: .83; letter-spacing: -.075em; font-weight: 800; text-transform: uppercase; }
-.hero-copy h1 span { display: block; color: #6e736c; }
-.hero-intro { max-width: 520px; margin: 0; color: #9ca199; font-size: clamp(.95rem, 1.4vw, 1.12rem); line-height: 1.6; }
-.hero-actions { margin-top: 34px; display: flex; align-items: center; gap: 20px; color: #747a72; font-size: .72rem; }
-.primary-cta { height: 48px; border-radius: 8px; background: #d8ff3e; color: #070808; padding: 0 20px; text-transform: uppercase; letter-spacing: .08em; font: 700 .68rem var(--font-mono); box-shadow: 0 12px 36px rgba(216,255,62,.1); transition: transform .2s ease, background .2s ease; }
-.primary-cta:hover { background: #e7ff8c; transform: translateY(-2px); }
-.primary-cta svg { width: 15px; height: 15px; }
-
-.workspace-section { width: min(1220px, calc(100% - 40px)); margin: 0 auto; padding: clamp(100px, 12vw, 170px) 0 130px; }
+.landing-hero { --grid-x: 72%; --grid-y: 42%; min-height: calc(100svh - 72px); padding: clamp(34px, 5vh, 64px) clamp(20px, 4vw, 64px) 24px; position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; isolation: isolate; }
+.landing-hero::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(circle 160px at var(--grid-x) var(--grid-y), rgba(200,255,26,.065), transparent 72%); transition: background-position .15s linear; }
+.landing-hero::after { content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none; opacity: .48; background-image: radial-gradient(circle, rgba(216,255,62,.16) 0 1px, transparent 1.5px); background-size: 64px 64px; background-position: -1px -1px; mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 78%, transparent); }
+.hero-layout { width: 100%; max-width: 1720px; min-height: min(830px, calc(100svh - 170px)); margin: 0 auto; display: grid; grid-template-columns: 1fr; grid-template-areas: "object"; place-items: center; }
+.hero-object { grid-area: object; position: relative; z-index: 2; min-width: 0; width: 100%; height: min(860px, calc(100svh - 105px)); min-height: 660px; }
+.android-stage { position: relative; width: 100%; height: 100%; cursor: crosshair; isolation: isolate; }
+.android-stage::before { content: ""; position: absolute; inset: 8% 4% 10%; z-index: -1; border: 1px solid rgba(255,255,255,.06); clip-path: polygon(0 0, 24% 0, 24% 1px, 76% 1px, 76% 0, 100% 0, 100% 100%, 76% 100%, 76% calc(100% - 1px), 24% calc(100% - 1px), 24% 100%, 0 100%); }
+.android-stage::after { content: ""; position: absolute; z-index: -2; inset: 14% 13%; background: radial-gradient(circle, rgba(200,255,26,.11), transparent 64%); filter: blur(20px); opacity: .55; transition: opacity .5s ease, transform .7s cubic-bezier(.2,.8,.2,1); }
+.android-stage.is-exploded::after { opacity: .9; transform: scale(1.18); }
+.android-canvas { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; }
+.android-reticle { position: absolute; inset: 50% auto auto 50%; width: 42px; height: 42px; translate: -50% -50%; pointer-events: none; opacity: .34; transition: opacity .35s ease, scale .5s ease; }
+.android-reticle span { position: absolute; background: #c8ff1a; }
+.android-reticle span:first-child { width: 100%; height: 1px; top: 50%; left: 0; }
+.android-reticle span:last-child { width: 1px; height: 100%; left: 50%; top: 0; }
+.is-exploded .android-reticle { opacity: 0; scale: .35; }
+.android-caption { position: absolute; left: 50%; bottom: 7%; translate: -50% 0; display: grid; gap: 5px; color: #656a63; text-align: center; pointer-events: none; font: .52rem var(--font-mono); letter-spacing: .13em; }
+.android-caption b { color: #c8ff1a; font-size: .58rem; font-weight: 500; }
+.apk-labels { position: absolute; inset: 0; pointer-events: none; }
+.apk-label { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 15%; min-width: 0; color: #7d837a; text-align: center; font: .45rem var(--font-mono); letter-spacing: .045em; opacity: 0; transform: translateY(-7px); transition: opacity .25s ease, transform .45s cubic-bezier(.2,.8,.2,1); }
+.apk-label i { width: 1px; height: 36px; margin-top: 2px; background: linear-gradient(to bottom, #c8ff1a, transparent); }
+.apk-label span { color: #c8ff1a; }
+.apk-label b { max-width: 100%; overflow: hidden; color: #a9afa5; font-weight: 400; white-space: nowrap; text-overflow: ellipsis; }
+.is-exploded .apk-label { opacity: 1; transform: none; }
+.layer-1 { left: 0; top: 5%; transition-delay: .04s; }
+.layer-2 { left: 17%; top: 10%; transition-delay: .08s; }
+.layer-3 { left: 34%; top: 15%; transition-delay: .12s; }
+.layer-4 { left: 51%; top: 20%; transition-delay: .16s; }
+.layer-5 { left: 68%; top: 25%; transition-delay: .2s; }
+.layer-6 { left: 85%; top: 30%; transition-delay: .24s; }
+.workspace-section { width: min(1220px, calc(100% - 40px)); margin: 0 auto; padding: clamp(44px, 6vw, 82px) 0 130px; }
 .workspace-intro { margin: 0 0 34px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .workspace-intro p { margin: 0 0 7px; color: #d8ff3e; letter-spacing: .16em; font: .59rem var(--font-mono); }
 .workspace-intro h2 { margin: 0; font-size: clamp(2.5rem, 5vw, 5rem); line-height: .95; letter-spacing: -.055em; text-transform: uppercase; }
@@ -167,8 +184,16 @@ footer > span { justify-self: end; }
 @media (max-width: 820px) {
   .site-nav { grid-template-columns: 1fr auto; }
   .nav-link { display: none; }
-  .landing-hero { min-height: calc(100svh - 72px); padding-top: 64px; }
-  .hero-copy h1 { font-size: clamp(3.8rem, 16vw, 7rem); }
+  .landing-hero { min-height: calc(100svh - 72px); padding-top: 24px; }
+  .hero-layout { min-height: auto; }
+  .hero-object { width: 100%; height: 680px; min-height: 0; }
+  .apk-label { width: 20%; }
+  .layer-1 { left: 2%; top: 4%; }
+  .layer-2 { left: 78%; top: 4%; }
+  .layer-3 { left: 2%; top: 32%; }
+  .layer-4 { left: 78%; top: 32%; }
+  .layer-5 { left: 2%; top: 60%; }
+  .layer-6 { left: 78%; top: 60%; }
   .workspace-body { grid-template-columns: 1fr; }
   .controls-column { border-right: 0; border-bottom: 1px solid #292c28; }
 }
@@ -176,8 +201,9 @@ footer > span { justify-self: end; }
 @media (max-width: 540px) {
   .site-nav { height: 64px; }
   .landing-hero { min-height: calc(100svh - 64px); padding-inline: 18px; }
-  .hero-copy h1 { margin-block: 22px; font-size: clamp(3.25rem, 17vw, 5.4rem); }
-  .hero-actions { flex-direction: column; gap: 13px; }
+  .hero-object { height: 610px; margin-inline: -18px; width: calc(100% + 36px); }
+  .android-caption { bottom: 4%; }
+  .apk-label { font-size: .36rem; }
   .workspace-section { width: min(100% - 24px, 1220px); padding-block: 90px; }
   .workspace-intro { margin-bottom: 24px; }
   .workspace { border-radius: 13px; }

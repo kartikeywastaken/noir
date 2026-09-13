@@ -12,7 +12,6 @@ import {
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
-  ArrowDownRight,
   Check,
   CheckCircle2,
   Download,
@@ -20,7 +19,6 @@ import {
   LockKeyhole,
   Radio,
   RotateCcw,
-  ShieldCheck,
   Terminal,
   Upload,
 } from "lucide-react";
@@ -29,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import { NoirApkCoreHero } from "@/components/noir-android-hero";
 
 type Phase =
   | "empty"
@@ -169,7 +168,10 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => { void checkBackend(); }, [checkBackend]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void checkBackend(), 0);
+    return () => window.clearTimeout(timer);
+  }, [checkBackend]);
 
   const loadFile = useCallback((file: File) => {
     if (!file.name.toLowerCase().endsWith(".apk")) {
@@ -469,21 +471,24 @@ export default function Home() {
     <main ref={root} className="noir-shell">
       <div className="scanline" aria-hidden="true" />
       <header className="site-nav" data-reveal>
-        <a className="wordmark" href="#top" aria-label="NOIR home"><span className="mark" aria-hidden="true">N</span><span>NOIR</span></a>
+        <a className="wordmark" href="#top" aria-label="NOIR home"><span>NOIR</span></a>
         <a className="nav-link" href="#workspace">Workspace</a>
         <div className="nav-status"><span className={`pulse-dot ${backendOnline ? "" : "offline"}`} /> {backendOnline ? "AWS online" : "Connecting"}</div>
       </header>
 
-      <section id="top" className="landing-hero">
-        <div className="hero-copy">
-          <p className="eyebrow" data-reveal><ShieldCheck size={14} /> Authorized APK editor</p>
-          <h1 data-reveal>Edit apps.<span>In plain English.</span></h1>
-          <p className="hero-intro" data-reveal>Describe the change. Review the diff. Build with proof.</p>
-          <div className="hero-actions" data-reveal>
-            <Button className="primary-cta" asChild><a href="#workspace">Enter workspace <ArrowDownRight /></a></Button>
-            <span>Nothing runs without approval.</span>
-          </div>
+      <section
+        id="top"
+        className="landing-hero"
+        onPointerMove={(event) => {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          event.currentTarget.style.setProperty("--grid-x", `${event.clientX - bounds.left}px`);
+          event.currentTarget.style.setProperty("--grid-y", `${event.clientY - bounds.top}px`);
+        }}
+      >
+        <div className="hero-layout">
+          <div className="hero-object" data-reveal><NoirApkCoreHero /></div>
         </div>
+
       </section>
 
       <section className="workspace-section">
