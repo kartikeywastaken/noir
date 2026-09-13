@@ -60,6 +60,17 @@ type Review = {
   paths: string[];
   operationCount: number;
 };
+type S3UploadSession = {
+  upload_id: string;
+  project_id: string;
+  upload_mode: "s3";
+  part_size: number;
+  total_parts: number;
+  completed_parts?: CompletedPart[];
+};
+type PendingPart = { part_number: number; bytes: ArrayBuffer; checksum_sha256: string };
+type CompletedPart = { part_number: number; etag: string; checksum_sha256: string; size: number };
+type PresignedPart = { part_number: number; url: string; headers: Record<string, string> };
 
 const openingLogs: Log[] = [
   { time: "--:--:--", tag: "AWS", message: "Connecting to NOIR" },
@@ -75,6 +86,29 @@ const stamp = () =>
     second: "2-digit",
     hour12: false,
   }).format(new Date());
+
+const hexDigest = (bytes: ArrayBuffer) =>
+  Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, "0")).join("");
+
+const base64Digest = (bytes: ArrayBuffer) => {
+  let binary = "";
+  for (const value of new Uint8Array(bytes)) binary += String.fromCharCode(value);
+  return window.btoa(binary);
+};
+
+const retry = async <T,>(operation: () => Promise<T>) => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt === 3) break;
+      await wait(500 * (2 ** attempt));
+    }
+  }
+  throw lastError;
+};
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/noir${path}`, {
@@ -202,33 +236,78 @@ export default function Home() {
   const uploadAndImport = useCallback(async (file: File) => {
     setPhase("uploading");
     setProgress(2);
-    addLog("UPLOAD", "Opening private upload");
+    addLog("HASH", "Verifying APK locally");
     const key = crypto.randomUUID();
-    let session = await apiJson<{ upload_id: string; chunk_size: number; offset: number }>(
+    const fileBytes = await file.arrayBuffer();
+    const sha256 = hexDigest(await crypto.subtle.digest("SHA-256", fileBytes));
+    setProgress(5);
+    addLog("UPLOAD", "Opening direct S3 upload");
+    const session = await apiJson<S3UploadSession>(
       "/v1/uploads",
-      jsonRequest("POST", { filename: file.name, size: file.size, upload_mode: "proxy" }, key),
+      jsonRequest("POST", { filename: file.name, size: file.size, sha256, upload_mode: "s3" }, key),
     );
-    const chunkSize = session.chunk_size;
-    if (!session.upload_id || !Number.isInteger(chunkSize) || chunkSize <= 0) {
-      throw new Error("Backend returned an invalid upload session.");
+    if (session.upload_mode !== "s3" || !session.upload_id || !Number.isInteger(session.part_size) || session.part_size < 5 * 1024 * 1024) {
+      throw new Error("Direct S3 upload is unavailable.");
     }
-    let offset = session.offset || 0;
-    while (offset < file.size) {
-      const chunk = await file.slice(offset, Math.min(offset + chunkSize, file.size)).arrayBuffer();
-      session = await apiJson<typeof session>(`/v1/uploads/${session.upload_id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/octet-stream", "Upload-Offset": String(offset) },
-        body: chunk,
-      });
-      if (session.offset <= offset) throw new Error("Upload did not advance.");
-      offset = session.offset;
-      setProgress(3 + Math.round((offset / file.size) * 27));
+
+    const completedParts = new Map<number, CompletedPart>(
+      (session.completed_parts ?? []).map((part) => [part.part_number, part]),
+    );
+    let uploadedBytes = [...completedParts.values()].reduce((sum, part) => sum + part.size, 0);
+    const pendingNumbers = Array.from({ length: session.total_parts }, (_, index) => index + 1)
+      .filter((partNumber) => !completedParts.has(partNumber));
+
+    for (let start = 0; start < pendingNumbers.length; start += 4) {
+      const numbers = pendingNumbers.slice(start, start + 4);
+      const pending = await Promise.all(numbers.map(async (partNumber): Promise<PendingPart> => {
+        const offset = (partNumber - 1) * session.part_size;
+        const bytes = fileBytes.slice(offset, Math.min(offset + session.part_size, file.size));
+        return {
+          part_number: partNumber,
+          bytes,
+          checksum_sha256: base64Digest(await crypto.subtle.digest("SHA-256", bytes)),
+        };
+      }));
+      const authorization = await retry(() => apiJson<{ parts: PresignedPart[] }>(
+        `/v1/uploads/${session.upload_id}/parts/presign`,
+        jsonRequest("POST", { parts: pending.map(({ part_number, checksum_sha256 }) => ({ part_number, checksum_sha256 })) }),
+      ));
+      const byNumber = new Map(authorization.parts.map((part) => [part.part_number, part]));
+      const uploaded = await Promise.all(pending.map(async (part): Promise<CompletedPart> => {
+        const signed = byNumber.get(part.part_number);
+        if (!signed) throw new Error(`Upload authorization missing for part ${part.part_number}.`);
+        const checksumHeader = Object.entries(signed.headers).find(([name]) => name.toLowerCase() === "x-amz-checksum-sha256");
+        if (Object.keys(signed.headers).length !== 1 || checksumHeader?.[1] !== part.checksum_sha256) {
+          throw new Error("The backend returned unsafe upload headers.");
+        }
+        const response = await retry(async () => {
+          const result = await fetch(signed.url, {
+            method: "PUT",
+            headers: { "x-amz-checksum-sha256": part.checksum_sha256 },
+            body: part.bytes,
+          });
+          if (!result.ok) throw new Error(`S3 rejected part ${part.part_number} (${result.status}).`);
+          return result;
+        });
+        const etag = response.headers.get("etag")?.trim() ?? "";
+        if (!/^"?[a-f\d]{32}(?:-\d+)?"?$/i.test(etag)) throw new Error("S3 did not acknowledge the uploaded part.");
+        const result = { part_number: part.part_number, etag, checksum_sha256: part.checksum_sha256, size: part.bytes.byteLength };
+        completedParts.set(part.part_number, result);
+        uploadedBytes += result.size;
+        setProgress(5 + Math.round((uploadedBytes / file.size) * 25));
+        return result;
+      }));
+      await retry(() => apiJson<S3UploadSession>(
+        `/v1/uploads/${session.upload_id}/parts`,
+        jsonRequest("PUT", { parts: uploaded }),
+      ));
     }
-    addLog("AWS", "Upload complete; import queued");
+    if (uploadedBytes !== file.size || completedParts.size !== session.total_parts) throw new Error("S3 upload is incomplete.");
+    addLog("AWS", "Direct upload complete; import queued");
     setPhase("importing");
     const job = await apiJson<Job>(
       `/v1/uploads/${session.upload_id}/complete?authorized=true`,
-      jsonRequest("POST", {}, key),
+      jsonRequest("POST", { parts: [...completedParts.values()].sort((a, b) => a.part_number - b.part_number) }, key),
     );
     const completed = await pollJob(job, 30, 48);
     const imported = await apiJson<Project>(`/v1/projects/${completed.project_id}`);

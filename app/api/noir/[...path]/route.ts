@@ -6,6 +6,8 @@ const rules: Array<[string, RegExp]> = [
   ["GET", /^v1\/auth\/me$/],
   ["POST", /^v1\/uploads$/],
   ["PATCH", /^v1\/uploads\/[a-f0-9]{32}$/],
+  ["POST", /^v1\/uploads\/[a-f0-9]{32}\/parts\/presign$/],
+  ["PUT", /^v1\/uploads\/[a-f0-9]{32}\/parts$/],
   ["POST", /^v1\/uploads\/[a-f0-9]{32}\/complete$/],
   ["GET", /^v1\/jobs\/[a-f0-9]{16}$/],
   ["GET", /^v1\/projects\/[a-f0-9]{16}$/],
@@ -73,4 +75,5 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 
 export const GET = proxy;
 export const POST = proxy;
+export const PUT = proxy;
 export const PATCH = proxy;
