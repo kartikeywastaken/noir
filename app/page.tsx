@@ -371,7 +371,7 @@ export default function Home() {
 
       <section id="security" className="security-section" data-scroll-reveal>
         <p className="eyebrow"><LockKeyhole size={15} /> CONTROL IS THE FEATURE</p>
-        <h2>AI drafts.<br /><span>NOIR decides.</span></h2>
+        <h2>DRAFT<br /><span>AND DECIDE</span></h2>
         <div className="security-list">
           <p><span>01</span> Exact preimage hashes</p>
           <p><span>02</span> Revision-bound approval</p>
