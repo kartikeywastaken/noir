@@ -238,14 +238,21 @@ function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (v
 
 export function NoirApkCoreHero() {
   const [exploded, setExploded] = useState(false);
+  const [introComplete, setIntroComplete] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIntroComplete(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   return (
     <div
-      className={`android-stage ${exploded ? "is-exploded" : ""}`}
+      className={`android-stage ${exploded ? "is-exploded" : ""} ${introComplete ? "intro-complete" : "intro-active"}`}
       onPointerLeave={() => setExploded(false)}
       role="img"
-      aria-label="Interactive exploded view of a precision APK security module"
+      aria-label={introComplete ? "Interactive exploded view of a precision APK security module" : "NOIR"}
     >
+      <div className="noir-intro" aria-hidden="true"><strong>NOIR</strong></div>
       <Canvas className="android-canvas" camera={{ position: [0, 0.2, 8.1], fov: 38 }} dpr={[1, 1.25]} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}>
         <ambientLight intensity={0.42} />
         <directionalLight position={[4, 6, 6]} intensity={2.4} color="#f4f5f1" />
