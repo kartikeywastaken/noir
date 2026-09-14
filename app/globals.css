@@ -110,14 +110,9 @@ button, textarea, input { font: inherit; }
 .android-canvas { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; opacity: 1; clip-path: circle(80% at 50% 50%); filter: blur(0); transition: opacity .82s ease .08s, clip-path 1.05s cubic-bezier(.16,1,.3,1), filter .72s ease; }
 .intro-active .android-canvas { pointer-events: none; opacity: 0; clip-path: circle(0% at 50% 50%); filter: blur(12px); }
 .noir-intro { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; pointer-events: none; opacity: 1; transform: scale(1); filter: blur(0); transition: opacity .62s ease, transform 1.05s cubic-bezier(.7,0,.2,1), filter .7s ease; }
-.noir-intro strong { color: #eff3e8; font-size: clamp(7.5rem, 25vw, 22rem); font-weight: 900; line-height: .72; letter-spacing: -.095em; text-indent: -.095em; text-shadow: 0 0 70px rgba(91,132,24,.12); }
+.noir-intro strong { background: linear-gradient(110deg, #f3ffca 0%, #d8ff3e 52%, #7f9c21 100%); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; font-family: "Audiowide", sans-serif; font-size: clamp(4.2rem, 11vw, 9.5rem); font-weight: 400; line-height: .82; letter-spacing: .14em; text-indent: .14em; text-shadow: 0 0 70px rgba(132,177,31,.22); }
 .intro-complete .noir-intro { opacity: 0; transform: scale(.22); filter: blur(15px); }
-.intro-active .android-reticle, .intro-active .android-caption { visibility: hidden; opacity: 0 !important; }
-.android-reticle { position: absolute; inset: 50% auto auto 50%; width: 42px; height: 42px; translate: -50% -50%; pointer-events: none; opacity: .34; transition: opacity .35s ease, scale .5s ease; }
-.android-reticle span { position: absolute; background: #c8ff1a; }
-.android-reticle span:first-child { width: 100%; height: 1px; top: 50%; left: 0; }
-.android-reticle span:last-child { width: 1px; height: 100%; left: 50%; top: 0; }
-.is-exploded .android-reticle { opacity: 0; scale: .35; }
+.intro-active .android-caption { visibility: hidden; opacity: 0 !important; }
 .android-caption { position: absolute; left: 50%; bottom: 7%; translate: -50% 0; display: grid; gap: 5px; color: #656a63; text-align: center; pointer-events: none; font: .52rem var(--font-mono); letter-spacing: .13em; }
 .android-caption b { color: #c8ff1a; font-size: .58rem; font-weight: 500; }
 .apk-labels { position: absolute; inset: 0; pointer-events: none; }

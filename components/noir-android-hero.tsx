@@ -261,7 +261,6 @@ export function NoirApkCoreHero() {
         <ApkCore exploded={exploded} setExploded={setExploded} />
       </Canvas>
 
-      <div className="android-reticle" aria-hidden="true"><span /><span /></div>
       <div className="android-caption"><span>NOIR / APK CORE</span><b>{exploded ? "06 LAYERS EXPOSED" : "HOVER TO INSPECT"}</b></div>
       <div className="apk-labels" aria-hidden="true">
         {LAYERS.map((label, index) => (
