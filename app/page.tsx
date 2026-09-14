@@ -71,6 +71,13 @@ type S3UploadSession = {
 type PendingPart = { part_number: number; bytes: ArrayBuffer; checksum_sha256: string };
 type CompletedPart = { part_number: number; etag: string; checksum_sha256: string; size: number };
 type PresignedPart = { part_number: number; url: string; headers: Record<string, string> };
+type ModelId = "gemini-3.6-flash" | "gemini-3.1-pro-preview" | "gemini-2.5-flash";
+
+const models: Array<{ id: ModelId; label: string; note: string }> = [
+  { id: "gemini-3.6-flash", label: "3.6 Flash", note: "Fast" },
+  { id: "gemini-3.1-pro-preview", label: "3.1 Pro", note: "Deep" },
+  { id: "gemini-2.5-flash", label: "2.5 Flash", note: "Stable" },
+];
 
 const openingLogs: Log[] = [
   { time: "--:--:--", tag: "AWS", message: "Connecting to NOIR" },
@@ -149,6 +156,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [backendOnline, setBackendOnline] = useState(false);
   const [authorized, setAuthorized] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<ModelId>("gemini-3.6-flash");
 
   const addLog = useCallback((tag: string, message: string) => {
     setLogs((current) => [...current, { time: stamp(), tag, message }]);
@@ -334,6 +342,7 @@ export default function Home() {
           user_request: request.trim(),
           allow_ai_upload: true,
           revision: activeProject.workspace_revision,
+          model: selectedModel,
         }, crypto.randomUUID()),
       );
       const completed = await pollJob(job, 50, 88);
@@ -364,7 +373,7 @@ export default function Home() {
       setPhase("error");
       addLog("ERROR", message);
     }
-  }, [addLog, authorized, phase, pollJob, project, request, selectedFile, uploadAndImport]);
+  }, [addLog, authorized, phase, pollJob, project, request, selectedFile, selectedModel, uploadAndImport]);
 
   const approveBuild = useCallback(async () => {
     if (!project || !review || phase !== "review") return;
@@ -575,6 +584,23 @@ export default function Home() {
                 <div className="field-label"><label htmlFor="change-request">Change request</label></div>
                 <Textarea id="change-request" className="request-input" value={request} onChange={(event) => setRequest(event.target.value)} disabled={working || phase === "complete"} />
               </div>
+              <fieldset className="model-picker" disabled={working || phase === "complete"}>
+                <legend>Model</legend>
+                <div className="model-options">
+                  {models.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      className={selectedModel === model.id ? "active" : ""}
+                      aria-pressed={selectedModel === model.id}
+                      onClick={() => setSelectedModel(model.id)}
+                    >
+                      <strong>{model.label}</strong>
+                      <small>{model.note}</small>
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
               <label className="consent-row" htmlFor="authorization">
                 <Checkbox id="authorization" className="consent-check" checked={authorized} onCheckedChange={(value) => setAuthorized(value === true)} disabled={working} />
                 <span>I own or may modify this APK and allow bounded AI context.</span>
