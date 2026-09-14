@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import gsap from "gsap";
+import ScrollSmoother from "gsap/ScrollSmoother";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   Check,
@@ -414,14 +415,36 @@ export default function Home() {
 
   useLayoutEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    gsap.registerPlugin(ScrollTrigger);
+    gsap.registerPlugin(ScrollTrigger, ScrollSmoother);
+    ScrollSmoother.get()?.kill();
+    const smoother = ScrollSmoother.create({
+      wrapper: "#smooth-wrapper",
+      content: "#smooth-content",
+      smooth: 1.35,
+      effects: true,
+      normalizeScroll: true,
+      smoothTouch: 0.12,
+    });
     const context = gsap.context(() => {
       gsap.from("[data-reveal]", { y: 24, opacity: 0, duration: .9, stagger: .08, ease: "power3.out" });
       gsap.utils.toArray<HTMLElement>("[data-scroll-reveal]").forEach((element) => {
         gsap.from(element, { scrollTrigger: { trigger: element, start: "top 82%", once: true }, y: 36, opacity: 0, duration: .8, ease: "power3.out" });
       });
     }, root);
-    return () => context.revert();
+    const anchors = root.current?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [];
+    const scrollToAnchor = (event: Event) => {
+      const anchor = event.currentTarget as HTMLAnchorElement;
+      const target = anchor.getAttribute("href");
+      if (!target || target === "#") return;
+      event.preventDefault();
+      smoother.scrollTo(target, true, "top top");
+    };
+    anchors.forEach((anchor) => anchor.addEventListener("click", scrollToAnchor));
+    return () => {
+      anchors.forEach((anchor) => anchor.removeEventListener("click", scrollToAnchor));
+      context.revert();
+      smoother.kill();
+    };
   }, []);
 
   useEffect(() => {
@@ -468,8 +491,10 @@ export default function Home() {
   };
 
   return (
-    <main ref={root} className="noir-shell">
+    <>
       <div className="scanline" aria-hidden="true" />
+      <div id="smooth-wrapper">
+        <main ref={root} id="smooth-content" className="noir-shell">
       <header className="site-nav" data-reveal>
         <a className="wordmark" href="#top" aria-label="NOIR home"><span>NOIR</span></a>
         <a className="nav-link" href="#workspace">Workspace</a>
@@ -487,22 +512,41 @@ export default function Home() {
       >
         <div className="hero-backdrop" aria-hidden="true">
           <svg className="circuit-map" viewBox="0 0 1600 820" preserveAspectRatio="none">
-            <path d="M0 168H188L238 218H422L468 172H620" />
-            <path d="M1600 142H1390L1338 194H1190L1142 242H1012" />
-            <path d="M0 628H205L260 574H424L482 632H650" />
-            <path d="M1600 660H1434L1384 610H1220L1168 558H1010" />
-            <path d="M800 0V94L748 146V238" />
-            <path d="M800 820V742L854 688V604" />
+            <path id="route-a" d="M0 168H188L238 218H422L468 172H620" />
+            <path id="route-b" d="M1600 142H1390L1338 194H1190L1142 242H1012" />
+            <path id="route-c" d="M0 628H205L260 574H424L482 632H650" />
+            <path id="route-d" d="M1600 660H1434L1384 610H1220L1168 558H1010" />
+            <path id="route-e" d="M800 0V94L748 146V238" />
+            <path id="route-f" d="M800 820V742L854 688V604" />
             <circle cx="238" cy="218" r="4" />
             <circle cx="1338" cy="194" r="4" />
             <circle cx="260" cy="574" r="4" />
             <circle cx="1384" cy="610" r="4" />
+            {[
+              ["route-a", "7.2s", "-1.4s"],
+              ["route-b", "8.4s", "-5.1s"],
+              ["route-c", "9.1s", "-3.2s"],
+              ["route-d", "7.8s", "-6.4s"],
+              ["route-e", "5.6s", "-2.8s"],
+              ["route-f", "6.2s", "-4.7s"],
+            ].map(([route, duration, delay]) => (
+              <g className="signal-pulse" key={route}>
+                <circle className="signal-halo" r="9" />
+                <circle className="signal-core" r="3.2" />
+                <animateMotion
+                  dur={duration}
+                  begin={delay}
+                  repeatCount="indefinite"
+                  calcMode="linear"
+                  keyPoints="0;0.25;0.5;0.75;1"
+                  keyTimes="0;0.4;0.68;0.87;1"
+                >
+                  <mpath href={`#${route}`} />
+                </animateMotion>
+              </g>
+            ))}
           </svg>
           <div className="calibration-rings"><i /><i /><i /></div>
-          <span className="telemetry telemetry-a">APK / CONTROL PLANE<br />X 04.219 · Y 08.404</span>
-          <span className="telemetry telemetry-b">SHA-256<br />INTEGRITY CHANNEL</span>
-          <span className="telemetry telemetry-c">REVISION 01<br />BOUNDED CHANGESET</span>
-          <span className="telemetry telemetry-d">SIGN / VERIFY<br />OUTPUT SEALED</span>
           <div className="side-scale side-scale-left">{["00", "16", "32", "48", "64"].map((tick) => <span key={tick}>{tick}</span>)}</div>
           <div className="side-scale side-scale-right">{["A", "B", "C", "D", "E"].map((tick) => <span key={tick}>{tick}</span>)}</div>
         </div>
@@ -566,7 +610,9 @@ export default function Home() {
         </section>
       </section>
 
-      <footer><a className="wordmark" href="#top"><span className="mark">N</span><span>NOIR</span></a><p>Draft. Decide. Build.</p><span>© 2026</span></footer>
-    </main>
+          <footer><a className="wordmark" href="#top"><span className="mark">N</span><span>NOIR</span></a><p>Draft. Decide. Build.</p><span>© 2026</span></footer>
+        </main>
+      </div>
+    </>
   );
 }

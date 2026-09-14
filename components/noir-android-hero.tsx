@@ -1,7 +1,8 @@
 "use client";
 
 import { Canvas, ThreeEvent, useFrame, useThree } from "@react-three/fiber";
-import { useMemo, useRef, useState } from "react";
+import gsap from "gsap";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 const LAYERS = [
@@ -40,7 +41,7 @@ function DataPlate({ index, exploded, register }: PlateProps) {
   const geometry = useMemo(() => new THREE.ExtrudeGeometry(shape, {
     depth: 0.13,
     bevelEnabled: true,
-    bevelSegments: 3,
+    bevelSegments: 2,
     steps: 1,
     bevelSize: 0.045,
     bevelThickness: 0.045,
@@ -51,14 +52,12 @@ function DataPlate({ index, exploded, register }: PlateProps) {
   return (
     <group ref={(node) => register(index, node)} position={[0, 0, assembledDepth]}>
       <mesh geometry={geometry}>
-        <meshPhysicalMaterial
+        <meshStandardMaterial
           color={index % 2 ? "#111b0c" : "#0b1508"}
           emissive={edge ? "#526f0f" : "#233309"}
           emissiveIntensity={exploded ? (edge ? 0.2 : 0.1) : 0.065}
           metalness={0.93}
           roughness={0.18 + index * 0.035}
-          clearcoat={0.6}
-          clearcoatRoughness={0.22}
         />
       </mesh>
 
@@ -89,12 +88,18 @@ function Trace({ position, scale = [1, 1, 1] }: { position: [number, number, num
 function FrontFace({ exploded }: { exploded: boolean }) {
   const core = useRef<THREE.Group>(null);
 
-  useFrame((_, delta) => {
+  useEffect(() => {
     if (!core.current) return;
-    const damp = 1 - Math.exp(-delta * 12);
-    const scale = exploded ? 0 : 1;
-    core.current.scale.setScalar(THREE.MathUtils.lerp(core.current.scale.x, scale, damp));
-  });
+    const tween = gsap.to(core.current.scale, {
+      x: exploded ? 0 : 1,
+      y: exploded ? 0 : 1,
+      z: exploded ? 0 : 1,
+      duration: exploded ? 0.38 : 0.5,
+      ease: exploded ? "power2.in" : "power3.out",
+      overwrite: true,
+    });
+    return () => tween.kill();
+  }, [exploded]);
 
   return (
     <group position={[0, 0, 0.25]}>
@@ -105,7 +110,7 @@ function FrontFace({ exploded }: { exploded: boolean }) {
         </mesh>
         <mesh>
           <circleGeometry args={[0.43, 48]} />
-          <meshPhysicalMaterial color="#060706" metalness={1} roughness={0.08} clearcoat={1} />
+          <meshStandardMaterial color="#060706" metalness={1} roughness={0.08} />
         </mesh>
         <mesh position={[0, 0, 0.025]}>
           <ringGeometry args={[0.11, 0.16, 28]} />
@@ -171,6 +176,7 @@ function SignaturePattern() {
 function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (value: boolean) => void }) {
   const assembly = useRef<THREE.Group>(null);
   const layerGroups = useRef<Array<THREE.Group | null>>([]);
+  const expansion = useRef({ value: 0 });
   const { pointer, viewport } = useThree();
   const targets = useMemo(
     () => LAYERS.map((_, index) => viewport.width < 8
@@ -183,8 +189,19 @@ function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (v
     [],
   );
 
+  useEffect(() => {
+    const tween = gsap.to(expansion.current, {
+      value: exploded ? 1 : 0,
+      duration: exploded ? 0.82 : 0.68,
+      ease: exploded ? "power3.out" : "power3.inOut",
+      overwrite: true,
+    });
+    return () => tween.kill();
+  }, [exploded]);
+
   useFrame((state, delta) => {
-    const damp = 1 - Math.exp(-delta * (exploded ? 7 : 10));
+    const damp = 1 - Math.exp(-Math.min(delta, 1 / 30) * 8);
+    const progress = expansion.current.value;
     if (assembly.current) {
       assembly.current.rotation.y = THREE.MathUtils.lerp(assembly.current.rotation.y, -0.18 + pointer.x * 0.13, damp);
       assembly.current.rotation.x = THREE.MathUtils.lerp(assembly.current.rotation.x, 0.04 - pointer.y * 0.08, damp);
@@ -193,11 +210,11 @@ function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (v
     }
     layerGroups.current.forEach((group, index) => {
       if (!group) return;
-      group.position.lerp(exploded ? targets[index] : assembled[index], damp);
-      group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, exploded ? (index - 2.5) * -0.075 : 0, damp);
-      group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, exploded ? (index - 2.5) * 0.012 : 0, damp);
-      const scale = exploded ? (viewport.width < 8 ? 0.5 : 0.58) : 1;
-      group.scale.setScalar(THREE.MathUtils.lerp(group.scale.x, scale, damp));
+      group.position.lerpVectors(assembled[index], targets[index], progress);
+      group.rotation.y = (index - 2.5) * -0.075 * progress;
+      group.rotation.z = (index - 2.5) * 0.012 * progress;
+      const openScale = viewport.width < 8 ? 0.5 : 0.58;
+      group.scale.setScalar(THREE.MathUtils.lerp(1, openScale, progress));
     });
   });
 
@@ -229,7 +246,7 @@ export function NoirApkCoreHero() {
       role="img"
       aria-label="Interactive exploded view of a precision APK security module"
     >
-      <Canvas className="android-canvas" camera={{ position: [0, 0.2, 8.1], fov: 38 }} dpr={[1, 1.75]} gl={{ antialias: true, alpha: true }}>
+      <Canvas className="android-canvas" camera={{ position: [0, 0.2, 8.1], fov: 38 }} dpr={[1, 1.25]} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}>
         <ambientLight intensity={0.42} />
         <directionalLight position={[4, 6, 6]} intensity={2.4} color="#f4f5f1" />
         <pointLight position={[-4, 2, 5]} intensity={24} distance={10} color="#c8ff1a" />
