@@ -63,20 +63,20 @@ class _PlanCache:
         self._lock = threading.RLock()
 
     @staticmethod
-    def _key(project_id: str, revision: int, request: str) -> str:
-        request_hash = hashlib.sha256(request.encode()).hexdigest()[:16]
+    def _key(project_id: str, revision: int, request: str, model: str = "") -> str:
+        request_hash = hashlib.sha256(f"{model}\0{request}".encode()).hexdigest()[:16]
         return f"{project_id}:{revision}:{request_hash}"
 
-    def get(self, project_id: str, revision: int, request: str):
-        key = self._key(project_id, revision, request)
+    def get(self, project_id: str, revision: int, request: str, model: str = ""):
+        key = self._key(project_id, revision, request, model)
         with self._lock:
             plan = self._cache.get(key)
             if plan is not None:
                 self._cache.move_to_end(key)
             return plan
 
-    def put(self, project_id: str, revision: int, request: str, plan) -> None:
-        key = self._key(project_id, revision, request)
+    def put(self, project_id: str, revision: int, request: str, plan, model: str = "") -> None:
+        key = self._key(project_id, revision, request, model)
         with self._lock:
             self._cache[key] = plan
             self._cache.move_to_end(key)
@@ -166,7 +166,7 @@ def _create_discovery_provider(config):
         return LocalDiscoveryProvider(config)
 
 
-def generate_plan(config, project_id, request, consent, *, analysis=None):
+def generate_plan(config, project_id, request, consent, *, analysis=None, model=None):
     if not consent:
         raise PlanServiceError("Explicit AI upload consent required")
     with project_lock(config, project_id):
@@ -180,14 +180,17 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
         # Check the plan cache before making any API calls.
         project = ProjectRepository().get(project_id)
         revision = project.workspace_revision if project else 0
-        cached = _plan_cache.get(project_id, revision, request)
+        selected_model = model or config.ai_model
+        cached = _plan_cache.get(project_id, revision, request, selected_model)
         if cached is not None:
             logger.info("Plan cache hit for project=%s revision=%d", project_id, revision)
             return cached
 
         workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
-        generation_provider = GeminiProvider(config=config, purpose="generation")
+        generation_provider = GeminiProvider(
+            model=selected_model, config=config, purpose="generation"
+        )
         budget = _WorkflowCallBudget(config)
 
         # Phase C: evidence-driven discovery before plan generation.
@@ -259,11 +262,11 @@ def generate_plan(config, project_id, request, consent, *, analysis=None):
                 f"{missing}. No plan was saved."
             )
         result = PlanService(config).create_plan(plan)
-        _plan_cache.put(project_id, revision, request, result)
+        _plan_cache.put(project_id, revision, request, result, selected_model)
         return result
 
 
-def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None):
+def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None, model=None):
     with project_lock(config, project_id):
         project = ProjectRepository().get(project_id)
         plan = PlanService(config).get_plan(plan_id)
@@ -285,5 +288,7 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None)
         context = AiContextTools(ProjectWorkspace(project_id, config), analysis).build_context(
             [change.relative_path for change in plan.file_changes], user_request=plan.user_request
         )
-        patch = GeminiProvider(config=config, purpose="generation").generate_patch(plan, context)
+        patch = GeminiProvider(
+            model=model, config=config, purpose="generation"
+        ).generate_patch(plan, context)
         return PatchService(config).store_patch(patch, preview=preview)

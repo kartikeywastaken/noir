@@ -120,6 +120,11 @@ class WorkflowPrepareRequest(BaseModel):
     user_request: str = Field(min_length=1, max_length=16000)
     allow_ai_upload: bool = False
     revision: int = Field(ge=0)
+    model: Literal[
+        "gemini-3.6-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-flash",
+    ] = "gemini-3.6-flash"
 
 
 class WorkflowFinishRequest(BaseModel):
