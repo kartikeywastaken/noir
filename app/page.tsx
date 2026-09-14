@@ -3,15 +3,12 @@
 import {
   ChangeEvent,
   DragEvent,
+  PointerEvent,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import gsap from "gsap";
-import ScrollSmoother from "gsap/ScrollSmoother";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   Check,
   CheckCircle2,
@@ -141,6 +138,7 @@ const jsonRequest = (method: string, body: unknown, idempotencyKey?: string): Re
 export default function Home() {
   const root = useRef<HTMLElement>(null);
   const feed = useRef<HTMLDivElement>(null);
+  const heroPointerFrame = useRef<number | null>(null);
   const eventCursor = useRef<string | null>(null);
   const lastJobState = useRef("");
   const [phase, setPhase] = useState<Phase>("empty");
@@ -159,7 +157,7 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState<ModelId>("gemini-3.6-flash");
 
   const addLog = useCallback((tag: string, message: string) => {
-    setLogs((current) => [...current, { time: stamp(), tag, message }]);
+    setLogs((current) => [...current, { time: stamp(), tag, message }].slice(-160));
   }, []);
 
   const checkBackend = useCallback(async () => {
@@ -220,7 +218,7 @@ export default function Home() {
         tag: (event.stage || event.severity || "AWS").slice(0, 8).toUpperCase(),
         message: event.message,
       })),
-    ]);
+    ].slice(-160));
   }, []);
 
   const pollJob = useCallback(async (initial: Job, from: number, to: number) => {
@@ -422,38 +420,21 @@ export default function Home() {
     void checkBackend();
   }, [checkBackend]);
 
-  useLayoutEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    gsap.registerPlugin(ScrollTrigger, ScrollSmoother);
-    ScrollSmoother.get()?.kill();
-    const smoother = ScrollSmoother.create({
-      wrapper: "#smooth-wrapper",
-      content: "#smooth-content",
-      smooth: 1.35,
-      effects: true,
-      normalizeScroll: true,
-      smoothTouch: 0.12,
+  useEffect(() => () => {
+    if (heroPointerFrame.current !== null) window.cancelAnimationFrame(heroPointerFrame.current);
+  }, []);
+
+  const moveHeroSpotlight = useCallback((event: PointerEvent<HTMLElement>) => {
+    const hero = event.currentTarget;
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+    if (heroPointerFrame.current !== null) return;
+    heroPointerFrame.current = window.requestAnimationFrame(() => {
+      const bounds = hero.getBoundingClientRect();
+      hero.style.setProperty("--grid-x", `${clientX - bounds.left}px`);
+      hero.style.setProperty("--grid-y", `${clientY - bounds.top}px`);
+      heroPointerFrame.current = null;
     });
-    const context = gsap.context(() => {
-      gsap.from("[data-reveal]", { y: 24, opacity: 0, duration: .9, stagger: .08, ease: "power3.out" });
-      gsap.utils.toArray<HTMLElement>("[data-scroll-reveal]").forEach((element) => {
-        gsap.from(element, { scrollTrigger: { trigger: element, start: "top 82%", once: true }, y: 36, opacity: 0, duration: .8, ease: "power3.out" });
-      });
-    }, root);
-    const anchors = root.current?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [];
-    const scrollToAnchor = (event: Event) => {
-      const anchor = event.currentTarget as HTMLAnchorElement;
-      const target = anchor.getAttribute("href");
-      if (!target || target === "#") return;
-      event.preventDefault();
-      smoother.scrollTo(target, true, "top top");
-    };
-    anchors.forEach((anchor) => anchor.addEventListener("click", scrollToAnchor));
-    return () => {
-      anchors.forEach((anchor) => anchor.removeEventListener("click", scrollToAnchor));
-      context.revert();
-      smoother.kill();
-    };
   }, []);
 
   useEffect(() => {
@@ -513,11 +494,7 @@ export default function Home() {
       <section
         id="top"
         className="landing-hero"
-        onPointerMove={(event) => {
-          const bounds = event.currentTarget.getBoundingClientRect();
-          event.currentTarget.style.setProperty("--grid-x", `${event.clientX - bounds.left}px`);
-          event.currentTarget.style.setProperty("--grid-y", `${event.clientY - bounds.top}px`);
-        }}
+        onPointerMove={moveHeroSpotlight}
       >
         <div className="hero-backdrop" aria-hidden="true">
           <svg className="circuit-map" viewBox="0 0 1600 820" preserveAspectRatio="none">

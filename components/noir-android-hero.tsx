@@ -26,7 +26,7 @@ export function NoirApkCoreHero() {
   useEffect(() => {
     const preloadTimer = window.setTimeout(() => {
       void import("@/components/noir-apk-canvas");
-    }, 1000);
+    }, 2600);
     const timer = window.setTimeout(() => setIntroComplete(true), 4000);
     return () => {
       window.clearTimeout(preloadTimer);

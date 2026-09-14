@@ -173,11 +173,12 @@ function SignaturePattern() {
   );
 }
 
-function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (value: boolean) => void }) {
+function ApkCore({ active, exploded, setExploded }: { active: boolean; exploded: boolean; setExploded: (value: boolean) => void }) {
   const assembly = useRef<THREE.Group>(null);
   const layerGroups = useRef<Array<THREE.Group | null>>([]);
   const expansion = useRef({ value: 0 });
-  const { pointer, viewport } = useThree();
+  const { invalidate, pointer, viewport } = useThree();
+  const transitionUntil = useRef(0);
   const targets = useMemo(
     () => LAYERS.map((_, index) => viewport.width < 8
       ? new THREE.Vector3(index % 2 ? 1.45 : -1.45, 1.75 - Math.floor(index / 2) * 1.75, (2.5 - index) * 0.12)
@@ -190,6 +191,7 @@ function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (v
   );
 
   useEffect(() => {
+    transitionUntil.current = performance.now() + 950;
     const tween = gsap.to(expansion.current, {
       value: exploded ? 1 : 0,
       duration: exploded ? 0.82 : 0.68,
@@ -198,6 +200,22 @@ function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (v
     });
     return () => tween.kill();
   }, [exploded]);
+
+  useEffect(() => {
+    if (!active) return;
+    let frame = 0;
+    let lastIdleFrame = 0;
+    const tick = (now: number) => {
+      const transitionActive = now < transitionUntil.current;
+      if (transitionActive || now - lastIdleFrame >= 1000 / 24) {
+        invalidate();
+        lastIdleFrame = now;
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, invalidate]);
 
   useFrame((state, delta) => {
     const damp = 1 - Math.exp(-Math.min(delta, 1 / 30) * 8);
@@ -238,12 +256,12 @@ function ApkCore({ exploded, setExploded }: { exploded: boolean; setExploded: (v
 
 export function NoirApkCanvas({ active, exploded, setExploded }: { active: boolean; exploded: boolean; setExploded: (value: boolean) => void }) {
   return (
-    <Canvas className="android-canvas" frameloop={active ? "always" : "never"} camera={{ position: [0, 0.2, 8.1], fov: 38 }} dpr={[1, 1.25]} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}>
+    <Canvas className="android-canvas" frameloop="demand" camera={{ position: [0, 0.2, 8.1], fov: 38 }} dpr={1} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}>
       <ambientLight intensity={0.42} />
       <directionalLight position={[4, 6, 6]} intensity={2.4} color="#f4f5f1" />
       <pointLight position={[-4, 2, 5]} intensity={24} distance={10} color="#c8ff1a" />
       <pointLight position={[3, -3, 4]} intensity={8} distance={8} color="#53622c" />
-      <ApkCore exploded={exploded} setExploded={setExploded} />
+      <ApkCore active={active} exploded={exploded} setExploded={setExploded} />
     </Canvas>
   );
 }
