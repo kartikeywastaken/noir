@@ -99,6 +99,15 @@ def invalidate_plan_cache(project_id: str) -> None:
     _plan_cache.invalidate(project_id)
 
 
+def _create_generation_provider(config, model: str | None = None):
+    """Create the selected plan/patch provider without exposing provider credentials."""
+    if model and model.startswith("openrouter:"):
+        from noir.infrastructure.ai.openrouter import OpenRouterGenerationProvider
+
+        return OpenRouterGenerationProvider(config, model=model.removeprefix("openrouter:"))
+    return GeminiProvider(model=model, config=config, purpose="generation")
+
+
 def _invalid_plan_paths(
     plan, workspace: ProjectWorkspace, allowed_paths: set[str] | None = None
 ) -> list[str]:
@@ -188,9 +197,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
 
         workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
-        generation_provider = GeminiProvider(
-            model=selected_model, config=config, purpose="generation"
-        )
+        generation_provider = _create_generation_provider(config, selected_model)
         budget = _WorkflowCallBudget(config)
 
         # Phase C: evidence-driven discovery before plan generation.
@@ -288,7 +295,5 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None,
         context = AiContextTools(ProjectWorkspace(project_id, config), analysis).build_context(
             [change.relative_path for change in plan.file_changes], user_request=plan.user_request
         )
-        patch = GeminiProvider(
-            model=model, config=config, purpose="generation"
-        ).generate_patch(plan, context)
+        patch = _create_generation_provider(config, model).generate_patch(plan, context)
         return PatchService(config).store_patch(patch, preview=preview)

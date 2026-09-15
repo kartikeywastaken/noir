@@ -24,6 +24,7 @@ from noir.infrastructure.ai.discovery import (
     is_label_task,
 )
 from noir.infrastructure.ai.discovery_provider import DiscoveryProvider
+from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
 
 if TYPE_CHECKING:
     from noir.domain.config import NoirConfig
@@ -47,6 +48,124 @@ class OpenRouterDiscoveryError(Exception):
     """Raised when OpenRouter API operations fail."""
 
     pass
+
+
+class OpenRouterGenerationProvider(GeminiProvider):
+    """Use an OpenRouter model with NOIR's existing grounded plan/patch schemas."""
+
+    provider_name = "openrouter"
+
+    def __init__(self, config: NoirConfig, model: str | None = None):
+        self.config = config
+        self.model_name = model or config.openrouter_discovery_model
+        self.fallback_model_name = ""
+        self.last_model_name = self.model_name
+        self.purpose = "generation"
+        self.api_key = config.openrouter_api_key.get_secret_value()
+        self.timeout = config.ai_timeout
+        self.max_output_tokens = config.ai_max_output_tokens
+        if not self.api_key:
+            raise OpenRouterDiscoveryError(
+                "OpenRouter API key not configured. Set NOIR_OPENROUTER_API_KEY."
+            )
+
+    def _call_model(
+        self,
+        prompt: str,
+        system_instruction: str = "",
+        *,
+        json_output: bool = True,
+        response_schema: dict[str, Any] | None = None,
+    ) -> str:
+        actual = len(prompt.encode()) + len(system_instruction.encode())
+        if response_schema:
+            actual += len(json.dumps(response_schema, separators=(",", ":")).encode())
+        if actual > self.config.ai_max_request_size:
+            raise GeminiProviderError(
+                f"AI request requires {actual:,} bytes; configured limit is "
+                f"{self.config.ai_max_request_size:,}. No request was sent."
+            )
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://noir.v0id.in",
+            "X-Title": "NOIR APK Modifier",
+        }
+        payload: dict[str, Any] = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": self.max_output_tokens,
+            "temperature": 0,
+        }
+        if json_output:
+            payload["response_format"] = (
+                {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "noir_response",
+                        "strict": True,
+                        "schema": response_schema,
+                    },
+                }
+                if response_schema
+                else {"type": "json_object"}
+            )
+
+        attempts = 1 + self.config.ai_response_retry_limit if json_output else 1
+        last_failure = "OpenRouter returned an incomplete response"
+        for attempt in range(1, attempts + 1):
+            try:
+                response = httpx.post(
+                    OPENROUTER_API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                data = response.json()
+            except Exception as exc:
+                detail = str(exc).replace(self.api_key, "[REDACTED]")
+                raise GeminiProviderError(f"OpenRouter generation failed: {detail}") from None
+
+            choices = data.get("choices")
+            if not isinstance(choices, list) or not choices:
+                raise GeminiProviderError("OpenRouter returned no response choices")
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason")
+            content = choice.get("message", {}).get("content")
+            if finish_reason == "length":
+                last_failure = f"OpenRouter output was truncated at {self.max_output_tokens:,} tokens"
+            elif finish_reason not in {"stop", None}:
+                raise GeminiProviderError(
+                    f"OpenRouter did not finish normally ({finish_reason})"
+                )
+            elif not isinstance(content, str) or not content.strip():
+                last_failure = "OpenRouter returned an empty response"
+            else:
+                if len(content.encode()) > self.config.ai_max_output_size:
+                    raise GeminiProviderError("OpenRouter returned an oversized response")
+                try:
+                    if json_output:
+                        self._parse_json_response(content)
+                    self.last_model_name = self.model_name
+                    return content
+                except GeminiProviderError as exc:
+                    last_failure = str(exc)
+
+            if attempt == attempts:
+                break
+            logger.warning(
+                "Invalid OpenRouter JSON; retrying generation (%s/%s)",
+                attempt + 1,
+                attempts,
+            )
+        raise GeminiProviderError(
+            f"{last_failure} after {attempts} generation attempt(s). No partial response was used."
+        )
 
 
 def _openai_tool_definitions() -> list[dict[str, Any]]:

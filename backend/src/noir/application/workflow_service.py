@@ -104,13 +104,21 @@ def prepare(config, job):
             _checkpoint(job, "planning", plan_id=plan.plan_id, unsupported=True)
             return {"plan_id": plan.plan_id, "unsupported": True}
         _checkpoint(job, "generating_patch", plan_id=plan.plan_id)
+        # Pro is used where its deeper reasoning matters most: the plan. Flash
+        # turns that already-grounded plan into exact operations without spending
+        # a second scarce Pro request.
+        patch_model = (
+            "gemini-3.6-flash"
+            if payload.get("model") == "gemini-3.1-pro-preview"
+            else payload.get("model")
+        )
         patch = generate_patch(
             config,
             project_id,
             plan.plan_id,
             preview=True,
             analysis=analysis,
-            model=payload.get("model"),
+            model=patch_model,
         )
         _checkpoint(job, "generating_patch", patch_id=patch.patch_id)
         return {"plan_id": plan.plan_id, "patch_id": patch.patch_id}

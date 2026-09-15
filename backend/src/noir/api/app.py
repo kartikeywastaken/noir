@@ -123,7 +123,7 @@ class WorkflowPrepareRequest(BaseModel):
     model: Literal[
         "gemini-3.6-flash",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
+        "openrouter:nvidia/nemotron-3.5-lightning:free",
     ] = "gemini-3.6-flash"
 
 
