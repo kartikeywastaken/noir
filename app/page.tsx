@@ -182,7 +182,10 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState<ModelId>("gemini-3.6-flash");
 
   const addLog = useCallback((tag: string, message: string) => {
-    setLogs((current) => [...current, { time: stamp(), tag, message }].slice(-160));
+    setLogs((current) => [
+      ...current,
+      { time: stamp(), tag: logTag(tag), message: message.trim() },
+    ].slice(-160));
   }, []);
 
   const checkBackend = useCallback(async () => {

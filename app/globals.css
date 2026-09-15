@@ -208,9 +208,9 @@ button, textarea, input { font: inherit; }
 .process-progress { height: 2px; border-radius: 0; background: #20231f; }
 .process-progress > div { background: #d8ff3e; }
 .terminal-feed { flex: 1; min-height: 378px; max-height: 438px; padding: 22px 18px; overflow: auto; scrollbar-width: thin; scrollbar-color: #31362d transparent; background: radial-gradient(circle at 100% 100%, rgba(216,255,62,.04), transparent 50%); font: .66rem/1.7 var(--font-mono); }
-.terminal-feed p { margin: 0 0 10px; display: grid; grid-template-columns: 66px 98px minmax(0, 1fr); column-gap: 12px; align-items: start; }
+.terminal-feed p { margin: 0 0 10px; display: grid; grid-template-columns: 66px 108px minmax(0, 1fr); column-gap: 14px; align-items: start; }
 .terminal-feed time { color: #50554f; }
-.terminal-feed b { color: #d8ff3e; font-weight: 500; white-space: nowrap; }
+.terminal-feed b { min-width: 0; color: #d8ff3e; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .terminal-feed span { min-width: 0; color: #aeb2ac; overflow-wrap: anywhere; }
 .cursor-line { display: flex; align-items: center; gap: 8px; color: #656a63 !important; margin-top: 16px; }
 .cursor-line i { width: 7px; height: 12px; background: #d8ff3e; animation: blink 1s steps(1) infinite; }
@@ -264,7 +264,7 @@ footer > span { justify-self: end; }
   .controls-column { padding: 15px; }
   .upload-zone { padding: 14px; }
   .terminal-feed { padding-inline: 14px; }
-  .terminal-feed p { grid-template-columns: 52px 82px minmax(0, 1fr); column-gap: 8px; font-size: .59rem; line-height: 1.6; }
+  .terminal-feed p { grid-template-columns: 52px 76px minmax(0, 1fr); column-gap: 10px; font-size: .59rem; line-height: 1.6; }
   footer { grid-template-columns: 1fr auto; padding: 22px 0; }
   footer p { grid-column: 1 / -1; grid-row: 2; }
 }
