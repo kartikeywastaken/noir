@@ -122,9 +122,17 @@ class WorkflowPrepareRequest(BaseModel):
     revision: int = Field(ge=0)
     model: Literal[
         "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-latest",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite",
         "gemini-2.5-flash",
+        "openrouter:nvidia/nemotron-3.5-lightning:free",
     ] = "gemini-3.6-flash"
+
 
 
 class WorkflowFinishRequest(BaseModel):

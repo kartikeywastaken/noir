@@ -505,3 +505,126 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
                 logger.warning("%s; trying discovery fallback model", last_error)
 
         raise OpenRouterDiscoveryError(last_error)
+
+
+class OpenRouterGenerationProvider:
+    """Generation provider (plan + patch) backed by OpenRouter chat completions.
+
+    Uses the same prompts as GeminiProvider but sends them via OpenRouter's
+    /chat/completions endpoint so any OpenRouter model can be selected from
+    the frontend for end-to-end APK modification.
+    """
+
+    provider_name = "openrouter"
+
+    def __init__(self, model: str, config: "NoirConfig") -> None:
+        self.model = model
+        self.config = config
+        self.api_key = config.openrouter_api_key.get_secret_value() if config.openrouter_api_key else ""
+        self.timeout = config.ai_timeout
+
+        if not self.api_key:
+            raise OpenRouterDiscoveryError(
+                "OpenRouter API key not configured. Set NOIR_OPENROUTER_API_KEY, then restart."
+            )
+
+    def _chat(self, system: str, user: str) -> str:
+        """Send a single chat turn to OpenRouter and return the assistant text."""
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "max_tokens": 8192,
+            "response_format": {"type": "json_object"},
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://noir.v0id.in",
+            "X-Title": "NOIR",
+        }
+        with httpx.Client(timeout=self.timeout) as client:
+            for attempt in range(self.config.ai_retry_limit + 1):
+                try:
+                    resp = client.post(OPENROUTER_API_URL, json=payload, headers=headers)
+                except httpx.TimeoutException:
+                    if attempt < self.config.ai_retry_limit:
+                        time.sleep(1.0)
+                        continue
+                    raise OpenRouterDiscoveryError(
+                        f"OpenRouter generation timed out after {self.timeout}s"
+                    ) from None
+
+                if resp.status_code >= 400:
+                    if resp.status_code in (429, 503) and attempt < self.config.ai_retry_limit:
+                        time.sleep(float(resp.headers.get("Retry-After", "2")))
+                        continue
+                    raise OpenRouterDiscoveryError(
+                        f"OpenRouter generation API returned {resp.status_code}: {resp.text[:200]}"
+                    )
+
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if not content:
+                    raise OpenRouterDiscoveryError("OpenRouter returned empty generation response")
+                return content
+
+        raise OpenRouterDiscoveryError("OpenRouter generation failed after all retries")
+
+    def generate_plan(self, user_request: str, analysis: Any, context: dict[str, Any], *, project_id: str) -> Any:
+        """Generate a change plan using the OpenRouter model."""
+        from noir.infrastructure.ai.gemini import GeminiProvider, _PLAN_RESPONSE_SCHEMA
+
+        # Build the same prompt Gemini uses so output structure is identical
+        dummy = GeminiProvider.__new__(GeminiProvider)
+        dummy.config = self.config
+        dummy.model_name = self.model
+        dummy.fallback_model_name = ""
+        dummy.fallback_model_names = []
+        dummy.last_model_name = self.model
+        dummy.purpose = "generation"
+        dummy.api_key = ""
+        dummy.timeout = self.timeout
+        dummy.max_output_tokens = 8192
+        dummy._client = None
+
+        context_str = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        system, prompt = dummy._build_plan_prompt(user_request, context_str, analysis)  # type: ignore[attr-defined]
+        response_text = self._chat(system, prompt)
+        data = dummy._parse_json_response(response_text)  # type: ignore[attr-defined]
+        return dummy._build_plan_object(data, user_request, project_id)  # type: ignore[attr-defined]
+
+    def generate_patch(self, plan: Any, context: dict[str, Any]) -> Any:
+        """Generate a patch from an approved plan using the OpenRouter model."""
+        from noir.infrastructure.ai.gemini import GeminiProvider
+
+        dummy = GeminiProvider.__new__(GeminiProvider)
+        dummy.config = self.config
+        dummy.model_name = self.model
+        dummy.fallback_model_name = ""
+        dummy.fallback_model_names = []
+        dummy.last_model_name = self.model
+        dummy.purpose = "generation"
+        dummy.api_key = ""
+        dummy.timeout = self.timeout
+        dummy.max_output_tokens = 8192
+        dummy._client = None
+
+        context_str = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        system, prompt = dummy._build_patch_prompt(plan, context_str)  # type: ignore[attr-defined]
+        response_text = self._chat(system, prompt)
+        data = dummy._parse_json_response(response_text)  # type: ignore[attr-defined]
+        return dummy._build_patch_object(data, plan)  # type: ignore[attr-defined]
+
+    def diagnose_build_failure(self, error_log: str, context: dict[str, Any]) -> dict[str, Any]:
+        system = "You are an expert Android build toolchain engineer. Diagnose the Apktool/smali build failure and suggest the minimal fix."
+        prompt = f"BUILD ERROR:\n{error_log}\n\nCONTEXT:\n{json.dumps(context, separators=(',', ':'))}"
+        return {"diagnosis": self._chat(system, prompt)}
+
+    def generate_summary(self, audit_data: dict[str, Any]) -> str:
+        system = "Generate a concise markdown audit summary for an Android APK modification."
+        prompt = json.dumps(audit_data, separators=(",", ":"))
+        return self._chat(system, prompt)
+

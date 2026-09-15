@@ -101,7 +101,17 @@ def invalidate_plan_cache(project_id: str) -> None:
 
 
 def _create_generation_provider(config, model: str | None = None):
-    """Keep the legacy Gemini seam while enabling ADK on the test branch."""
+    """Keep the legacy Gemini seam while enabling ADK on the test branch.
+
+    If the caller passes a model string prefixed with "openrouter:" (e.g.
+    "openrouter:nvidia/nemotron-3.5-lightning:free") we swap both the
+    generation provider AND the discovery provider to OpenRouter so the
+    end-to-end flow is consistent with the user's selection.
+    """
+    if model and model.startswith("openrouter:"):
+        or_model = model[len("openrouter:"):]
+        from noir.infrastructure.ai.openrouter import OpenRouterGenerationProvider
+        return OpenRouterGenerationProvider(model=or_model, config=config)
     if config.ai_provider == "adk":
         selected_config = config.model_copy(update={"ai_model": model}) if model else config
         return create_ai_provider(selected_config, purpose="generation")
