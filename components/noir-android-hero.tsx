@@ -20,18 +20,31 @@ const NoirApkCanvas = dynamic(
 export function NoirApkCoreHero() {
   const [exploded, setExploded] = useState(false);
   const [introComplete, setIntroComplete] = useState(false);
+  const [sceneReady, setSceneReady] = useState(false);
   const [inView, setInView] = useState(true);
   const stage = useRef<HTMLDivElement>(null);
   const brand = useRef<HTMLDivElement>(null);
   const brandFrame = useRef<number | null>(null);
 
   useEffect(() => {
-    const preloadTimer = window.setTimeout(() => {
-      void import("@/components/noir-apk-canvas");
-    }, 2600);
+    let cancelled = false;
+    const warmScene = () => {
+      void import("@/components/noir-apk-canvas").then(() => {
+        if (!cancelled) setSceneReady(true);
+      });
+    };
+    const idleWindow = window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const idleTimer = idleWindow.requestIdleCallback
+      ? idleWindow.requestIdleCallback(warmScene, { timeout: 1200 })
+      : window.setTimeout(warmScene, 250);
     const timer = window.setTimeout(() => setIntroComplete(true), 4000);
     return () => {
-      window.clearTimeout(preloadTimer);
+      cancelled = true;
+      if (idleWindow.cancelIdleCallback) idleWindow.cancelIdleCallback(idleTimer);
+      else window.clearTimeout(idleTimer);
       window.clearTimeout(timer);
     };
   }, []);
@@ -101,7 +114,7 @@ export function NoirApkCoreHero() {
           {["N", "O", "I", "R"].map((letter) => <i data-brand-letter key={letter}>{letter}</i>)}
         </strong>
       </div>
-      {introComplete && <NoirApkCanvas active={inView} exploded={exploded} setExploded={setExploded} />}
+      {sceneReady && <NoirApkCanvas active={inView && introComplete} exploded={exploded} setExploded={setExploded} />}
       <div className="android-caption"><span>NOIR / APK CORE</span><b>{exploded ? "06 LAYERS EXPOSED" : "HOVER TO INSPECT"}</b></div>
       <div className="apk-labels" aria-hidden="true">
         {LAYERS.map((label, index) => (

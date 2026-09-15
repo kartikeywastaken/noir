@@ -1,5 +1,7 @@
-import { env } from "cloudflare:workers";
 import type { NextRequest } from "next/server";
+
+export const runtime = "nodejs";
+export const preferredRegion = "bom1";
 
 const rules: Array<[string, RegExp]> = [
   ["GET", /^v1\/health$/],
@@ -35,9 +37,8 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     return Response.json({ detail: "Route not available" }, { status: 404 });
   }
 
-  const runtime = env as unknown as Record<string, string | undefined>;
-  const baseUrl = (runtime.NOIR_BACKEND_URL || process.env.NOIR_BACKEND_URL)?.replace(/\/$/, "");
-  const token = runtime.NOIR_API_TOKEN || process.env.NOIR_API_TOKEN;
+  const baseUrl = process.env.NOIR_BACKEND_URL?.replace(/\/$/, "");
+  const token = process.env.NOIR_API_TOKEN;
   if (!baseUrl || (!token && route !== "v1/health")) {
     return Response.json({ detail: "NOIR backend is not configured" }, { status: 503 });
   }

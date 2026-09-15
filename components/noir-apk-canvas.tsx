@@ -98,7 +98,9 @@ function FrontFace({ exploded }: { exploded: boolean }) {
       ease: exploded ? "power2.in" : "power3.out",
       overwrite: true,
     });
-    return () => tween.kill();
+    return () => {
+      tween.kill();
+    };
   }, [exploded]);
 
   return (
@@ -198,7 +200,9 @@ function ApkCore({ active, exploded, setExploded }: { active: boolean; exploded:
       ease: exploded ? "power3.out" : "power3.inOut",
       overwrite: true,
     });
-    return () => tween.kill();
+    return () => {
+      tween.kill();
+    };
   }, [exploded]);
 
   useEffect(() => {
