@@ -1147,9 +1147,9 @@ def run(
     project_id = None
     try:
         if request_file is not None:
-            from noir.infrastructure.ai.gemini import GeminiProvider
+            from noir.infrastructure.ai.factory import create_ai_provider
 
-            GeminiProvider(config=config)
+            create_ai_provider(config)
         if existing_project is not None:
             from noir.infrastructure.database.repositories import ProjectRepository
             from noir.security.locking import require_clean_workspace
@@ -1225,20 +1225,30 @@ app.add_typer(ai_app, name="ai")
 
 @ai_app.command("check")
 def ai_check():
-    """Make a small real Gemini request (no APK contents). Requires a valid key."""
+    """Make a small real AI-provider request (no APK contents)."""
     from noir.domain.config import get_config
-    from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
+    from noir.infrastructure.ai.factory import create_ai_provider
+    from noir.infrastructure.ai.gemini import GeminiProviderError
 
     try:
-        provider = GeminiProvider(config=get_config())
+        provider = create_ai_provider(get_config())
         result = provider._parse_json_response(
-            provider._call_model('{"status":"ok"}', "Return only valid JSON.")
+            provider._call_model(
+                '{"status":"ok"}',
+                "Return exactly the requested connectivity JSON and nothing else.",
+                response_schema={
+                    "type": "object",
+                    "properties": {"status": {"type": "string", "enum": ["ok"]}},
+                    "required": ["status"],
+                    "additionalProperties": False,
+                },
+            )
         )
         if result.get("status") != "ok":
             raise GeminiProviderError("Unexpected Gemini connectivity response")
         output(
             {
-                "provider": "gemini",
+                "provider": provider.provider_name,
                 "model": provider.last_model_name,
                 "primary_model": provider.model_name,
                 "fallback_used": provider.last_model_name != provider.model_name,

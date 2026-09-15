@@ -362,7 +362,14 @@ class GeminiProvider(AiProvider):
     ):
         self.config = config or get_config()
         self.model_name = model or self.config.ai_model
-        self.fallback_model_name = self.config.ai_fallback_model.strip()
+        # Parse comma-separated fallback chain; first entry is the legacy fallback_model_name.
+        _raw_fallbacks = [
+            m.strip()
+            for m in self.config.ai_fallback_model.split(",")
+            if m.strip() and m.strip() != self.model_name
+        ]
+        self.fallback_model_names: list[str] = list(dict.fromkeys(_raw_fallbacks))
+        self.fallback_model_name = self.fallback_model_names[0] if self.fallback_model_names else ""
         self.last_model_name = self.model_name
         self.purpose = purpose
         self.api_key = api_key or self.config.gemini_key_for(purpose)
@@ -443,9 +450,9 @@ class GeminiProvider(AiProvider):
                     f"AI call exceeded stall timeout ({elapsed}s). No response was used."
                 )
             response = None
-            models = [self.model_name]
-            if self.fallback_model_name and self.fallback_model_name != self.model_name:
-                models.append(self.fallback_model_name)
+            # Build full model chain: primary + all fallbacks.
+            models = [self.model_name, *self.fallback_model_names]
+            models = list(dict.fromkeys(models))  # deduplicate, preserve order
             for model_index, model_name in enumerate(models):
                 textual_schema = response_schema is not None and _requires_textual_schema(
                     model_name
@@ -478,14 +485,15 @@ class GeminiProvider(AiProvider):
                             active_schema = None
                             active_prompt = prompt + _schema_prompt_suffix(response_schema)
                             continue
-                        can_fallback = model_index == 0 and len(models) > 1
+                        can_fallback = model_index < len(models) - 1
                         if can_fallback and _is_retryable_availability_error(
                             exc, has_fallback=True
                         ):
+                            next_model = models[model_index + 1]
                             logger.warning(
                                 "Gemini model %s is temporarily unavailable; retrying with %s",
-                                self.model_name,
-                                self.fallback_model_name,
+                                model_name,
+                                next_model,
                             )
                             break
                         # Fail fast with a clear message on quota exhaustion.

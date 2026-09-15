@@ -98,12 +98,20 @@ def prepare(config, job):
             payload["user_request"],
             payload["allow_ai_upload"],
             analysis=analysis,
+            model=payload.get("model"),
         )
         if not plan.file_changes:
             _checkpoint(job, "planning", plan_id=plan.plan_id, unsupported=True)
             return {"plan_id": plan.plan_id, "unsupported": True}
         _checkpoint(job, "generating_patch", plan_id=plan.plan_id)
-        patch = generate_patch(config, project_id, plan.plan_id, preview=True, analysis=analysis)
+        patch = generate_patch(
+            config,
+            project_id,
+            plan.plan_id,
+            preview=True,
+            analysis=analysis,
+            model=payload.get("model"),
+        )
         _checkpoint(job, "generating_patch", patch_id=patch.patch_id)
         return {"plan_id": plan.plan_id, "patch_id": patch.patch_id}
 

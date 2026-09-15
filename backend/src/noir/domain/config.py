@@ -99,8 +99,11 @@ class NoirConfig(BaseSettings):
     native_patch_timeout: int = 60
 
     # ── AI ────────────────────────────────────────────────────────────
-    ai_provider: str = "gemini"
+    ai_provider: Literal["gemini", "adk", "none"] = "gemini"
     ai_model: str = "gemini-3.6-flash"
+    # Comma-separated ordered list of fallback models to try on capacity/quota failures.
+    # Example: "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-flash-latest"
+    # Legacy single-model usage (e.g. NOIR_AI_FALLBACK_MODEL=gemini-3.5-flash) still works.
     ai_fallback_model: str = ""
     ai_timeout: int = 120
     ai_retry_limit: int = 2
@@ -113,7 +116,7 @@ class NoirConfig(BaseSettings):
     # the common search → read/inspect flow; set three for unusually broad work.
     discovery_max_rounds: int = Field(default=2, ge=1, le=3)
     discovery_enabled: bool = True  # kill switch — falls back to static selection if False
-    discovery_provider: Literal["openrouter", "gemini", "local"] = "openrouter"
+    discovery_provider: Literal["openrouter", "gemini", "adk", "local"] = "openrouter"
     discovery_timeout: int = 30  # per-request timeout for discovery provider calls
     openrouter_discovery_model: str = "minimax/minimax-m3:free"
     openrouter_discovery_fallback_model: str = "z-ai/glm-5.2:free"

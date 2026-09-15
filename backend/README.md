@@ -58,7 +58,20 @@ Check the real API connection:
 noir ai check
 ```
 
-This makes one small billable/quota-consuming Gemini request, without APK contents.
+This makes one small billable/quota-consuming provider request, without APK contents.
+
+On the `codex/google-adk` evaluation branch, set both of these to route discovery,
+plan generation, and patch generation through Google ADK:
+
+```dotenv
+NOIR_AI_PROVIDER=adk
+NOIR_DISCOVERY_PROVIDER=adk
+```
+
+ADK still uses the configured Gemini model and the existing split Gemini keys. It
+does not apply patches itself: it writes the structured plan and patch operations,
+then NOIR performs the existing approval, validation, deterministic application,
+rebuild, signing, and audit stages.
 Missing/invalid credentials, unavailable models, quota failures, and malformed responses fail
 explicitly. There is no fake or offline response.
 Gemini 3.6 Flash is currently the only configured model. Provider errors fail explicitly;
