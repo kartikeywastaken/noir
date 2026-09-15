@@ -86,6 +86,15 @@ class OpenRouterGenerationProvider(GeminiProvider):
                 f"{self.config.ai_max_request_size:,}. No request was sent."
             )
 
+        # The free Nemotron route currently does not advertise OpenRouter's
+        # response_format/structured_outputs parameters. Supply the schema as
+        # bounded text and keep NOIR's existing parse-and-retry validation.
+        active_prompt = prompt
+        if json_output and response_schema:
+            active_prompt += "\n\nREQUIRED JSON SCHEMA:\n" + json.dumps(
+                response_schema, separators=(",", ":")
+            )
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -96,25 +105,11 @@ class OpenRouterGenerationProvider(GeminiProvider):
             "model": self.model_name,
             "messages": [
                 {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": active_prompt},
             ],
             "max_tokens": self.max_output_tokens,
             "temperature": 0,
         }
-        if json_output:
-            payload["response_format"] = (
-                {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "noir_response",
-                        "strict": True,
-                        "schema": response_schema,
-                    },
-                }
-                if response_schema
-                else {"type": "json_object"}
-            )
-
         attempts = 1 + self.config.ai_response_retry_limit if json_output else 1
         last_failure = "OpenRouter returned an incomplete response"
         for attempt in range(1, attempts + 1):
