@@ -96,6 +96,49 @@ def test_gemini_37_capacity_failure_uses_gemini_36_fallback(monkeypatch, provide
     assert provider.last_model_name == "gemini-3.6-flash"
 
 
+def test_capacity_failures_walk_the_configured_fallback_chain(monkeypatch):
+    provider = GeminiProvider(
+        config=NoirConfig(
+            _env_file=None,
+            gemini_api_key="unit-test-only",
+            ai_provider="gemini",
+            ai_model="gemini-3.6-flash",
+            ai_fallback_model=(
+                "gemini-3.6-flash, gemini-3.5-flash, "
+                "gemini-3.5-flash-lite, gemini-3.5-flash"
+            ),
+        )
+    )
+    calls = []
+
+    class UnavailableError(Exception):
+        status_code = 503
+
+    def generate_content(**kwargs):
+        calls.append(kwargs["model"])
+        if kwargs["model"] != "gemini-3.5-flash-lite":
+            raise UnavailableError("503 UNAVAILABLE: high demand")
+        return SimpleNamespace(
+            text='{"status":"ok"}',
+            prompt_feedback=None,
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+        )
+
+    monkeypatch.setattr(
+        provider,
+        "_get_client",
+        lambda: SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+    )
+
+    assert provider._call_model("test") == '{"status":"ok"}'
+    assert calls == [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+    ]
+    assert provider.last_model_name == "gemini-3.5-flash-lite"
+
+
 def test_configured_fallback_disables_slow_hidden_sdk_retries(monkeypatch, provider):
     from google import genai
 

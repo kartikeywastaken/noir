@@ -101,6 +101,8 @@ class NoirConfig(BaseSettings):
     # ── AI ────────────────────────────────────────────────────────────
     ai_provider: str = "gemini"
     ai_model: str = "gemini-3.6-flash"
+    # Comma-separated, ordered Gemini fallbacks used for capacity and quota failures.
+    # A single value remains supported for older deployments.
     ai_fallback_model: str = ""
     ai_timeout: int = 120
     ai_retry_limit: int = 2
