@@ -112,6 +112,12 @@ button, textarea, input { font: inherit; }
 .noir-intro { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; pointer-events: none; opacity: 1; transform: scale(1); transition: opacity .62s ease, transform 1.05s cubic-bezier(.7,0,.2,1); }
 .noir-intro strong { background: linear-gradient(110deg, #f3ffca 0%, #d8ff3e 52%, #7f9c21 100%); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; font-family: "Audiowide", sans-serif; font-size: clamp(4.2rem, 11vw, 9.5rem); font-weight: 400; line-height: .82; letter-spacing: .14em; text-indent: .14em; text-shadow: 0 0 70px rgba(132,177,31,.22); }
 .intro-complete .noir-intro { opacity: 0; transform: scale(.22); }
+.hero-brand { position: absolute; z-index: 3; left: clamp(3%, 6vw, 9%); top: 50%; display: grid; gap: 10px; translate: 0 -50%; pointer-events: none; opacity: 0; transform: translateX(-16px); transition: opacity .6s ease .35s, transform .75s cubic-bezier(.2,.8,.2,1) .35s; }
+.intro-complete .hero-brand { opacity: 1; transform: none; }
+.is-exploded .hero-brand { opacity: 0; transform: translateX(-24px); transition-delay: 0s; transition-duration: .3s; }
+.hero-brand span { color: #879457; font: .56rem var(--font-mono); letter-spacing: .22em; }
+.hero-brand strong { color: #edf2dc; font-family: "Audiowide", sans-serif; font-size: clamp(2.7rem, 5.4vw, 6.4rem); font-weight: 400; line-height: .82; letter-spacing: .12em; text-indent: .12em; text-shadow: 0 0 45px rgba(132,177,31,.16); }
+.hero-brand small { color: #697064; font: .66rem/1.65 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
 .intro-active .android-caption { visibility: hidden; opacity: 0 !important; }
 .android-caption { position: absolute; left: 50%; bottom: 7%; translate: -50% 0; display: grid; gap: 5px; color: #656a63; text-align: center; pointer-events: none; font: .52rem var(--font-mono); letter-spacing: .13em; }
 .android-caption b { color: #c8ff1a; font-size: .58rem; font-weight: 500; }
@@ -198,10 +204,10 @@ button, textarea, input { font: inherit; }
 .process-progress { height: 2px; border-radius: 0; background: #20231f; }
 .process-progress > div { background: #d8ff3e; }
 .terminal-feed { flex: 1; min-height: 378px; max-height: 438px; padding: 22px 18px; overflow: auto; scrollbar-width: thin; scrollbar-color: #31362d transparent; background: radial-gradient(circle at 100% 100%, rgba(216,255,62,.04), transparent 50%); font: .66rem/1.7 var(--font-mono); }
-.terminal-feed p { margin: 0 0 8px; display: grid; grid-template-columns: 62px 52px 1fr; gap: 8px; }
+.terminal-feed p { margin: 0 0 10px; display: grid; grid-template-columns: 66px 98px minmax(0, 1fr); column-gap: 12px; align-items: start; }
 .terminal-feed time { color: #50554f; }
-.terminal-feed b { color: #d8ff3e; font-weight: 500; }
-.terminal-feed span { color: #aeb2ac; }
+.terminal-feed b { color: #d8ff3e; font-weight: 500; white-space: nowrap; }
+.terminal-feed span { min-width: 0; color: #aeb2ac; overflow-wrap: anywhere; }
 .cursor-line { display: flex; align-items: center; gap: 8px; color: #656a63 !important; margin-top: 16px; }
 .cursor-line i { width: 7px; height: 12px; background: #d8ff3e; animation: blink 1s steps(1) infinite; }
 
@@ -222,6 +228,8 @@ footer > span { justify-self: end; }
   .calibration-rings { width: 125vw; }
   .hero-layout { min-height: auto; }
   .hero-object { width: 100%; height: 680px; min-height: 0; }
+  .hero-brand { left: 5%; top: 18%; }
+  .hero-brand strong { font-size: clamp(2.3rem, 12vw, 4.2rem); }
   .apk-label { width: 20%; font-size: .52rem; }
   .apk-label b { font-size: .54rem; }
   .apk-label i { height: 32px; }
@@ -249,7 +257,8 @@ footer > span { justify-self: end; }
   .workspace-head { padding-inline: 15px; }
   .controls-column { padding: 15px; }
   .upload-zone { padding: 14px; }
-  .terminal-feed p { grid-template-columns: 53px 46px 1fr; gap: 6px; font-size: .59rem; }
+  .terminal-feed { padding-inline: 14px; }
+  .terminal-feed p { grid-template-columns: 52px 82px minmax(0, 1fr); column-gap: 8px; font-size: .59rem; line-height: 1.6; }
   footer { grid-template-columns: 1fr auto; padding: 22px 0; }
   footer p { grid-column: 1 / -1; grid-row: 2; }
 }

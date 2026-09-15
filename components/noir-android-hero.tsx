@@ -53,6 +53,11 @@ export function NoirApkCoreHero() {
       aria-label={introComplete ? "Interactive exploded view of a precision APK security module" : "NOIR"}
     >
       <div className="noir-intro" aria-hidden="true"><strong>NOIR</strong></div>
+      <div className="hero-brand" aria-hidden="true">
+        <span>AUTHORIZED APK EDITOR</span>
+        <strong>NOIR</strong>
+        <small>Say the change.<br />See the proof.</small>
+      </div>
       {introComplete && <NoirApkCanvas active={inView} exploded={exploded} setExploded={setExploded} />}
       <div className="android-caption"><span>NOIR / APK CORE</span><b>{exploded ? "06 LAYERS EXPOSED" : "HOVER TO INSPECT"}</b></div>
       <div className="apk-labels" aria-hidden="true">

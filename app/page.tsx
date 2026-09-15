@@ -68,12 +68,15 @@ type S3UploadSession = {
 type PendingPart = { part_number: number; bytes: ArrayBuffer; checksum_sha256: string };
 type CompletedPart = { part_number: number; etag: string; checksum_sha256: string; size: number };
 type PresignedPart = { part_number: number; url: string; headers: Record<string, string> };
-type ModelId = "gemini-3.6-flash" | "gemini-3.1-pro-preview" | "gemini-2.5-flash";
+type ModelId =
+  | "gemini-3.6-flash"
+  | "gemini-3.1-pro-preview"
+  | "openrouter:nvidia/nemotron-3.5-lightning:free";
 
 const models: Array<{ id: ModelId; label: string; note: string }> = [
-  { id: "gemini-3.6-flash", label: "3.6 Flash", note: "Fast" },
-  { id: "gemini-3.1-pro-preview", label: "3.1 Pro", note: "Deep" },
-  { id: "gemini-2.5-flash", label: "2.5 Flash", note: "Stable" },
+  { id: "gemini-3.6-flash", label: "3.6 Flash", note: "Balanced" },
+  { id: "gemini-3.1-pro-preview", label: "3.1 Pro", note: "Deep plan" },
+  { id: "openrouter:nvidia/nemotron-3.5-lightning:free", label: "Nemotron", note: "OpenRouter" },
 ];
 
 const openingLogs: Log[] = [
@@ -90,6 +93,15 @@ const stamp = () =>
     second: "2-digit",
     hour12: false,
   }).format(new Date());
+
+const quietStatus = new Set(["queued", "running", "succeeded"]);
+
+const logTag = (value: string) => value
+  .replace(/^validating_input$/i, "VALIDATE")
+  .replace(/^generating_patch$/i, "PATCH")
+  .replace(/_/g, " ")
+  .slice(0, 12)
+  .toUpperCase();
 
 const hexDigest = (bytes: ArrayBuffer) =>
   Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, "0")).join("");
@@ -211,11 +223,15 @@ export default function Home() {
     const events = data.events ?? [];
     if (!events.length) return;
     eventCursor.current = events.at(-1)?.event_id ?? eventCursor.current;
+    const usefulEvents = events.filter((event) => {
+      const message = event.message.trim();
+      return !quietStatus.has(message.toLowerCase()) && !message.startsWith("Workflow: ");
+    });
     setLogs((current) => [
       ...current,
-      ...events.map((event) => ({
+      ...usefulEvents.map((event) => ({
         time: stamp(),
-        tag: (event.stage || event.severity || "AWS").slice(0, 8).toUpperCase(),
+        tag: logTag(event.stage || event.severity || "AWS"),
         message: event.message,
       })),
     ].slice(-160));
@@ -344,12 +360,21 @@ export default function Home() {
         }, crypto.randomUUID()),
       );
       const completed = await pollJob(job, 50, 88);
-      const result = (completed.result_data?.result || {}) as Record<string, string>;
+      const result = (completed.result_data?.result || {}) as Record<string, unknown>;
+      if (result.plan_id && result.unsupported) {
+        const unsupportedPlan = await apiJson<Record<string, unknown>>(
+          `/v1/projects/${activeProject.id}/plans/${String(result.plan_id)}`,
+        );
+        const reasons = Array.isArray(unsupportedPlan.unsupported_aspects)
+          ? unsupportedPlan.unsupported_aspects.map(String).filter(Boolean)
+          : [];
+        throw new Error(reasons.join(" ") || "NOIR could not find enough grounded evidence to make this change safely.");
+      }
       if (!result.plan_id || !result.patch_id) throw new Error("The backend did not return a reviewable patch.");
       const [plan, patch, diff] = await Promise.all([
-        apiJson<Record<string, unknown>>(`/v1/projects/${activeProject.id}/plans/${result.plan_id}`),
-        apiJson<Record<string, unknown>>(`/v1/projects/${activeProject.id}/patches/${result.patch_id}`),
-        apiJson<{ diff?: Array<Record<string, unknown>> }>(`/v1/projects/${activeProject.id}/patches/${result.patch_id}/diff`),
+        apiJson<Record<string, unknown>>(`/v1/projects/${activeProject.id}/plans/${String(result.plan_id)}`),
+        apiJson<Record<string, unknown>>(`/v1/projects/${activeProject.id}/patches/${String(result.patch_id)}`),
+        apiJson<{ diff?: Array<Record<string, unknown>> }>(`/v1/projects/${activeProject.id}/patches/${String(result.patch_id)}/diff`),
       ]);
       const operations = Array.isArray(patch.operations) ? patch.operations as Array<Record<string, unknown>> : [];
       const paths = [...new Set(operations.map((operation) => String(operation.relative_path || "")).filter(Boolean))];
