@@ -70,14 +70,27 @@ type CompletedPart = { part_number: number; etag: string; checksum_sha256: strin
 type PresignedPart = { part_number: number; url: string; headers: Record<string, string> };
 type ModelId =
   | "gemini-3.6-flash"
+  | "gemini-3.5-flash"
+  | "gemini-3.5-flash-lite"
+  | "gemini-flash-latest"
+  | "gemini-3.7-flash"
+  | "gemini-3.8-flash"
   | "gemini-3.1-pro-preview"
+  | "gemini-3.1-flash-lite"
   | "openrouter:nvidia/nemotron-3.5-lightning:free";
 
 const models: Array<{ id: ModelId; label: string; note: string }> = [
-  { id: "gemini-3.6-flash", label: "3.6 Flash", note: "Balanced" },
-  { id: "gemini-3.1-pro-preview", label: "3.1 Pro", note: "Deep plan" },
+  { id: "gemini-3.6-flash",              label: "3.6 Flash",       note: "Balanced" },
+  { id: "gemini-3.5-flash",              label: "3.5 Flash",       note: "Fallback" },
+  { id: "gemini-3.5-flash-lite",         label: "3.5 Flash Lite",  note: "Fast" },
+  { id: "gemini-flash-latest",           label: "Flash Latest",    note: "Stable" },
+  { id: "gemini-3.7-flash",              label: "3.7 Flash",       note: "Preview" },
+  { id: "gemini-3.8-flash",              label: "3.8 Flash",       note: "Preview" },
+  { id: "gemini-3.1-pro-preview",        label: "3.1 Pro",         note: "Deep plan" },
+  { id: "gemini-3.1-flash-lite",         label: "3.1 Flash Lite",  note: "Light" },
   { id: "openrouter:nvidia/nemotron-3.5-lightning:free", label: "Nemotron", note: "OpenRouter" },
 ];
+
 
 const openingLogs: Log[] = [
   { time: "--:--:--", tag: "AWS", message: "Connecting to NOIR" },
