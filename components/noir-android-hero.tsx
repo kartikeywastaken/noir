@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { PointerEvent, useCallback, useEffect, useRef, useState } from "react";
 
 const LAYERS = [
   "AndroidManifest.xml",
@@ -22,6 +22,8 @@ export function NoirApkCoreHero() {
   const [introComplete, setIntroComplete] = useState(false);
   const [inView, setInView] = useState(true);
   const stage = useRef<HTMLDivElement>(null);
+  const brand = useRef<HTMLDivElement>(null);
+  const brandFrame = useRef<number | null>(null);
 
   useEffect(() => {
     const preloadTimer = window.setTimeout(() => {
@@ -33,6 +35,42 @@ export function NoirApkCoreHero() {
       window.clearTimeout(timer);
     };
   }, []);
+
+  const resetBrand = useCallback(() => {
+    if (brandFrame.current !== null) window.cancelAnimationFrame(brandFrame.current);
+    brandFrame.current = null;
+    brand.current?.classList.remove("is-startled");
+    brand.current?.querySelectorAll<HTMLElement>("[data-brand-letter]").forEach((letter) => {
+      letter.style.setProperty("--flee-x", "0px");
+      letter.style.setProperty("--flee-y", "0px");
+    });
+  }, []);
+
+  const moveBrandLetters = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (!brand.current || exploded) return;
+    const pointerX = event.clientX;
+    const pointerY = event.clientY;
+    if (brandFrame.current !== null) window.cancelAnimationFrame(brandFrame.current);
+    brandFrame.current = window.requestAnimationFrame(() => {
+      const letters = brand.current?.querySelectorAll<HTMLElement>("[data-brand-letter]");
+      if (!letters || !brand.current) return;
+      let startled = false;
+      letters.forEach((letter, index) => {
+        const bounds = letter.getBoundingClientRect();
+        const dx = bounds.left + bounds.width / 2 - pointerX;
+        const dy = bounds.top + bounds.height / 2 - pointerY;
+        const distance = Math.max(1, Math.hypot(dx, dy));
+        const force = Math.max(0, 1 - distance / 190);
+        startled ||= force > 0;
+        letter.style.setProperty("--flee-x", `${(dx / distance) * force * (30 + index * 3)}px`);
+        letter.style.setProperty("--flee-y", `${(dy / distance) * force * (22 + index * 2)}px`);
+      });
+      brand.current.classList.toggle("is-startled", startled);
+      brandFrame.current = null;
+    });
+  }, [exploded]);
+
+  useEffect(() => () => resetBrand(), [resetBrand]);
 
   useEffect(() => {
     if (!stage.current) return;
@@ -48,15 +86,20 @@ export function NoirApkCoreHero() {
     <div
       ref={stage}
       className={`android-stage ${exploded ? "is-exploded" : ""} ${introComplete ? "intro-complete" : "intro-active"}`}
-      onPointerLeave={() => setExploded(false)}
+      onPointerMove={moveBrandLetters}
+      onPointerLeave={() => {
+        setExploded(false);
+        resetBrand();
+      }}
       role="img"
       aria-label={introComplete ? "Interactive exploded view of a precision APK security module" : "NOIR"}
     >
       <div className="noir-intro" aria-hidden="true"><strong>NOIR</strong></div>
-      <div className="hero-brand" aria-hidden="true">
+      <div className="hero-brand" aria-hidden="true" ref={brand}>
         <span>AUTHORIZED APK EDITOR</span>
-        <strong>NOIR</strong>
-        <small>Say the change.<br />See the proof.</small>
+        <strong aria-label="NOIR">
+          {["N", "O", "I", "R"].map((letter) => <i data-brand-letter key={letter}>{letter}</i>)}
+        </strong>
       </div>
       {introComplete && <NoirApkCanvas active={inView} exploded={exploded} setExploded={setExploded} />}
       <div className="android-caption"><span>NOIR / APK CORE</span><b>{exploded ? "06 LAYERS EXPOSED" : "HOVER TO INSPECT"}</b></div>

@@ -112,14 +112,18 @@ button, textarea, input { font: inherit; }
 .noir-intro { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; pointer-events: none; opacity: 1; transform: scale(1); transition: opacity .62s ease, transform 1.05s cubic-bezier(.7,0,.2,1); }
 .noir-intro strong { background: linear-gradient(110deg, #f3ffca 0%, #d8ff3e 52%, #7f9c21 100%); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; font-family: "Audiowide", sans-serif; font-size: clamp(4.2rem, 11vw, 9.5rem); font-weight: 400; line-height: .82; letter-spacing: .14em; text-indent: .14em; text-shadow: 0 0 70px rgba(132,177,31,.22); }
 .intro-complete .noir-intro { opacity: 0; transform: scale(.22); }
-.hero-brand { position: absolute; z-index: 3; left: clamp(3%, 6vw, 9%); top: 50%; display: grid; gap: 10px; translate: 0 -50%; pointer-events: none; opacity: 0; transform: translateX(-16px); transition: opacity .6s ease .35s, transform .75s cubic-bezier(.2,.8,.2,1) .35s; }
+.hero-brand { position: absolute; z-index: 3; left: clamp(6%, 10vw, 13%); top: 50%; width: 34%; display: grid; gap: 13px; translate: 0 -50%; pointer-events: none; opacity: 0; transform: translateX(-16px); transition: opacity .6s ease .35s, transform .75s cubic-bezier(.2,.8,.2,1) .35s; }
 .intro-complete .hero-brand { opacity: 1; transform: none; }
 .is-exploded .hero-brand { opacity: 0; transform: translateX(-24px); transition-delay: 0s; transition-duration: .3s; }
 .hero-brand span { color: #879457; font: .56rem var(--font-mono); letter-spacing: .22em; }
-.hero-brand strong { color: #edf2dc; font-family: "Audiowide", sans-serif; font-size: clamp(2.7rem, 5.4vw, 6.4rem); font-weight: 400; line-height: .82; letter-spacing: .12em; text-indent: .12em; text-shadow: 0 0 45px rgba(132,177,31,.16); }
-.hero-brand small { color: #697064; font: .66rem/1.65 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.hero-brand strong { display: flex; align-items: center; color: #edf2dc; font-family: "Audiowide", sans-serif; font-size: clamp(4rem, 7.2vw, 8.2rem); font-weight: 400; line-height: .82; letter-spacing: .075em; text-shadow: 0 0 45px rgba(132,177,31,.16); }
+.hero-brand strong i { --flee-x: 0px; --flee-y: 0px; display: inline-block; font-style: normal; transform: translate(var(--flee-x), var(--flee-y)); transition: transform .32s cubic-bezier(.16,1.35,.32,1), color .2s ease, text-shadow .2s ease; will-change: transform; }
+.hero-brand.is-startled strong i { color: #dfff60; text-shadow: 0 0 24px rgba(216,255,62,.34); }
+.hero-brand.is-startled strong i:nth-child(2n) { animation: nervous-letter .22s steps(2, end) infinite alternate; }
+.hero-brand.is-startled strong i:nth-child(2n + 1) { animation: nervous-letter .27s steps(2, end) infinite alternate-reverse; }
 .intro-active .android-caption { visibility: hidden; opacity: 0 !important; }
-.android-caption { position: absolute; left: 50%; bottom: 7%; translate: -50% 0; display: grid; gap: 5px; color: #656a63; text-align: center; pointer-events: none; font: .52rem var(--font-mono); letter-spacing: .13em; }
+.android-caption { position: absolute; left: 65%; bottom: 7%; translate: -50% 0; display: grid; gap: 5px; color: #656a63; text-align: center; pointer-events: none; font: .52rem var(--font-mono); letter-spacing: .13em; transition: left .7s cubic-bezier(.2,.8,.2,1); }
+.is-exploded .android-caption { left: 50%; }
 .android-caption b { color: #c8ff1a; font-size: .58rem; font-weight: 500; }
 .apk-labels { position: absolute; inset: 0; pointer-events: none; }
 .apk-label { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 15%; min-width: 0; color: #f0f4e9; text-align: center; font: .62rem var(--font-mono); letter-spacing: .055em; opacity: 0; transform: translateY(-7px); transition: opacity .25s ease, transform .45s cubic-bezier(.2,.8,.2,1); }
@@ -219,6 +223,7 @@ footer > span { justify-self: end; }
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes calibrate { to { rotate: 360deg; } }
+@keyframes nervous-letter { to { margin-top: -3px; } }
 
 @media (max-width: 820px) {
   .site-nav { grid-template-columns: 1fr auto; }
@@ -228,8 +233,9 @@ footer > span { justify-self: end; }
   .calibration-rings { width: 125vw; }
   .hero-layout { min-height: auto; }
   .hero-object { width: 100%; height: 680px; min-height: 0; }
-  .hero-brand { left: 5%; top: 18%; }
-  .hero-brand strong { font-size: clamp(2.3rem, 12vw, 4.2rem); }
+  .hero-brand { left: 6%; top: 18%; width: 70%; }
+  .hero-brand strong { font-size: clamp(2.8rem, 13vw, 4.8rem); }
+  .android-caption { left: 50%; }
   .apk-label { width: 20%; font-size: .52rem; }
   .apk-label b { font-size: .54rem; }
   .apk-label i { height: 32px; }

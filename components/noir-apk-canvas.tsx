@@ -221,6 +221,8 @@ function ApkCore({ active, exploded, setExploded }: { active: boolean; exploded:
     const damp = 1 - Math.exp(-Math.min(delta, 1 / 30) * 8);
     const progress = expansion.current.value;
     if (assembly.current) {
+      const assembledX = viewport.width < 8 ? 0 : 1.65;
+      assembly.current.position.x = THREE.MathUtils.lerp(assembledX, 0, progress);
       assembly.current.rotation.y = THREE.MathUtils.lerp(assembly.current.rotation.y, -0.18 + pointer.x * 0.13, damp);
       assembly.current.rotation.x = THREE.MathUtils.lerp(assembly.current.rotation.x, 0.04 - pointer.y * 0.08, damp);
       assembly.current.position.y = Math.sin(state.clock.elapsedTime * 0.72) * 0.09;
