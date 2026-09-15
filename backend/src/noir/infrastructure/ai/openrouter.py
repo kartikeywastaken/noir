@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 _UI_REQUEST = re.compile(
-    r"\b(ui|screen|button|message|toast|flash|interact(?:ion)?|click|tap|touch|keypress)\b",
+    r"\b(ui|screen|button|message|toast|flash|interact(?:ion)?|click|tap|touch|keypress"
+    r"|launch|redirect|startup|start.?up|open|navigate|deeplink|intent|browser|url|link"
+    r"|upon|on.?start|on.?launch|on.?creat|on.?resume|app.?start|first.?run|first.?launch)\b",
     re.IGNORECASE,
 )
 _RESOURCE_TEXT_REQUEST = re.compile(
@@ -359,10 +361,21 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
             tool_calls = message.get("tool_calls", [])
 
             if not tool_calls:
-                if finish_reason != "stop":
-                    raise OpenRouterDiscoveryError(
-                        "OpenRouter stopped without a complete response "
-                        f"({finish_reason or 'unknown'})"
+                if finish_reason == "length":
+                    # Reasoning models (Nemotron, DeepSeek-R1, etc.) can exhaust
+                    # max_tokens mid-thought and emit no tool calls. Treat this as
+                    # budget exhaustion for this round and stop gracefully rather than
+                    # crashing discovery and forcing a full static fallback.
+                    logger.debug(
+                        "OpenRouter model hit max_tokens without tool calls (finish_reason=length); "
+                        "stopping discovery with partial evidence"
+                    )
+                    result.stop_reason = "model_length_exhausted"
+                    break
+                if finish_reason not in {"stop", "end_turn", "eos"}:
+                    logger.debug(
+                        "OpenRouter returned unexpected finish_reason=%r; treating as model_finished",
+                        finish_reason,
                     )
                 result.stop_reason = "model_finished"
                 break
@@ -437,7 +450,10 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
             "messages": messages,
             "tools": tools,
             "tool_choice": "auto",
-            "max_tokens": 768,
+            # 4096 tokens gives reasoning models (Nemotron, DeepSeek-R1, etc.) enough
+            # budget to complete their chain-of-thought AND emit tool calls. 768 caused
+            # finish_reason="length" on every turn-2 response, crashing discovery.
+            "max_tokens": 4096,
         }
         client = self._client
         if client is None:

@@ -101,6 +101,9 @@ class NoirConfig(BaseSettings):
     # ── AI ────────────────────────────────────────────────────────────
     ai_provider: Literal["gemini", "adk", "none"] = "gemini"
     ai_model: str = "gemini-3.6-flash"
+    # Comma-separated ordered list of fallback models to try on capacity/quota failures.
+    # Example: "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-flash-latest"
+    # Legacy single-model usage (e.g. NOIR_AI_FALLBACK_MODEL=gemini-3.5-flash) still works.
     ai_fallback_model: str = ""
     ai_timeout: int = 120
     ai_retry_limit: int = 2
