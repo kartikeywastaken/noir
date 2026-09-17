@@ -24,6 +24,7 @@ from noir.infrastructure.ai.discovery import (
     is_label_task,
 )
 from noir.infrastructure.ai.discovery_provider import DiscoveryProvider
+from noir.infrastructure.ai.gemini import GeminiProvider, _schema_prompt_suffix
 
 if TYPE_CHECKING:
     from noir.domain.config import NoirConfig
@@ -507,44 +508,79 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
         raise OpenRouterDiscoveryError(last_error)
 
 
-class OpenRouterGenerationProvider:
+class OpenRouterGenerationProvider(GeminiProvider):
     """Generation provider (plan + patch) backed by OpenRouter chat completions.
 
-    Uses the same prompts as GeminiProvider but sends them via OpenRouter's
-    /chat/completions endpoint so any OpenRouter model can be selected from
-    the frontend for end-to-end APK modification.
+    Subclasses GeminiProvider and overrides only _call_model() to route through
+    OpenRouter's /chat/completions endpoint instead of the Google GenAI SDK.
+    All prompt building, JSON parsing, schema validation, plan/patch object
+    construction, and grounding correction are inherited from GeminiProvider.
     """
 
     provider_name = "openrouter"
 
     def __init__(self, model: str, config: "NoirConfig") -> None:
-        self.model = model
+        # Bypass GeminiProvider.__init__ (which requires a Gemini API key) and
+        # initialise only the attributes _call_model and the inherited methods need.
         self.config = config
+        self.model_name = model
+        self.fallback_model_name = ""
+        self.fallback_model_names: list[str] = []
+        self.last_model_name = model
+        self.purpose = "generation"
         self.api_key = config.openrouter_api_key.get_secret_value() if config.openrouter_api_key else ""
         self.timeout = config.ai_timeout
+        self.max_output_tokens = config.ai_max_output_tokens
+        self._client = None  # Never used; we talk to OpenRouter via httpx directly.
 
         if not self.api_key:
             raise OpenRouterDiscoveryError(
                 "OpenRouter API key not configured. Set NOIR_OPENROUTER_API_KEY, then restart."
             )
 
-    def _chat(self, system: str, user: str) -> str:
-        """Send a single chat turn to OpenRouter and return the assistant text."""
+    # ------------------------------------------------------------------
+    # Override: replace the Gemini SDK transport with OpenRouter httpx calls.
+    # Signature must match GeminiProvider._call_model exactly.
+    # ------------------------------------------------------------------
+
+    def _call_model(
+        self,
+        prompt: str,
+        system_instruction: str = "",
+        *,
+        json_output: bool = True,
+        response_schema: dict[str, Any] | None = None,
+    ) -> str:
+        """Send a generation request to OpenRouter and return the assistant text.
+
+        Translates the GeminiProvider calling convention (prompt + system_instruction)
+        into an OpenAI-compatible messages array. The response_schema is embedded as
+        a textual suffix in the prompt (same as Gemini's textual-schema path) because
+        OpenRouter's json_object mode does not enforce a JSON schema.
+        """
+        # Embed schema as text so the model knows the required output structure.
+        full_prompt = prompt
+        if json_output and response_schema:
+            full_prompt = prompt + _schema_prompt_suffix(response_schema)
+
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": self.model_name,
             "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "system", "content": system_instruction or "You are a helpful assistant."},
+                {"role": "user", "content": full_prompt},
             ],
-            "max_tokens": 8192,
-            "response_format": {"type": "json_object"},
+            "max_tokens": self.max_output_tokens,
         }
+        if json_output:
+            payload["response_format"] = {"type": "json_object"}
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://noir.v0id.in",
             "X-Title": "NOIR",
         }
+
         with httpx.Client(timeout=self.timeout) as client:
             for attempt in range(self.config.ai_retry_limit + 1):
                 try:
@@ -566,65 +602,22 @@ class OpenRouterGenerationProvider:
                     )
 
                 data = resp.json()
+                finish_reason = (
+                    data.get("choices", [{}])[0].get("finish_reason", "")
+                )
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                if finish_reason == "length":
+                    logger.warning(
+                        "OpenRouter generation hit max_tokens (finish_reason=length); "
+                        "response may be truncated"
+                    )
+
                 if not content:
                     raise OpenRouterDiscoveryError("OpenRouter returned empty generation response")
+
+                self.last_model_name = self.model_name
                 return content
 
         raise OpenRouterDiscoveryError("OpenRouter generation failed after all retries")
-
-    def generate_plan(self, user_request: str, analysis: Any, context: dict[str, Any], *, project_id: str) -> Any:
-        """Generate a change plan using the OpenRouter model."""
-        from noir.infrastructure.ai.gemini import GeminiProvider, _PLAN_RESPONSE_SCHEMA
-
-        # Build the same prompt Gemini uses so output structure is identical
-        dummy = GeminiProvider.__new__(GeminiProvider)
-        dummy.config = self.config
-        dummy.model_name = self.model
-        dummy.fallback_model_name = ""
-        dummy.fallback_model_names = []
-        dummy.last_model_name = self.model
-        dummy.purpose = "generation"
-        dummy.api_key = ""
-        dummy.timeout = self.timeout
-        dummy.max_output_tokens = 8192
-        dummy._client = None
-
-        context_str = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        system, prompt = dummy._build_plan_prompt(user_request, context_str, analysis)  # type: ignore[attr-defined]
-        response_text = self._chat(system, prompt)
-        data = dummy._parse_json_response(response_text)  # type: ignore[attr-defined]
-        return dummy._build_plan_object(data, user_request, project_id)  # type: ignore[attr-defined]
-
-    def generate_patch(self, plan: Any, context: dict[str, Any]) -> Any:
-        """Generate a patch from an approved plan using the OpenRouter model."""
-        from noir.infrastructure.ai.gemini import GeminiProvider
-
-        dummy = GeminiProvider.__new__(GeminiProvider)
-        dummy.config = self.config
-        dummy.model_name = self.model
-        dummy.fallback_model_name = ""
-        dummy.fallback_model_names = []
-        dummy.last_model_name = self.model
-        dummy.purpose = "generation"
-        dummy.api_key = ""
-        dummy.timeout = self.timeout
-        dummy.max_output_tokens = 8192
-        dummy._client = None
-
-        context_str = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        system, prompt = dummy._build_patch_prompt(plan, context_str)  # type: ignore[attr-defined]
-        response_text = self._chat(system, prompt)
-        data = dummy._parse_json_response(response_text)  # type: ignore[attr-defined]
-        return dummy._build_patch_object(data, plan)  # type: ignore[attr-defined]
-
-    def diagnose_build_failure(self, error_log: str, context: dict[str, Any]) -> dict[str, Any]:
-        system = "You are an expert Android build toolchain engineer. Diagnose the Apktool/smali build failure and suggest the minimal fix."
-        prompt = f"BUILD ERROR:\n{error_log}\n\nCONTEXT:\n{json.dumps(context, separators=(',', ':'))}"
-        return {"diagnosis": self._chat(system, prompt)}
-
-    def generate_summary(self, audit_data: dict[str, Any]) -> str:
-        system = "Generate a concise markdown audit summary for an Android APK modification."
-        prompt = json.dumps(audit_data, separators=(",", ":"))
-        return self._chat(system, prompt)
 
