@@ -223,9 +223,22 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
 
             discovery_provider = _create_discovery_provider(config)
 
+            # Smart pre-selection: predictively inject smali files into the discovery
+            # result BEFORE the ADK agent runs, so it starts with exact evidence
+            # already in hand for known intent patterns (toast/flash, launch-redirect,
+            # network-exfil, app-name). This saves a full discovery round.
+            preselected = context_tools.smart_preselect_smali(request)
+
             if discovery_provider is not None:
                 # OpenRouter or local provider — clean interface
                 discovery = discovery_provider.discover(request, context_tools, analysis)
+                # Merge pre-selected files that discovery didn't already cover
+                for path, content in preselected.items():
+                    if path not in discovery.seen_files:
+                        discovery.seen_files[path] = content
+                        if discovery.used_static_fallback and preselected:
+                            discovery.used_static_fallback = False
+                            discovery.stop_reason = "smart_preselect"
             else:
                 # Legacy Gemini discovery path
                 from noir.infrastructure.ai.discovery import EvidenceDiscovery
@@ -235,6 +248,12 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
                 discovery = EvidenceDiscovery(
                     gemini_discovery, context_tools, config, analysis
                 ).discover(request)
+                for path, content in preselected.items():
+                    if path not in discovery.seen_files:
+                        discovery.seen_files[path] = content
+                        if discovery.used_static_fallback and preselected:
+                            discovery.used_static_fallback = False
+                            discovery.stop_reason = "smart_preselect"
 
             discovery_transcript = [r.to_dict() for r in discovery.transcript]
             discovery_api_calls = discovery.api_calls
