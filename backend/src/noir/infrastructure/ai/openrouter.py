@@ -573,6 +573,8 @@ class OpenRouterGenerationProvider(GeminiProvider):
         }
         if json_output:
             payload["response_format"] = {"type": "json_object"}
+        if "nemotron" in self.model_name.lower():
+            payload["reasoning"] = {"max_tokens": 0}
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
