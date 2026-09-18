@@ -1291,8 +1291,9 @@ class NoirApiClient {
     String id,
     String text,
     int revision,
-    String key,
-  ) async => JobInfo.fromJson(
+    String key, {
+    String? model,
+  }) async => JobInfo.fromJson(
     await _request(
       'POST',
       '/v1/projects/$id/workflow/prepare',
@@ -1301,6 +1302,7 @@ class NoirApiClient {
         'user_request': text,
         'allow_ai_upload': true,
         'revision': revision,
+        if (model != null && model.isNotEmpty) 'model': model,
       },
     ),
   );

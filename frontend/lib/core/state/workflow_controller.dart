@@ -131,7 +131,9 @@ class WorkflowController extends SafeNotifier {
     }
   }
 
-  Future<void> prepare(String text) async {
+  String? selectedModel;
+
+  Future<void> prepare(String text, {String? model}) async {
     if (working || project == null || text.trim().isEmpty) return;
     busy = true;
     error = null;
@@ -147,6 +149,7 @@ class WorkflowController extends SafeNotifier {
         request,
         project!.workspaceRevision,
         const Uuid().v4(),
+        model: model ?? selectedModel,
       );
       await refresh();
     } catch (e) {
