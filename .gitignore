@@ -14,3 +14,7 @@ backend/tests/fixtures/*.apk
 /output/
 .DS_Store
 backend-private.tar.gz
+node-modules
+node_modules
+.next/
+next-env.d.ts
