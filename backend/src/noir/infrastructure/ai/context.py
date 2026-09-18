@@ -32,26 +32,8 @@ _NON_LABEL_BEHAVIOR = re.compile(
     re.IGNORECASE,
 )
 
-# Intent patterns for smart smali pre-selection
-_INTENT_TOAST_FLASH = re.compile(
-    r"\b(toast|flash|message|popup|notify|notification|banner|snackbar|alert|show)\b"
-    r".*?\b(interact|click|tap|touch|press|button|ui|screen|every|whenever)\b"
-    r"|\b(interact|click|tap|touch|press|button|ui|screen|every|whenever)\b"
-    r".*?\b(toast|flash|message|popup|notify|notification|banner|snackbar|alert|show)\b",
-    re.IGNORECASE | re.DOTALL,
-)
-_INTENT_LAUNCH_REDIRECT = re.compile(
-    r"https?://\S+"  # URL present anywhere in the request
-    r"|\\b(redirect|navigate|go to|forward|take)\\b.*?\\b(launch|open|start|app)\\b"
-    r"|\\b(launch|open|start|run|startup)\\b.*?\\b(redirect|navigate|go to|forward|take)\\b",
-    re.IGNORECASE | re.DOTALL,
-)
-_INTENT_NETWORK_EXFIL = re.compile(
-    r"\b(send|upload|post|transmit|report|exfil|forward)\b"
-    r".*?\b(file|data|info|log|server|url|endpoint|api)\b"
-    r"|\b(server|endpoint|api|url|http)\b.*?\b(send|post|upload|transmit)\b",
-    re.IGNORECASE | re.DOTALL,
-)
+# Intent patterns removed — consolidated in intent_router.py
+
 
 
 def is_label_only_request(user_request: str) -> bool:
@@ -200,85 +182,6 @@ class AiContextTools:
         """Search for text in project files."""
         return self.workspace.search_text(query, max_results=self.MAX_SEARCH_RESULTS)
 
-    def smart_preselect_smali(
-        self, user_request: str
-    ) -> dict[str, str]:
-        """Return {path: content} for smali files that are predictably relevant.
-
-        Called before discovery so the AI gets exact evidence on the first call
-        without spending a discovery round on a search/list/read chain.
-
-        Covers:
-        - Toast / flash / message on any UI interaction → launcher activity + MainActivity
-        - Redirect on launch → launcher activity onCreate
-        - Network exfil / send to server → network client smali classes
-        """
-        if not self.analysis:
-            return {}
-
-        preselected: list[str] = []
-
-        wants_toast = bool(_INTENT_TOAST_FLASH.search(user_request))
-        wants_redirect = bool(_INTENT_LAUNCH_REDIRECT.search(user_request))
-        wants_network = bool(_INTENT_NETWORK_EXFIL.search(user_request))
-
-        # ── Find launcher activity descriptor from manifest components ──
-        launcher_name: str | None = None
-        for component in self.analysis.components:
-            if component.is_launcher and component.component_type == "activity":
-                launcher_name = component.name
-                break
-
-        # Convert Android component name to smali descriptor fragment
-        # e.g. "ch.protonvpn.android.MainActivity" → "ch/protonvpn/android/MainActivity"
-        launcher_path_fragment: str | None = None
-        if launcher_name:
-            launcher_path_fragment = launcher_name.lstrip(".").replace(".", "/")
-
-        for cls in self.analysis.smali_classes:
-            desc_lower = cls.descriptor.lower()
-            frag = launcher_path_fragment
-
-            # Launcher activity — needed for both toast-on-tap and redirect-on-launch
-            if (wants_toast or wants_redirect) and frag and frag.lower() in cls.file_path.lower():
-                preselected.append(cls.file_path)
-                continue
-
-            # MainActivity / BaseActivity fallbacks when launcher isn't resolved
-            if wants_toast or wants_redirect:
-                if any(
-                    kw in desc_lower
-                    for kw in ("mainactivity", "baseactivity", "homeactivity",
-                               "splashactivity", "launchactivity")
-                ):
-                    preselected.append(cls.file_path)
-                    continue
-
-            # Network clients for exfil/redirect patterns
-            if wants_network or wants_redirect:
-                if any(
-                    kw in desc_lower
-                    for kw in ("okhttp", "retrofit", "httpclient", "httpurlconnection",
-                               "networkclient", "apiservice", "apiclient",
-                               "webviewclient", "urlutil")
-                ):
-                    preselected.append(cls.file_path)
-                    continue
-
-            if len(preselected) >= 6:
-                break
-
-        # Read the pre-selected files into seen_files dict (bounded by MAX_FILE_SIZE)
-        seen: dict[str, str] = {}
-        for path in dict.fromkeys(preselected):  # deduplicate, preserve order
-            if len(seen) >= 4:
-                break
-            try:
-                content = self.read_file_range(path)
-                seen[path] = content
-            except (FileNotFoundError, OSError, ValueError):
-                continue
-        return seen
 
     def inspect_manifest(self) -> dict[str, Any]:
         """Get structured manifest information."""

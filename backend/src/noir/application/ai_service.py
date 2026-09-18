@@ -220,50 +220,47 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         discovery_stop_reason = ""
         try:
             from noir.infrastructure.ai.discovery import build_discovered_context
+            from noir.infrastructure.ai.intent_router import IntentRouter
 
-            discovery_provider = _create_discovery_provider(config)
-
-            # Smart pre-selection: predictively inject smali files into the discovery
-            # result BEFORE the ADK agent runs, so it starts with exact evidence
-            # already in hand for known intent patterns (toast/flash, launch-redirect,
-            # network-exfil, app-name). This saves a full discovery round.
-            preselected = context_tools.smart_preselect_smali(request)
-
-            if discovery_provider is not None:
-                # OpenRouter or local provider — clean interface
-                discovery = discovery_provider.discover(request, context_tools, analysis)
-                # Merge pre-selected files that discovery didn't already cover
-                for path, content in preselected.items():
-                    if path not in discovery.seen_files:
-                        discovery.seen_files[path] = content
-                        if discovery.used_static_fallback and preselected:
-                            discovery.used_static_fallback = False
-                            discovery.stop_reason = "smart_preselect"
+            route_result = IntentRouter().route(request, context_tools, analysis)
+            if route_result and route_result.matched_intents and route_result.seen_files:
+                discovery_stop_reason = "intent_matched"
+                discovery_api_calls = 0
+                discovery_transcript = []
+                context = build_discovered_context(
+                    context_tools, route_result, user_request=request
+                )
+                context["detected_intents"] = route_result.matched_intents
             else:
-                # Legacy Gemini discovery path
-                from noir.infrastructure.ai.discovery import EvidenceDiscovery
-                from noir.infrastructure.ai.gemini import GeminiProvider
+                logger.warning(
+                    "No intent matched for request; falling through to AI discovery"
+                )
+                discovery_provider = _create_discovery_provider(config)
 
-                gemini_discovery = GeminiProvider(config=config, purpose="discovery")
-                discovery = EvidenceDiscovery(
-                    gemini_discovery, context_tools, config, analysis
-                ).discover(request)
-                for path, content in preselected.items():
-                    if path not in discovery.seen_files:
-                        discovery.seen_files[path] = content
-                        if discovery.used_static_fallback and preselected:
-                            discovery.used_static_fallback = False
-                            discovery.stop_reason = "smart_preselect"
+                if discovery_provider is not None:
+                    # OpenRouter or local provider — clean interface
+                    discovery = discovery_provider.discover(request, context_tools, analysis)
+                else:
+                    # Legacy Gemini discovery path
+                    from noir.infrastructure.ai.discovery import EvidenceDiscovery
+                    from noir.infrastructure.ai.gemini import GeminiProvider
 
-            discovery_transcript = [r.to_dict() for r in discovery.transcript]
-            discovery_api_calls = discovery.api_calls
-            discovery_stop_reason = discovery.stop_reason
-            budget.consume(discovery_api_calls, label="discovery")
+                    gemini_discovery = GeminiProvider(config=config, purpose="discovery")
+                    discovery = EvidenceDiscovery(
+                        gemini_discovery, context_tools, config, analysis
+                    ).discover(request)
 
-            if not discovery.used_static_fallback:
-                context = build_discovered_context(context_tools, discovery, user_request=request)
-            else:
-                context = context_tools.build_context(user_request=request)
+                discovery_transcript = [r.to_dict() for r in discovery.transcript]
+                discovery_api_calls = discovery.api_calls
+                discovery_stop_reason = discovery.stop_reason
+                budget.consume(discovery_api_calls, label="discovery")
+
+                if not discovery.used_static_fallback:
+                    context = build_discovered_context(
+                        context_tools, discovery, user_request=request
+                    )
+                else:
+                    context = context_tools.build_context(user_request=request)
         except PlanServiceError:
             raise  # budget exhaustion is a real error, not a fallback case
         except Exception:
