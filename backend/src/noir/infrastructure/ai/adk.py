@@ -167,8 +167,9 @@ class AdkGeminiProvider(GeminiProvider):
         token_budget = self.max_output_tokens
         stall_deadline = time.monotonic() + self.config.ai_stall_timeout
         models = [self.model_name]
-        if self.fallback_model_name and self.fallback_model_name != self.model_name:
-            models.append(self.fallback_model_name)
+        for fb in self.fallback_model_names:
+            if fb and fb != self.model_name and fb not in models:
+                models.append(fb)
 
         for attempt in range(1, attempts + 1):
             failure = ""
