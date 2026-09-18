@@ -18,7 +18,7 @@ from noir.infrastructure.ai.context import AiContextTools
 
 logger = logging.getLogger(__name__)
 
-MAX_FILES_PER_INTENT = 8
+MAX_FILES_PER_INTENT = 20
 MAX_FILES_TOTAL = 20
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
