@@ -140,17 +140,7 @@ class AdkGeminiProvider(GeminiProvider):
                 new_message=message,
             )
         )
-        for event in reversed(events):
-            if hasattr(event, "content") and event.content:
-                parts = getattr(event.content, "parts", [])
-                text_parts = [p.text for p in parts if hasattr(p, "text") and p.text]
-                if text_parts:
-                    return "".join(text_parts)
-        for event in events:
-            text = getattr(event, "text", "")
-            if text:
-                return text
-        raise GeminiProviderError("ADK agent completed with no text output")
+        return _final_text(events)
 
     def _call_model(
         self,
