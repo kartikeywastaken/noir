@@ -116,7 +116,7 @@ class AdkGeminiProvider(GeminiProvider):
             description="Produces an exact NOIR APK modification artifact.",
             model=model,
             instruction=system_instruction,
-            output_schema=response_schema,
+            output_schema=None,
             generate_content_config=types.GenerateContentConfig(
                 max_output_tokens=token_budget,
                 response_mime_type=("application/json" if json_output else "text/plain"),
@@ -138,10 +138,19 @@ class AdkGeminiProvider(GeminiProvider):
                 user_id="noir",
                 session_id=uuid.uuid4().hex,
                 new_message=message,
-                run_config=RunConfig(max_llm_calls=1),
             )
         )
-        return _final_text(events)
+        for event in reversed(events):
+            if hasattr(event, "content") and event.content:
+                parts = getattr(event.content, "parts", [])
+                text_parts = [p.text for p in parts if hasattr(p, "text") and p.text]
+                if text_parts:
+                    return "".join(text_parts)
+        for event in events:
+            text = getattr(event, "text", "")
+            if text:
+                return text
+        raise GeminiProviderError("ADK agent completed with no text output")
 
     def _call_model(
         self,
@@ -150,6 +159,20 @@ class AdkGeminiProvider(GeminiProvider):
         *,
         json_output: bool = True,
         response_schema: dict[str, Any] | None = None,
+    ) -> str:
+        return self._call_model_bounded(
+            prompt=prompt,
+            system_instruction=system_instruction,
+            response_schema=response_schema,
+            json_output=json_output,
+        )
+
+    def _call_model_bounded(
+        self,
+        prompt: str,
+        system_instruction: str,
+        response_schema: dict[str, Any] | None = None,
+        json_output: bool = True,
     ) -> str:
         """Run one bounded ADK agent turn with the existing fallback policy."""
         actual = (
@@ -180,30 +203,27 @@ class AdkGeminiProvider(GeminiProvider):
                         "No response was used."
                     )
 
-                textual_schema = response_schema is not None and _requires_textual_schema(
-                    model_name
-                )
-                active_schema = None if textual_schema else response_schema
                 active_prompt = (
-                    prompt + _schema_prompt_suffix(response_schema) if textual_schema else prompt
+                    prompt + _schema_prompt_suffix(response_schema) if response_schema else prompt
                 )
                 try:
                     text = self._run_agent(
                         model_name=model_name,
                         prompt=active_prompt,
                         system_instruction=system_instruction,
-                        response_schema=active_schema,
+                        response_schema=None,
                         json_output=json_output,
                         token_budget=token_budget,
                     )
                     self.last_model_name = model_name
                 except Exception as exc:
-                    can_fallback = model_index == 0 and len(models) > 1
+                    can_fallback = model_index < len(models) - 1
                     if can_fallback and _is_retryable_availability_error(exc, has_fallback=True):
+                        next_model = models[model_index + 1]
                         logger.warning(
                             "ADK model %s is unavailable; retrying with %s",
                             model_name,
-                            self.fallback_model_name,
+                            next_model,
                         )
                         continue
                     detail_upper = str(exc).upper()
