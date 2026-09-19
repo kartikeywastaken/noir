@@ -502,14 +502,14 @@ export default function Home() {
 
   return (
     <div className="stage">
-      {/* Background Video: k_no_logo_final.mp4 (No audio, autoplay, loop, cover) */}
+      {/* Background Video: something_bright_no_logo_no_audio.mp4 (No audio, autoplay, loop, cover) */}
       <video
         className="stage-video"
         autoPlay
         muted
         loop
         playsInline
-        src="/k_no_logo_final.mp4"
+        src="/something_bright_no_logo_no_audio.mp4"
       />
       <div className="stage-overlay" />
 
