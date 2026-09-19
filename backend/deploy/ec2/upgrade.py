@@ -167,6 +167,7 @@ def main() -> None:
             "NOIR_AI_PROVIDER",
             "NOIR_AI_MODEL",
             "NOIR_AI_FALLBACK_MODEL",
+            "NOIR_GEMINI_API_KEYS",
             "NOIR_DISCOVERY_PROVIDER",
             "NOIR_OPENROUTER_DISCOVERY_MODEL",
             "NOIR_OPENROUTER_DISCOVERY_FALLBACK_MODEL",
@@ -183,7 +184,8 @@ def main() -> None:
             "NOIR_S3_PRESIGN_EXPIRY",
             "NOIR_S3_UPLOAD_PART_SIZE",
         ):
-            current_environment[name] = desired_environment[name]
+            if name in desired_environment:
+                current_environment[name] = desired_environment[name]
         _write_environment(Path("/etc/noir/backend.env"), current_environment)
         subprocess.run(
             ["systemd-analyze", "verify", "/etc/systemd/system/noir.service"], check=True

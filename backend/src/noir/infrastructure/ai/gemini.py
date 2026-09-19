@@ -372,50 +372,78 @@ class GeminiProvider(AiProvider):
         self.fallback_model_name = self.fallback_model_names[0] if self.fallback_model_names else ""
         self.last_model_name = self.model_name
         self.purpose = purpose
-        self.api_key = api_key or self.config.gemini_key_for(purpose)
+        from noir.infrastructure.ai.key_rotator import ApiKeyRotator, get_gemini_rotator
+
+        if api_key:
+            self.key_rotator = ApiKeyRotator([api_key])
+            self.api_key = api_key
+        elif purpose == "discovery":
+            disc_key = self.config.gemini_key_for("discovery")
+            self.key_rotator = ApiKeyRotator([disc_key] if disc_key else [])
+            self.api_key = disc_key
+        else:
+            self.key_rotator = get_gemini_rotator(self.config)
+            self.api_key = self.key_rotator.get_next_key() or self.config.gemini_key_for(purpose)
+
         self.timeout = self.config.ai_timeout if timeout == 120 else timeout
         self.max_output_tokens = (
             self.config.ai_max_output_tokens if max_output_tokens is None else max_output_tokens
         )
         if not 1 <= self.max_output_tokens <= 65_536:
             raise GeminiProviderError("max_output_tokens must be between 1 and 65,536")
+        self._clients: dict[str, Client] = {}
         self._client: Client | None = None
 
-        if not self.api_key:
+        if not self.api_key and not self.key_rotator.has_keys():
             raise GeminiProviderError(
-                "Gemini API key not configured. Set GEMINI_API_KEY_1 for discovery and "
-                "GEMINI_API_KEY_2 for plan/patch generation (or use legacy GEMINI_API_KEY), "
-                "then restart the process."
+                "Gemini API key not configured. Set GEMINI_API_KEYS (or GEMINI_API_KEY_1 / "
+                "GEMINI_API_KEY_2 / legacy GEMINI_API_KEY), then restart the process."
             )
 
-    def _get_client(self) -> Client:
-        if self._client is None:
-            try:
-                from google import genai
-                from google.genai import types
+    def _get_client(self, api_key: str | None = None) -> Client:
+        key = api_key or self.api_key
+        if key in self._clients:
+            self._client = self._clients[key]
+            return self._clients[key]
+        if self._client is not None and not api_key:
+            return self._client
+        try:
+            from google import genai
+            from google.genai import types
 
-                # With an explicit fallback, hidden SDK retries delay failover by
-                # up to several full request timeouts. Try the primary once and
-                # let _call_model immediately route retryable capacity failures
-                # to the configured fallback. Without a fallback, retain the
-                # configured SDK retry policy.
-                sdk_attempts = (
-                    1
-                    if self.fallback_model_name and self.fallback_model_name != self.model_name
-                    else min(self.config.ai_retry_limit + 1, 2)
-                )
-                self._client = genai.Client(
-                    api_key=self.api_key,
-                    http_options=types.HttpOptions(
-                        timeout=self.timeout * 1000,
-                        retry_options=types.HttpRetryOptions(attempts=sdk_attempts),
-                    ),
-                )
-            except ImportError:
-                raise GeminiProviderError(
-                    "google-genai package not installed. Install with: pip install google-genai"
-                ) from None
-        return self._client
+            # With an explicit fallback, hidden SDK retries delay failover by
+            # up to several full request timeouts. Try the primary once and
+            # let _call_model immediately route retryable capacity failures
+            # to the configured fallback. Without a fallback, retain the
+            # configured SDK retry policy.
+            sdk_attempts = (
+                1
+                if self.fallback_model_name and self.fallback_model_name != self.model_name
+                else min(self.config.ai_retry_limit + 1, 2)
+            )
+            client = genai.Client(
+                api_key=key,
+                http_options=types.HttpOptions(
+                    timeout=self.timeout * 1000,
+                    retry_options=types.HttpRetryOptions(attempts=sdk_attempts),
+                ),
+            )
+            if key:
+                self._clients[key] = client
+            self._client = client
+            return client
+        except ImportError:
+            raise GeminiProviderError(
+                "google-genai package not installed. Install with: pip install google-genai"
+            ) from None
+
+    def _client_for_key(self, api_key: str) -> Client:
+        self.api_key = api_key
+        try:
+            return self._get_client(api_key)
+        except TypeError:
+            # Allow monkeypatched 0-arg _get_client() in tests
+            return self._get_client()
 
     def _call_model(
         self,
@@ -437,7 +465,6 @@ class GeminiProvider(AiProvider):
                 f"AI request requires {actual:,} bytes; configured limit is "
                 f"{self.config.ai_max_request_size:,}. No request was sent."
             )
-        client = self._get_client()
         from google.genai import types
 
         attempts = 1 + self.config.ai_response_retry_limit if json_output else 1
@@ -461,7 +488,19 @@ class GeminiProvider(AiProvider):
                 active_prompt = (
                     prompt + _schema_prompt_suffix(response_schema) if textual_schema else prompt
                 )
+                tried_keys_for_model: set[str] = set()
+                current_key = self.api_key
+                if self.key_rotator and (not current_key or self.key_rotator.is_in_cooldown(current_key)):
+                    current_key = self.key_rotator.get_next_key()
                 while True:
+                    if self.key_rotator and current_key in tried_keys_for_model:
+                        all_pool = self.key_rotator.get_all_keys()
+                        untried = [k for k in all_pool if k not in tried_keys_for_model]
+                        if untried:
+                            not_in_cooldown = [k for k in untried if not self.key_rotator.is_in_cooldown(k)]
+                            current_key = not_in_cooldown[0] if not_in_cooldown else untried[0]
+
+                    client = self._client_for_key(current_key) if current_key else self._get_client()
                     config = types.GenerateContentConfig(
                         max_output_tokens=token_budget,
                         system_instruction=system_instruction or None,
@@ -475,6 +514,7 @@ class GeminiProvider(AiProvider):
                             config=config,
                         )
                         self.last_model_name = model_name
+                        self.api_key = current_key
                         break
                     except Exception as exc:
                         if active_schema is not None and _is_structured_output_argument_error(exc):
@@ -485,31 +525,54 @@ class GeminiProvider(AiProvider):
                             active_schema = None
                             active_prompt = prompt + _schema_prompt_suffix(response_schema)
                             continue
-                        can_fallback = model_index < len(models) - 1
-                        if can_fallback and _is_retryable_availability_error(
-                            exc, has_fallback=True
-                        ):
-                            next_model = models[model_index + 1]
-                            logger.warning(
-                                "Gemini model %s is temporarily unavailable; retrying with %s",
-                                model_name,
-                                next_model,
-                            )
-                            break
-                        # Fail fast with a clear message on quota exhaustion.
+
                         detail_upper = str(exc).upper()
                         is_quota = (
                             getattr(exc, "status_code", None) == 429
                             or "429" in detail_upper
                             or "RESOURCE_EXHAUSTED" in detail_upper
                         )
+                        if is_quota and self.key_rotator and current_key:
+                            self.key_rotator.mark_rate_limited(current_key, 60.0)
+                            tried_keys_for_model.add(current_key)
+                            all_keys = self.key_rotator.get_all_keys()
+                            remaining_keys = [k for k in all_keys if k not in tried_keys_for_model]
+                            if remaining_keys:
+                                redacted = current_key[:4] + "..." + current_key[-4:] if len(current_key) > 8 else "***"
+                                logger.warning(
+                                    "Gemini key [%s] hit rate limit (429/quota); rotating to next API key in pool for model %s (%d untried key(s) remaining)",
+                                    redacted,
+                                    model_name,
+                                    len(remaining_keys),
+                                )
+                                continue
+
+                        can_fallback = model_index < len(models) - 1
+                        if can_fallback and (
+                            _is_retryable_availability_error(exc, has_fallback=True)
+                            or is_quota
+                        ):
+                            next_model = models[model_index + 1]
+                            logger.warning(
+                                "Gemini model %s is temporarily unavailable or quota exhausted across keys; retrying with %s",
+                                model_name,
+                                next_model,
+                            )
+                            break
+                        # Fail fast with a clear message on quota exhaustion.
                         if is_quota and not can_fallback:
+                            num_keys = len(self.key_rotator.get_all_keys()) if self.key_rotator else 1
                             raise GeminiProviderError(
-                                "Gemini daily quota exhausted. No fallback model is configured. "
+                                f"Gemini daily quota exhausted across all {num_keys} configured API key(s). "
+                                "No fallback model is configured. "
                                 "Wait for the quota to reset, configure NOIR_AI_FALLBACK_MODEL "
                                 "in your environment, or reduce usage."
                             ) from None
-                        detail = str(exc).replace(self.api_key, "[REDACTED]")
+                        detail = str(exc)
+                        redact_keys = self.key_rotator.get_all_keys() if self.key_rotator else [self.api_key]
+                        for k in redact_keys:
+                            if k:
+                                detail = detail.replace(k, "[REDACTED]")
                         raise GeminiProviderError(f"Gemini API call failed: {detail}") from None
                 if response is not None:
                     break

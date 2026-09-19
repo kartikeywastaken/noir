@@ -51,6 +51,15 @@ class NoirConfig(BaseSettings):
             "gemini_generation_api_key",
         ),
     )
+    gemini_api_keys: SecretStr = Field(
+        default=SecretStr(""),
+        exclude=True,
+        validation_alias=AliasChoices(
+            "GEMINI_API_KEYS",
+            "NOIR_GEMINI_API_KEYS",
+            "gemini_api_keys",
+        ),
+    )
 
     openrouter_api_key: SecretStr = Field(
         default=SecretStr(""),
@@ -124,21 +133,47 @@ class NoirConfig(BaseSettings):
     # Prevents nested retries from blocking a worker for minutes.
     ai_stall_timeout: int = 90
 
+    def get_gemini_generation_keys(self) -> list[str]:
+        """Return a list of Gemini API keys configured for generation/patching.
+
+        Sources (in priority order, stripped, deduplicated, non-empty):
+        1. Comma-separated keys in GEMINI_API_KEYS / NOIR_GEMINI_API_KEYS
+        2. Comma-separated keys in GEMINI_API_KEY_2 / NOIR_GEMINI_GENERATION_API_KEY
+        3. Comma-separated keys in GEMINI_API_KEY / NOIR_GEMINI_API_KEY
+        """
+        raw_candidates: list[str] = []
+        for val in (
+            self.gemini_api_keys.get_secret_value(),
+            self.gemini_generation_api_key.get_secret_value(),
+            self.gemini_api_key.get_secret_value(),
+        ):
+            if val:
+                raw_candidates.extend(val.split(","))
+
+        cleaned: list[str] = []
+        for k in raw_candidates:
+            stripped = k.strip()
+            if stripped and stripped not in cleaned:
+                cleaned.append(stripped)
+        return cleaned
+
     def gemini_key_for(self, purpose: Literal["default", "discovery", "generation"]) -> str:
         """Select a Gemini credential without exposing it through normal config output.
 
         Dual-key installations route discovery to key 1 and plan/patch generation to
-        key 2. The legacy single-key variable remains a supported fallback so existing
-        local and EC2 deployments keep working during migration.
+        key 2 or the configured round-robin key pool. The legacy single-key variable
+        remains a supported fallback so existing local and EC2 deployments keep working.
         """
         legacy = self.gemini_api_key.get_secret_value()
         discovery = self.gemini_discovery_api_key.get_secret_value()
         generation = self.gemini_generation_api_key.get_secret_value()
+        gen_keys = self.get_gemini_generation_keys()
+        primary_gen = gen_keys[0] if gen_keys else (generation or legacy or discovery)
         if purpose == "discovery":
-            return discovery or legacy or generation
+            return discovery or legacy or primary_gen
         if purpose == "generation":
-            return generation or legacy or discovery
-        return generation or legacy or discovery
+            return primary_gen
+        return primary_gen
 
     @classmethod
     def settings_customise_sources(
@@ -259,6 +294,9 @@ class NoirConfig(BaseSettings):
         )
         data["gemini_generation_api_key"] = (
             "***REDACTED***" if self.gemini_generation_api_key.get_secret_value() else ""
+        )
+        data["gemini_api_keys"] = (
+            "***REDACTED***" if self.gemini_api_keys.get_secret_value() else ""
         )
         data["openrouter_api_key"] = (
             "***REDACTED***" if self.openrouter_api_key.get_secret_value() else ""

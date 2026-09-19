@@ -94,6 +94,7 @@ class AdkGeminiProvider(GeminiProvider):
         response_schema: dict[str, Any] | None,
         json_output: bool,
         token_budget: int,
+        api_key: str | None = None,
     ) -> str:
         from google import genai
         from google.adk.agents import LlmAgent
@@ -103,8 +104,9 @@ class AdkGeminiProvider(GeminiProvider):
         from google.adk.sessions import InMemorySessionService
         from google.genai import types
 
+        key = api_key or self.api_key
         client = genai.Client(
-            api_key=self.api_key,
+            api_key=key,
             http_options=types.HttpOptions(
                 timeout=self.timeout * 1000,
                 retry_options=types.HttpRetryOptions(attempts=1),
@@ -187,48 +189,90 @@ class AdkGeminiProvider(GeminiProvider):
         for attempt in range(1, attempts + 1):
             failure = ""
             for model_index, model_name in enumerate(models):
-                if time.monotonic() > stall_deadline:
-                    raise GeminiProviderError(
-                        f"AI call exceeded stall timeout ({self.config.ai_stall_timeout}s). "
-                        "No response was used."
-                    )
-
-                active_prompt = (
-                    prompt + _schema_prompt_suffix(response_schema) if response_schema else prompt
-                )
-                try:
-                    text = self._run_agent(
-                        model_name=model_name,
-                        prompt=active_prompt,
-                        system_instruction=system_instruction,
-                        response_schema=None,
-                        json_output=json_output,
-                        token_budget=token_budget,
-                    )
-                    self.last_model_name = model_name
-                except Exception as exc:
-                    can_fallback = model_index < len(models) - 1
-                    if can_fallback and _is_retryable_availability_error(exc, has_fallback=True):
-                        next_model = models[model_index + 1]
-                        logger.warning(
-                            "ADK model %s is unavailable; retrying with %s",
-                            model_name,
-                            next_model,
-                        )
-                        continue
-                    detail_upper = str(exc).upper()
-                    is_quota = (
-                        getattr(exc, "status_code", None) == 429
-                        or "429" in detail_upper
-                        or "RESOURCE_EXHAUSTED" in detail_upper
-                    )
-                    if is_quota:
+                tried_keys_for_model: set[str] = set()
+                current_key = self.api_key
+                if self.key_rotator and (not current_key or self.key_rotator.is_in_cooldown(current_key)):
+                    current_key = self.key_rotator.get_next_key()
+                text = None
+                while True:
+                    if time.monotonic() > stall_deadline:
                         raise GeminiProviderError(
-                            "Gemini daily quota exhausted. Wait for quota reset or configure "
-                            "NOIR_AI_FALLBACK_MODEL."
-                        ) from None
-                    detail = str(exc).replace(self.api_key, "[REDACTED]")
-                    raise GeminiProviderError(f"Google ADK call failed: {detail}") from None
+                            f"AI call exceeded stall timeout ({self.config.ai_stall_timeout}s). "
+                            "No response was used."
+                        )
+
+                    active_prompt = (
+                        prompt + _schema_prompt_suffix(response_schema) if response_schema else prompt
+                    )
+                    if self.key_rotator and current_key in tried_keys_for_model:
+                        all_pool = self.key_rotator.get_all_keys()
+                        untried = [k for k in all_pool if k not in tried_keys_for_model]
+                        if untried:
+                            not_in_cooldown = [k for k in untried if not self.key_rotator.is_in_cooldown(k)]
+                            current_key = not_in_cooldown[0] if not_in_cooldown else untried[0]
+
+                    try:
+                        text = self._run_agent(
+                            model_name=model_name,
+                            prompt=active_prompt,
+                            system_instruction=system_instruction,
+                            response_schema=None,
+                            json_output=json_output,
+                            token_budget=token_budget,
+                            api_key=current_key,
+                        )
+                        self.last_model_name = model_name
+                        self.api_key = current_key
+                        break
+                    except Exception as exc:
+                        detail_upper = str(exc).upper()
+                        is_quota = (
+                            getattr(exc, "status_code", None) == 429
+                            or "429" in detail_upper
+                            or "RESOURCE_EXHAUSTED" in detail_upper
+                        )
+                        if is_quota and self.key_rotator and current_key:
+                            self.key_rotator.mark_rate_limited(current_key, 60.0)
+                            tried_keys_for_model.add(current_key)
+                            all_keys = self.key_rotator.get_all_keys()
+                            remaining_keys = [k for k in all_keys if k not in tried_keys_for_model]
+                            if remaining_keys:
+                                redacted = current_key[:4] + "..." + current_key[-4:] if len(current_key) > 8 else "***"
+                                logger.warning(
+                                    "ADK Gemini key [%s] hit rate limit (429/quota); rotating to next API key in pool for model %s (%d untried key(s) remaining)",
+                                    redacted,
+                                    model_name,
+                                    len(remaining_keys),
+                                )
+                                continue
+
+                        can_fallback = model_index < len(models) - 1
+                        if can_fallback and (
+                            _is_retryable_availability_error(exc, has_fallback=True)
+                            or is_quota
+                        ):
+                            next_model = models[model_index + 1]
+                            logger.warning(
+                                "ADK model %s is unavailable or quota exhausted across keys; retrying with %s",
+                                model_name,
+                                next_model,
+                            )
+                            break
+                        if is_quota and not can_fallback:
+                            num_keys = len(self.key_rotator.get_all_keys()) if self.key_rotator else 1
+                            raise GeminiProviderError(
+                                f"Gemini daily quota exhausted across all {num_keys} configured API key(s). "
+                                "Wait for quota reset or configure NOIR_AI_FALLBACK_MODEL."
+                            ) from None
+                        detail = str(exc)
+                        redact_keys = self.key_rotator.get_all_keys() if self.key_rotator else [self.api_key]
+                        for k in redact_keys:
+                            if k:
+                                detail = detail.replace(k, "[REDACTED]")
+                        raise GeminiProviderError(f"Google ADK call failed: {detail}") from None
+
+                if text is None:
+                    continue
 
                 if len(text.encode()) > self.config.ai_max_output_size:
                     failure = "Google ADK returned an oversized response"
