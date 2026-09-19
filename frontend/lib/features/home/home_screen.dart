@@ -1167,6 +1167,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   expand: true,
                   onPressed: flow.working ? null : flow.approveAndBuild,
                 ),
+                const SizedBox(height: 8),
+                NoirGhostButton(
+                  label: 'START OVER',
+                  expand: true,
+                  onPressed: flow.working
+                      ? null
+                      : () {
+                          flow.reset();
+                          _request.clear();
+                          setState(() {
+                            _download = null;
+                            _saveMessage = null;
+                          });
+                          context.go('/');
+                        },
+                ),
               ],
             ],
           ),

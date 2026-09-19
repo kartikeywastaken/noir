@@ -26,6 +26,7 @@ from noir.infrastructure.filesystem.workspace import (
     compute_file_hash,
     safe_resolve,
 )
+from noir.patches.smali_utils import sanitize_smali_content
 from noir.security.xml import fromstring, parse
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
@@ -975,7 +976,7 @@ class PatchEngine:
             raise PatchError(f"Method end not found for: {method_sig}")
 
         # Replace method body
-        replacement = (op.new_content or "").rstrip("\n") + "\n"
+        replacement = sanitize_smali_content((op.new_content or "").rstrip("\n")) + "\n"
         new_lines = lines[:method_start] + [replacement] + lines[method_end + 1 :]
         target.write_text("".join(new_lines))
 
@@ -1026,7 +1027,7 @@ class PatchEngine:
         matches = [span for span in spans if span[0] == op.method_signature]
         anchor_start = content.index(op.anchor)
         insert_at = anchor_start + len(op.anchor)
-        addition = op.new_content.strip()
+        addition = sanitize_smali_content(op.new_content.strip())
         added_methods = self._smali_method_spans(addition)
         if matches:
             if added_methods:

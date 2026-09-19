@@ -28,6 +28,7 @@ from noir.domain.models import (
     PlanFileChange,
 )
 from noir.infrastructure.ai.budget import bounded_prompt
+from noir.patches.smali_utils import sanitize_smali_content
 from noir.infrastructure.ai.provider import AiProvider
 
 logger = logging.getLogger(__name__)
@@ -926,6 +927,7 @@ xml_resource_update changes only the existing element with the same tag and name
 replaces the resource file. xml_resource_remove requires xml_element and xml_attributes.name;
 Both smali_replace_method and smali_insert_at_anchor require class_descriptor, method_signature
 and new_content. smali_insert_at_anchor also requires a unique exact anchor; insertion is AFTER it.
+CRITICAL Smali syntax: every invoke instruction method call MUST include the return type descriptor, including 'V' for void. For example: invoke-virtual {v0}, Landroid/widget/Toast;->show()V (never omit the trailing V: show() is a syntax error that breaks APK compilation).
 For an existing method, use an anchor inside that exact method and insert instructions only.
 To add a method that is absent from the class, use its exact signature, a unique class-level
 comment anchor (for example # virtual methods), and exactly one complete .method ... .end method
@@ -1156,6 +1158,7 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
                 not operation.anchor or not operation.anchor.strip()
             ):
                 raise GeminiProviderError(f"{prefix}: smali_insert_at_anchor requires anchor")
+            operation.new_content = sanitize_smali_content(operation.new_content)
         if operation.operation in {
             PatchOperationType.CIL_REPLACE_METHOD_BODY,
             PatchOperationType.CIL_INSERT_METHOD,

@@ -144,6 +144,9 @@ class WorkflowController extends SafeNotifier {
     request = text.trim();
     notifyListeners();
     try {
+      try {
+        project = await api.getProject(project!.id);
+      } catch (_) {}
       job = await api.prepareWorkflow(
         project!.id,
         request,
@@ -294,6 +297,10 @@ class WorkflowController extends SafeNotifier {
         error =
             latest.errorMessage ??
             'Operation ${latest.state}. Your completed work is retained.';
+        try {
+          project = await api.getProject(latest.projectId);
+          filename = project!.originalFilename;
+        } catch (_) {}
         if (operation == 'workflow_finish') {
           final payload = latest.resultData['payload'] as Map;
           plan = await api.getPlan(latest.projectId, '${payload['plan_id']}');
