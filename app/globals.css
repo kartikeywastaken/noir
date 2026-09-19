@@ -179,7 +179,7 @@ main.hero {
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  padding-bottom: calc(36 * var(--vu));
+  padding-bottom: calc(140 * var(--vu));
   gap: calc(var(--hero-gap) * var(--vu));
   position: relative;
   z-index: 10;
@@ -671,6 +671,9 @@ main.hero {
 @media (max-width: 1024px) {
   .frame {
     padding: 24px 28px;
+  }
+  main.hero {
+    padding-bottom: 24px;
   }
   .composer-card {
     width: 100%;
