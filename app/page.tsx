@@ -614,11 +614,11 @@ export default function Home() {
             {/* Success Pane */}
             {phase === "complete" && project && buildId && (
               <div className="complete-pane">
-                <div className="flex items-center gap-2 text-emerald-400">
+                <div className="flex items-center gap-2 text-emerald-600">
                   <CheckCircle2 size={18} />
                   <div>
-                    <strong className="block text-white text-sm">Verified APK Ready</strong>
-                    <span className="text-xs text-emerald-300/80">Signed, aligned, and ready to install</span>
+                    <strong className="block text-slate-900 text-sm font-semibold">Verified APK Ready</strong>
+                    <span className="text-xs text-emerald-700">Signed, aligned, and ready to install</span>
                   </div>
                 </div>
                 <a
@@ -638,7 +638,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setError("")}
-                  className="text-red-300 hover:text-white"
+                  className="text-red-500 hover:text-red-700"
                 >
                   <X size={12} />
                 </button>

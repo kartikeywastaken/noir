@@ -198,30 +198,31 @@ main.hero {
   white-space: nowrap;
 }
 
-/* Floating Glassmorphism Composer Card */
+/* Floating Glassmorphism Composer Card (Frosted White Glass) */
 .composer-card {
   width: calc(var(--card-w) * var(--u));
   min-height: calc(var(--card-h) * var(--u));
   border-radius: calc(var(--card-r) * var(--u));
-  background: rgba(24, 25, 29, 0.88);
-  backdrop-filter: blur(28px) saturate(130%);
-  -webkit-backdrop-filter: blur(28px) saturate(130%);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.13),
-    0 calc(22 * var(--u)) calc(55 * var(--u)) rgba(0, 0, 0, 0.55);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.95),
+    0 calc(20 * var(--u)) calc(50 * var(--u)) rgba(0, 0, 0, 0.14),
+    0 calc(6 * var(--u)) calc(18 * var(--u)) rgba(0, 0, 0, 0.06);
   position: relative;
   display: flex;
   flex-direction: column;
   padding: calc(16 * var(--u)) calc(24 * var(--u)) calc(16 * var(--u)) calc(22 * var(--u));
   gap: calc(10 * var(--u));
-  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
 }
 
 .composer-card.drag-active {
-  border-color: #F8B285;
+  background: rgba(255, 255, 255, 0.95);
   box-shadow:
-    inset 0 0 0 2px #F8B285,
-    0 calc(20 * var(--u)) calc(60 * var(--u)) rgba(248, 178, 133, 0.25);
+    inset 0 0 0 2px #F36523,
+    0 calc(20 * var(--u)) calc(60 * var(--u)) rgba(243, 101, 35, 0.25);
 }
 
 /* Attached APK Badge */
@@ -229,12 +230,12 @@ main.hero {
   display: inline-flex;
   align-items: center;
   gap: calc(8 * var(--u));
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: calc(8 * var(--u));
   padding: calc(4 * var(--u)) calc(10 * var(--u));
   font-size: calc(9.6 * var(--u));
-  color: #e2e8f0;
+  color: #0f172a;
   width: fit-content;
   max-width: 100%;
 }
@@ -245,16 +246,17 @@ main.hero {
   text-overflow: ellipsis;
   max-width: calc(340 * var(--u));
   font-weight: 500;
+  color: #0f172a;
 }
 
 .attached-badge .badge-size {
-  color: #94a3b8;
+  color: #64748b;
   font-size: calc(8.6 * var(--u));
 }
 
 .attached-badge .remove-btn {
   cursor: pointer;
-  color: #cbd5e1;
+  color: #64748b;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -276,7 +278,7 @@ main.hero {
   font-size: calc(11.2 * var(--u));
   font-weight: 400;
   line-height: 1.35;
-  color: #ffffff;
+  color: #0f172a;
   outline: none;
   background: transparent;
   border: none;
@@ -284,7 +286,7 @@ main.hero {
 }
 
 .prompt-ta::placeholder {
-  color: #8b8c8e;
+  color: #64748b;
 }
 
 /* Toolbar Row */
@@ -307,8 +309,8 @@ main.hero {
 .chip-btn {
   height: calc(var(--chip-h) * var(--u));
   border-radius: calc(var(--chip-r) * var(--u));
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.10);
   display: inline-flex;
   align-items: center;
   gap: calc(5 * var(--u));
@@ -316,16 +318,16 @@ main.hero {
   font-family: var(--font-text);
   font-size: calc(var(--chip-fs) * var(--u));
   font-weight: 500;
-  color: #909093;
+  color: #475569;
   cursor: pointer;
   white-space: nowrap;
   transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
 .chip-btn:hover {
-  background: rgba(255, 255, 255, 0.10);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(15, 23, 42, 0.10);
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.22);
 }
 
 /* Desktop Right Cluster */
@@ -343,16 +345,17 @@ main.hero {
   gap: calc(5 * var(--u));
   font-family: var(--font-text);
   font-size: calc(var(--son-fs) * var(--u));
-  font-weight: 400;
-  color: #ffffff;
+  font-weight: 500;
+  color: #1e293b;
   cursor: pointer;
   position: relative;
   opacity: 0.92;
-  transition: opacity 0.18s ease;
+  transition: opacity 0.18s ease, color 0.18s ease;
 }
 
 .model-trigger:hover {
   opacity: 1;
+  color: #0f172a;
 }
 
 /* Model Dropdown Menu */
@@ -360,12 +363,12 @@ main.hero {
   position: absolute;
   right: 0;
   bottom: calc(100% + 12px);
-  background: rgba(24, 25, 28, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 12px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.16);
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -381,20 +384,20 @@ main.hero {
   padding: 8px 12px;
   border-radius: 8px;
   font-size: 12px;
-  color: #cbd5e1;
+  color: #334155;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .model-item:hover, .model-item.active {
-  background: rgba(255, 255, 255, 0.10);
-  color: #ffffff;
+  background: rgba(15, 23, 42, 0.07);
+  color: #0f172a;
 }
 
 .model-item .model-tag {
   font-size: 10px;
-  color: #94a3b8;
-  background: rgba(255, 255, 255, 0.06);
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.06);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -405,18 +408,18 @@ main.hero {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #8b8c8e;
+  color: #64748b;
   transition: color 0.18s ease, transform 0.18s ease;
   position: relative;
 }
 
 .attach-btn:hover {
-  color: #ffffff;
+  color: #0f172a;
   transform: scale(1.06);
 }
 
 .attach-btn.has-file {
-  color: #F8B285;
+  color: #F36523;
 }
 
 /* Send Button (Orange Circle) */
@@ -433,6 +436,7 @@ main.hero {
   transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
   border: none;
   flex-shrink: 0;
+  color: #ffffff;
 }
 
 .send-btn:hover:not(:disabled) {
@@ -457,7 +461,7 @@ main.hero {
   flex-direction: column;
   gap: 6px;
   padding-top: calc(8 * var(--u));
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .status-label {
@@ -465,13 +469,13 @@ main.hero {
   align-items: center;
   justify-content: space-between;
   font-size: calc(9.4 * var(--u));
-  color: #94a3b8;
+  color: #475569;
 }
 
 .progress-track {
   width: 100%;
   height: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.08);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -485,8 +489,8 @@ main.hero {
 
 /* Review / Patch Ready Card */
 .patch-review-pane {
-  background: rgba(16, 185, 129, 0.08);
-  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
   border-radius: calc(12 * var(--u));
   padding: calc(12 * var(--u)) calc(16 * var(--u));
   display: flex;
@@ -501,20 +505,20 @@ main.hero {
   font-size: calc(8.5 * var(--u));
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #34d399;
+  color: #059669;
   font-weight: 600;
 }
 
 .patch-info strong {
   display: block;
   font-size: calc(12 * var(--u));
-  color: #ffffff;
+  color: #0f172a;
 }
 
 .patch-info small {
   display: block;
   font-size: calc(9.2 * var(--u));
-  color: #94a3b8;
+  color: #475569;
   font-family: var(--font-mono);
   max-width: calc(420 * var(--u));
   overflow: hidden;
@@ -524,7 +528,7 @@ main.hero {
 
 .approve-btn {
   background: #10b981;
-  color: #062817;
+  color: #ffffff;
   font-size: calc(10.5 * var(--u));
   font-weight: 600;
   padding: calc(8 * var(--u)) calc(16 * var(--u));
@@ -535,14 +539,14 @@ main.hero {
 }
 
 .approve-btn:hover {
-  background: #34d399;
+  background: #059669;
   transform: translateY(-1px);
 }
 
 /* Success Card */
 .complete-pane {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.38);
   border-radius: calc(12 * var(--u));
   padding: calc(12 * var(--u)) calc(16 * var(--u));
   display: flex;
@@ -554,7 +558,7 @@ main.hero {
 
 .download-link {
   background: #10b981;
-  color: #062817;
+  color: #ffffff;
   font-size: calc(11 * var(--u));
   font-weight: 600;
   padding: calc(8 * var(--u)) calc(18 * var(--u));
@@ -568,7 +572,7 @@ main.hero {
 }
 
 .download-link:hover {
-  background: #34d399;
+  background: #059669;
   transform: translateY(-1px);
 }
 
@@ -579,7 +583,7 @@ main.hero {
   border-radius: calc(10 * var(--u));
   padding: calc(10 * var(--u)) calc(14 * var(--u));
   font-size: calc(10 * var(--u));
-  color: #fca5a5;
+  color: #b91c1c;
   display: flex;
   align-items: center;
   justify-content: space-between;
