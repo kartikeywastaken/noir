@@ -138,3 +138,68 @@ Once all criteria and the final victory audit have passed:
 - [ ] Formal multi-agent completion audit confirms all ledger items resolved.
 - [ ] Changes are committed on branch `new` with message `"changed ai discovery to intent discovery"` and pushed.
 
+## 2026-09-20T21:29:38Z
+
+# Teamwork Project Prompt
+
+> Status: Launched
+> Requested team: Small, focused team (single self-contained subsystem)
+
+This is a single self-contained subsystem; keep it small and focused: implement Dalvik Smali bytecode pre-flight validation, an automated compiler-feedback self-repair loop, guaranteed entrypoint inventory prioritization, deterministic Smali intent templates, and an end-to-end automated build and signing pipeline in NOIR so that prompts can automatically proceed from modification through to verified, signed APKs.
+
+Working directory: `/Users/kartik/Documents/ChatGPT/noir`
+Git branch: `newU`
+Integrity mode: development
+
+## Requirements
+
+### R1. Smali Bytecode Pre-flight Validation
+Verify all AI-generated Smali patch operations against Dalvik bytecode syntax and assembly rules prior to patch acceptance. The validator must detect syntax violations (including raw literal strings or numeric values inside `{}` register argument lists, illegal opcode-operand combinations, missing method return type descriptors like `V`, unallocated or out-of-range registers) and return structured line-level error diagnostics.
+
+### R2. Compiler-Feedback Self-Repair Retry Loop
+When Smali pre-flight validation detects syntax errors in generated patch operations, automatically trigger a self-repair iteration. The repair prompt must supply the model with the exact compiler/parser diagnostic message, the offending instruction line, and relevant method context to allow immediate correction before patch application.
+
+### R3. Guaranteed Entrypoint & Launcher Context Prioritization
+Ensure that Android manifest launcher activities, main application classes, and detected primary entrypoints receive highest priority (Rank 0) in the bounded workspace file inventory during planning and discovery, preventing them from being truncated out of the 150 KB budget in large multi-DEX APKs.
+
+### R4. Deterministic Smali Intent Templates
+Provide deterministic, syntactically verified Smali code generators for common recurring operations (such as startup URL redirect intents, Toast notifications, and permission checks) so that routine modifications do not depend exclusively on open-ended LLM bytecode assembly.
+
+### R5. Automated End-to-End Rebuild & Signing Execution
+Provide seamless automated progression from patch generation through APK rebuild (Apktool) and APK signing (Apksigner / debug keystore). When a user submits a prompt, the system must automatically proceed through preparation, workspace patching, APK rebuild, and APK signing, delivering a verified signed APK ready for download without requiring a manual intermediate approval step.
+
+---
+
+## Acceptance Criteria
+
+### Pre-flight Validation
+- [ ] Synthetic invalid Smali snippets (e.g. `invoke-static {"https://example.com"}, Landroid/net/Uri;->parse...`, missing return descriptors, or register mismatches) are rejected during pre-flight validation with precise error diagnostics.
+- [ ] Validated Smali patches pass dry-run assembly without triggering APKTool parser errors (`no viable alternative at input ...`).
+
+### Self-Repair Execution
+- [ ] In the event of a Smali pre-flight validation error, the system automatically runs a targeted repair loop providing the model with exact line-level error feedback.
+- [ ] Repairs that fix the syntax violation are accepted; persistent failures gracefully log diagnostics without leaving the workspace in a corrupted state.
+
+### Multi-DEX & Context Prioritization
+- [ ] For multi-DEX APKs (specifically tested against ProtonVPN `vpn.apk` structure or multi-DEX fixtures), the launcher activity `MainActivity.smali` is guaranteed priority in file listing and never dropped by inventory size caps.
+
+### Automated Build & Signing Flow
+- [ ] Triggering the modification flow on a decoded project automatically executes rebuild (`BuildService`) and signing (`SigningService`), producing a verified signed APK container.
+- [ ] Web UI seamlessly progresses from AI patch generation directly into building and signing with live status updates, eliminating the required manual click on "Approve & Build".
+
+### Regression & Quality Verification
+- [ ] All existing and new unit tests for the patch engine, context tools, Smali utilities, and workflow services pass with 100% success.
+- [ ] Dedicated test suites verify Smali validation, repair retry, and automated build-and-sign pipeline.
+
+---
+
+## Verification Plan
+
+### Automated Verification
+Run the backend test suite:
+```bash
+cd backend && uv run pytest tests/unit/patches/ tests/unit/infrastructure/ai/ tests/unit/test_ai_context.py tests/unit/application/test_workflow_service.py -v
+```
+
+### End-to-End Smoke Test
+Run an end-to-end flow on a test APK to verify automated progression from user prompt to a signed, verified `.apk` output.

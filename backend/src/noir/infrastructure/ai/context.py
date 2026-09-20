@@ -91,9 +91,120 @@ class AiContextTools:
         prefix = subdir.replace("\\", "/").strip("/") + "/"
         return [path for path in self._indexed_paths if path.startswith(prefix)]
 
+    def _discover_primary_entrypoints(self) -> set[str]:
+        """Identify manifest launcher activities, main application classes, and primary entrypoints."""
+        entrypoints: set[str] = set()
+        launcher_names: set[str] = set()
+        app_class_names: set[str] = set()
+
+        # 1. Inspect analysis model if provided
+        if self.analysis:
+            if getattr(self.analysis, "application_class", None):
+                app_class_names.add(self.analysis.application_class)
+            for comp in getattr(self.analysis, "components", []):
+                if getattr(comp, "is_launcher", False):
+                    launcher_names.add(comp.name)
+                    if getattr(comp, "target_activity", None):
+                        launcher_names.add(comp.target_activity)
+            # Match directly against indexed smali classes
+            for smali_info in getattr(self.analysis, "smali_classes", []):
+                desc = getattr(smali_info, "descriptor", "")
+                fpath = getattr(smali_info, "file_path", "")
+                for name in launcher_names | app_class_names:
+                    name_slash = name.replace(".", "/")
+                    if desc == f"L{name_slash};" or desc.endswith(f"/{name_slash.split('/')[-1]};"):
+                        entrypoints.add(fpath.replace("\\", "/"))
+
+        # 2. Inspect AndroidManifest.xml directly if available
+        manifest_path = self.workspace.decoded_dir / "AndroidManifest.xml"
+        if manifest_path.is_file():
+            try:
+                from noir.analysis.manifest_parser import parse_manifest
+                manifest_data = parse_manifest(manifest_path)
+                if manifest_data.get("application_class"):
+                    app_class_names.add(manifest_data["application_class"])
+                for comp in manifest_data.get("components", []):
+                    if getattr(comp, "is_launcher", False) or (
+                        isinstance(comp, dict) and comp.get("is_launcher")
+                    ):
+                        c_name = getattr(comp, "name", None) or (
+                            comp.get("name") if isinstance(comp, dict) else ""
+                        )
+                        if c_name:
+                            launcher_names.add(c_name)
+                        t_act = getattr(comp, "target_activity", None) or (
+                            comp.get("target_activity") if isinstance(comp, dict) else None
+                        )
+                        if t_act:
+                            launcher_names.add(t_act)
+            except Exception:
+                pass
+
+            # Direct XML fallback for activity-alias and relative class names
+            try:
+                from noir.security.xml import parse as safe_xml_parse
+                root = safe_xml_parse(manifest_path).getroot()
+                pkg_name = root.get("package", "")
+                ns = "{http://schemas.android.com/apk/res/android}"
+                app_elem = root.find("application")
+                if app_elem is not None:
+                    app_name = app_elem.get(f"{ns}name")
+                    if app_name:
+                        if app_name.startswith("."):
+                            app_name = f"{pkg_name}{app_name}"
+                        app_class_names.add(app_name)
+                    for elem in app_elem:
+                        if elem.tag in ("activity", "activity-alias"):
+                            has_launcher = any(
+                                cat.get(f"{ns}name") == "android.intent.category.LAUNCHER"
+                                for cat in elem.findall("intent-filter/category")
+                            ) and any(
+                                act.get(f"{ns}name") == "android.intent.action.MAIN"
+                                for act in elem.findall("intent-filter/action")
+                            )
+                            if has_launcher:
+                                act_name = elem.get(f"{ns}name")
+                                if act_name:
+                                    if act_name.startswith("."):
+                                        act_name = f"{pkg_name}{act_name}"
+                                    launcher_names.add(act_name)
+                                if elem.tag == "activity-alias":
+                                    tgt = elem.get(f"{ns}targetActivity")
+                                    if tgt:
+                                        if tgt.startswith("."):
+                                            tgt = f"{pkg_name}{tgt}"
+                                        elif "." not in tgt and pkg_name:
+                                            tgt = f"{pkg_name}.{tgt}"
+                                        launcher_names.add(tgt)
+            except Exception:
+                pass
+
+        # 3. Derive file path patterns for launcher and application classes
+        all_class_names = launcher_names | app_class_names
+        # Default detected primary entrypoints
+        all_class_names.add("MainActivity")
+
+        suffixes = set()
+        for name in all_class_names:
+            clean_name = name.lstrip(".")
+            slash_path = clean_name.replace(".", "/") + ".smali"
+            simple_name = clean_name.split(".")[-1] + ".smali"
+            suffixes.add(slash_path.lower())
+            suffixes.add(simple_name.lower())
+
+        # Match against all workspace paths
+        for path in self._workspace_paths():
+            normalized = path.replace("\\", "/")
+            lower = normalized.lower()
+            if any(lower.endswith(sfx) or lower.endswith("/" + sfx) for sfx in suffixes):
+                entrypoints.add(normalized)
+
+        return entrypoints
+
     def list_project_files(self, subdir: str = "", *, user_request: str = "") -> list[str]:
-        """Return a bounded, request-ranked inventory of real decoded paths."""
+        """Return a bounded, request-ranked inventory of real decoded paths with guaranteed entrypoint priority."""
         files = self._workspace_paths(subdir)
+        entrypoints = self._discover_primary_entrypoints()
         stop_words = {
             "add",
             "and",
@@ -116,9 +227,17 @@ class AiContextTools:
             if token not in stop_words
         }
 
-        def priority(path: str) -> tuple[int, int, str]:
-            lower = path.lower()
-            if lower in {"androidmanifest.xml", "apktool.yml"}:
+        def priority(path: str) -> tuple[int, int, int, str]:
+            normalized = path.replace("\\", "/")
+            lower = normalized.lower()
+            is_entrypoint = (
+                lower in {"androidmanifest.xml", "apktool.yml"}
+                or normalized in entrypoints
+                or lower.endswith("/mainactivity.smali")
+                or lower == "mainactivity.smali"
+            )
+
+            if is_entrypoint:
                 rank = 0
             elif any(token in lower for token in tokens):
                 rank = 1
@@ -136,7 +255,17 @@ class AiContextTools:
                 rank = 4
             else:
                 rank = 6
-            return rank, lower.count("/"), lower
+
+            # Within Rank 0: Manifest first, then launcher activities and entrypoints, then apktool.yml
+            sub_rank = 0
+            if lower == "androidmanifest.xml":
+                sub_rank = 0
+            elif normalized in entrypoints or lower.endswith("mainactivity.smali"):
+                sub_rank = 1
+            elif lower == "apktool.yml":
+                sub_rank = 2
+
+            return rank, sub_rank, lower.count("/"), lower
 
         result: list[str] = []
         used = 2

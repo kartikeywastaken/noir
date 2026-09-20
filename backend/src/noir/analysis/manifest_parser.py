@@ -154,6 +154,14 @@ def parse_manifest(manifest_path: Path) -> dict[str, Any]:
                     for f in intent_filters
                 )
 
+                target_act = _attr(elem, "targetActivity") if tag == "activity-alias" else None
+                if target_act:
+                    pkg = result.get("package_name", "")
+                    if target_act.startswith("."):
+                        target_act = f"{pkg}{target_act}"
+                    elif "." not in target_act and pkg:
+                        target_act = f"{pkg}.{target_act}"
+
                 comp = ComponentInfo(
                     name=name,
                     component_type=comp_type,
@@ -162,6 +170,7 @@ def parse_manifest(manifest_path: Path) -> dict[str, Any]:
                     intent_filters=intent_filters,
                     is_launcher=is_launcher,
                     is_alias=(tag == "activity-alias"),
+                    target_activity=target_act,
                 )
                 result["components"].append(comp)
 

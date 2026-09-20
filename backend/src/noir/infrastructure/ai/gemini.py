@@ -927,7 +927,7 @@ xml_resource_update changes only the existing element with the same tag and name
 replaces the resource file. xml_resource_remove requires xml_element and xml_attributes.name;
 Both smali_replace_method and smali_insert_at_anchor require class_descriptor, method_signature
 and new_content. smali_insert_at_anchor also requires a unique exact anchor; insertion is AFTER it.
-CRITICAL Smali syntax: every invoke instruction method call MUST include the return type descriptor, including 'V' for void. For example: invoke-virtual {v0}, Landroid/widget/Toast;->show()V (never omit the trailing V: show() is a syntax error that breaks APK compilation).
+Smali invoke instructions must include the return descriptor, e.g. show()V (never omit trailing V).
 For an existing method, use an anchor inside that exact method and insert instructions only.
 To add a method that is absent from the class, use its exact signature, a unique class-level
 comment anchor (for example # virtual methods), and exactly one complete .method ... .end method
@@ -1011,13 +1011,21 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
             operation.expected_preimage_hash = context.get("file_hashes", {}).get(path)
             operations.append(operation)
 
-        return PatchSet(
+        patch_set = PatchSet(
             plan_id=plan.plan_id,
             project_id=plan.project_id,
             workspace_revision=plan.workspace_revision,
             provenance=Provenance.AI_GENERATED,
             operations=operations,
         )
+
+        from noir.infrastructure.ai.repair import repair_patch_set
+
+        try:
+            return repair_patch_set(patch_set, call_model=self._call_model, context=context)
+        except Exception as exc:
+            raise GeminiProviderError(str(exc)) from exc
+
 
     @staticmethod
     def _parse_patch_operation(data: Any, index: int) -> PatchOperation:

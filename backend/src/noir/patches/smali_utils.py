@@ -35,3 +35,13 @@ def sanitize_smali_content(smali_text: str) -> str:
     smali_text = _INVOKE_MISSING_RETURN_RE.sub(r"\g<1>V", smali_text)
 
     return smali_text
+
+
+# Pre-flight validator re-exports
+from noir.patches.smali_validator import (  # noqa: E402
+    SmaliBytecodeValidator,
+    SmaliDiagnostic,
+    SmaliValidationResult,
+)
+
+validate_smali = SmaliBytecodeValidator.validate

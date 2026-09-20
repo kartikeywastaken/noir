@@ -66,6 +66,7 @@ class ComponentInfo(BaseModel):
     intent_filters: list[dict[str, Any]] = Field(default_factory=list)
     is_launcher: bool = False
     is_alias: bool = False
+    target_activity: str | None = None
 
 
 class SmaliClassInfo(BaseModel):

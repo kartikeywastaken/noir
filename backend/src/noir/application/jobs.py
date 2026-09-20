@@ -109,8 +109,10 @@ class TaskQueue:
         stage = (
             WorkflowStage.VALIDATING_INPUT if operation == "import" else WorkflowStage.REBUILDING
         )
-        if operation == "workflow_prepare":
+        if operation in ("workflow_prepare", "workflow_automated"):
             stage = WorkflowStage.PLANNING
+        elif operation == "workflow_finish":
+            stage = WorkflowStage.APPLYING_PATCH
         job = JobInfo(
             project_id=project_id,
             stage=stage,
@@ -236,20 +238,54 @@ class TaskQueue:
                     )
                     if not result["success"]:
                         raise ValueError(result.get("error_message") or "APK rebuild failed")
-                elif job.result_data["operation"] in {"workflow_prepare", "workflow_finish"}:
-                    from noir.application.workflow_service import finish, prepare
-
-                    action = (
-                        prepare if job.result_data["operation"] == "workflow_prepare" else finish
+                elif job.result_data["operation"] in {
+                    "workflow_prepare",
+                    "workflow_finish",
+                    "workflow_automated",
+                }:
+                    from noir.application.workflow_service import (
+                        finish,
+                        prepare,
+                        run_automated_workflow,
                     )
-                    result = action(self.config, job)
+
+                    if job.result_data["operation"] == "workflow_prepare":
+                        result = prepare(self.config, job)
+                    elif job.result_data["operation"] == "workflow_automated":
+                        payload = job.result_data.get("payload", {})
+                        result = run_automated_workflow(
+                            self.config,
+                            job.project_id,
+                            payload.get("user_request", ""),
+                            user_id=payload.get("user_id", "default"),
+                            allow_ai_upload=payload.get("allow_ai_upload", True),
+                            model=payload.get("model"),
+                            job=job,
+                        )
+                    else:
+                        result = finish(self.config, job)
                 else:
                     raise ValueError("Unsupported queued operation")
             job.result_data["result"] = result
             job.state = JobState.SUCCEEDED
         except Exception as exc:
-            job.state = JobState.FAILED
+            if job.result_data.get("cancel_requested") or "cancelled" in str(exc).lower():
+                job.state = JobState.CANCELLED
+            else:
+                job.state = JobState.FAILED
             job.error_message = str(exc)
+            try:
+                EventRepository().create(
+                    AuditEvent(
+                        project_id=job.project_id,
+                        job_id=job.job_id,
+                        stage=job.stage,
+                        severity=EventSeverity.ERROR,
+                        message=f"Job failed in stage {job.stage.value}: {exc}",
+                    )
+                )
+            except Exception:
+                pass
         finally:
             job.finished_at = datetime.now(UTC)
             repo.update(job)

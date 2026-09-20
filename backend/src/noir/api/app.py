@@ -132,6 +132,7 @@ class WorkflowPrepareRequest(BaseModel):
         "gemini-2.5-flash",
         "openrouter:nvidia/nemotron-3.5-lightning:free",
     ] = "gemini-3.6-flash"
+    auto_build: bool = False
 
 
 
@@ -577,8 +578,28 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             job = queue.submit(
                 "workflow_prepare",
                 project_id,
-                req.model_dump(),
+                {**req.model_dump(), "user_id": principal.user_id},
                 f"{principal.user_id}:prepare:{idempotency_key}",
+            )
+            return job.model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.post("/v1/projects/{project_id}/workflow/automated", status_code=202)
+    def automated_workflow(
+        project_id: str,
+        req: WorkflowPrepareRequest,
+        principal: Principal,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+    ):
+        if not req.allow_ai_upload:
+            raise HTTPException(400, "Consent is required to send APK context to Gemini")
+        try:
+            job = queue.submit(
+                "workflow_automated",
+                project_id,
+                {**req.model_dump(), "user_id": principal.user_id, "auto_build": True},
+                f"{principal.user_id}:auto:{idempotency_key}",
             )
             return job.model_dump(mode="json")
         except ValueError as exc:

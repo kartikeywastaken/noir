@@ -26,7 +26,7 @@ from noir.infrastructure.filesystem.workspace import (
     compute_file_hash,
     safe_resolve,
 )
-from noir.patches.smali_utils import sanitize_smali_content
+from noir.patches.smali_utils import SmaliBytecodeValidator, sanitize_smali_content
 from noir.security.xml import fromstring, parse
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
@@ -105,6 +105,13 @@ class PatchEngine:
             if op.operation == PatchOperationType.CREATE_FILE:
                 if target.exists():
                     errors.append(f"{prefix}: File already exists")
+                elif op.relative_path.endswith(".smali") and op.new_content:
+                    validation = SmaliBytecodeValidator.validate(op.new_content)
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                            )
 
             elif op.operation == PatchOperationType.REPLACE_FILE:
                 if not target.exists():
@@ -117,6 +124,13 @@ class PatchEngine:
                             f"(expected {op.expected_preimage_hash[:16]}..., "
                             f"got {actual[:16]}...)"
                         )
+                if op.relative_path.endswith(".smali") and op.new_content:
+                    validation = SmaliBytecodeValidator.validate(op.new_content)
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                            )
 
             elif op.operation == PatchOperationType.REPLACE_BLOCK:
                 if not target.exists():
@@ -132,6 +146,14 @@ class PatchEngine:
                                 f"{prefix}: Match content is ambiguous "
                                 f"({count} occurrences found, expected exactly 1)"
                             )
+                        elif op.relative_path.endswith(".smali") and op.new_content:
+                            new_content_simulated = content.replace(op.match_content, op.new_content, 1)
+                            validation = SmaliBytecodeValidator.validate(new_content_simulated)
+                            if not validation.is_valid:
+                                for diag in validation.diagnostics:
+                                    errors.append(
+                                        f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                                    )
                     except OSError as e:
                         errors.append(f"{prefix}: Cannot read file: {e}")
 
@@ -175,22 +197,46 @@ class PatchEngine:
                             errors.append(f"{prefix}: Method signature not found in file")
                     except OSError as e:
                         errors.append(f"{prefix}: Cannot read file: {e}")
+                if op.new_content:
+                    validation = SmaliBytecodeValidator.validate(
+                        op.new_content,
+                        context_method=op.method_signature,
+                        context_class=op.class_descriptor,
+                    )
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                            )
 
             elif op.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR:
+                target_content = None
                 if not op.anchor:
                     errors.append(f"{prefix}: Missing anchor for insertion")
                 elif not target.exists():
                     errors.append(f"{prefix}: Smali file does not exist")
                 else:
                     try:
-                        content = target.read_text(errors="replace")
-                        if op.anchor not in content:
+                        target_content = target.read_text(errors="replace")
+                        if op.anchor not in target_content:
                             errors.append(f"{prefix}: Anchor not found in file")
-                        count = content.count(op.anchor)
+                        count = target_content.count(op.anchor)
                         if count > 1:
                             errors.append(f"{prefix}: Anchor is ambiguous ({count} occurrences)")
                     except OSError as e:
                         errors.append(f"{prefix}: Cannot read file: {e}")
+                if op.new_content:
+                    validation = SmaliBytecodeValidator.validate(
+                        op.new_content,
+                        context_method=op.method_signature,
+                        context_class=op.class_descriptor,
+                        enclosing_file_content=target_content,
+                    )
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                            )
 
             elif op.operation in CIL_OPERATIONS:
                 errors.extend(self._validate_cil_operation(op, target, prefix))
