@@ -283,7 +283,7 @@ export default function Home() {
       if (stateKey !== lastJobState.current) {
         lastJobState.current = stateKey;
         addLog(job.stage.toUpperCase(), job.state);
-        setStatusMessage(`${labelPrefix}: ${job.state}...`);
+        setStatusMessage(`${labelPrefix}: ${job.stage.replace(/_/g, " ")} (${job.state})...`);
       }
       if (["succeeded", "failed", "cancelled"].includes(job.state)) break;
       setProgress(Math.min(to - 2, from + Math.round((to - from) * Math.min(attempt / 24, .9))));
@@ -411,6 +411,14 @@ export default function Home() {
       );
       const completed = await pollJob(job, 50, 88, "Generating Patch");
       const result = (completed.result_data?.result || {}) as Record<string, unknown>;
+      if (result.build_id) {
+        setBuildId(String(result.build_id));
+        setProgress(100);
+        setStatusMessage("Build complete & signed!");
+        setPhase("complete");
+        addLog("VERIFY", "Signed APK verified and ready");
+        return;
+      }
       if (result.plan_id && result.unsupported) {
         const unsupportedPlan = await apiJson<Record<string, unknown>>(
           `/v1/projects/${activeProject.id}/plans/${String(result.plan_id)}`,
@@ -428,7 +436,7 @@ export default function Home() {
       ]);
       const operations = Array.isArray(patch.operations) ? patch.operations as Array<Record<string, unknown>> : [];
       const paths = [...new Set(operations.map((operation) => String(operation.relative_path || "")).filter(Boolean))];
-      setReview({
+      const reviewData = {
         planId: String(plan.plan_id),
         patchId: String(patch.patch_id),
         planHash: String(plan.plan_hash),
@@ -436,13 +444,37 @@ export default function Home() {
         revision: Number(plan.workspace_revision),
         paths,
         operationCount: operations.length || diff.diff?.length || 0,
-      });
+      };
+      setReview(reviewData);
+      addLog("REVIEW", "Exact patch generated; automatically proceeding to rebuild & sign");
+
+      // Automated End-to-End Progression: Patch generation -> Rebuild & Sign (R5)
+      setPhase("building");
+      setProgress(88);
+      setStatusMessage("Rebuilding APK with Apktool & signing...");
+      addLog("APPROVE", "Patch accepted; executing automated rebuild & signing");
+
+      const finishJob = await apiJson<Job>(
+        `/v1/projects/${activeProject.id}/workflow/finish`,
+        jsonRequest("POST", {
+          plan_id: reviewData.planId,
+          patch_id: reviewData.patchId,
+          plan_hash: reviewData.planHash,
+          patch_hash: reviewData.patchHash,
+          revision: reviewData.revision,
+          confirm: true,
+        }, crypto.randomUUID()),
+      );
+      const finishCompleted = await pollJob(finishJob, 90, 99, "Rebuilding & Signing");
+      const resultData = (finishCompleted.result_data?.result || {}) as Record<string, string>;
+      if (!resultData.build_id) throw new Error("The backend did not return a verified build.");
+      setBuildId(resultData.build_id);
       setProgress(100);
-      setStatusMessage("Patch ready for approval");
-      setPhase("review");
-      addLog("REVIEW", "Exact patch ready for approval");
+      setStatusMessage("Build complete & signed!");
+      setPhase("complete");
+      addLog("VERIFY", "Signed APK verified and stored in S3");
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Preview failed.";
+      const message = caught instanceof Error ? caught.message : "Workflow failed.";
       setError(message);
       setPhase("error");
       addLog("ERROR", message);
