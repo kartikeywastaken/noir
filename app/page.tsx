@@ -14,10 +14,20 @@ import {
   ChevronDown,
   Download,
   FileArchive,
+  History,
   RefreshCw,
   Terminal,
+  Trash2,
   X,
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 type Phase =
   | "empty"
@@ -40,6 +50,18 @@ type Job = {
   result_data?: Record<string, unknown>;
 };
 type Project = { id: string; workspace_revision: number; original_filename: string };
+type HistoryRecord = {
+  id: string;
+  projectId: string;
+  jobId?: string;
+  buildId?: string;
+  filename: string;
+  prompt: string;
+  operations: string[];
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
 type Review = {
   planId: string;
   patchId: string;
@@ -115,6 +137,23 @@ const stamp = () =>
   }).format(new Date());
 
 const quietStatus = new Set(["queued", "running", "succeeded"]);
+const HISTORY_KEY = "noir.browser.history.v1";
+
+const operationLabels = (prompt: string) => {
+  const labels: string[] = [];
+  if (/\b(rename|change\s+(?:the\s+)?app\s+name|name\s+the\s+app)\b/i.test(prompt)) labels.push("Rename");
+  if (/https?:\/\//i.test(prompt) && /\b(launch|startup|open|redirect|website|site)\b/i.test(prompt)) labels.push("Launch redirect");
+  if (/\b(toast|flash|pop-?up|message)\b/i.test(prompt)) {
+    labels.push(/\b(tap|touch|click|interact|interaction)\b/i.test(prompt) ? "Interaction toast" : "Startup message");
+  }
+  return labels;
+};
+
+const isDeterministicPrompt = (prompt: string) => {
+  const operations = operationLabels(prompt);
+  const unsupported = /\b(?:add|grant|remove|revoke)\s+(?:the\s+)?(?:[\w.]+\s+){0,3}permission|\b(?:layout|button\s+colou?r|native\s+code|unity|il2cpp|service|receiver)\b/i.test(prompt);
+  return operations.length > 0 && !unsupported;
+};
 
 const logTag = (value: string) => value
   .replace(/^validating_input$/i, "VALIDATE")
@@ -189,8 +228,24 @@ export default function Home() {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [logsDrawerOpen, setLogsDrawerOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [history, setHistory] = useState<HistoryRecord[]>([]);
 
   const working = ["uploading", "importing", "previewing", "building"].includes(phase);
+  const deterministic = isDeterministicPrompt(request);
+
+  const saveHistory = useCallback((records: HistoryRecord[]) => {
+    const limited = records.slice(0, 30);
+    setHistory(limited);
+    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(limited));
+  }, []);
+
+  const upsertHistory = useCallback((record: HistoryRecord) => {
+    setHistory((current) => {
+      const next = [record, ...current.filter((item) => item.id !== record.id)].slice(0, 30);
+      window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const addLog = useCallback((tag: string, message: string) => {
     setLogs((current) => [
@@ -218,6 +273,31 @@ export default function Home() {
     const timer = window.setTimeout(() => void checkBackend(), 0);
     return () => window.clearTimeout(timer);
   }, [checkBackend]);
+
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(HISTORY_KEY) || "[]") as HistoryRecord[];
+      const records = Array.isArray(parsed) ? parsed.slice(0, 30) : [];
+      setHistory(records);
+      void Promise.all(records.map(async (record) => {
+        if (!record.jobId || ["complete", "failed", "cancelled"].includes(record.status)) return record;
+        try {
+          const job = await apiJson<Job>(`/v1/jobs/${record.jobId}`);
+          const result = (job.result_data?.result || {}) as Record<string, unknown>;
+          return {
+            ...record,
+            status: job.state === "succeeded" && result.build_id ? "complete" : job.state,
+            buildId: result.build_id ? String(result.build_id) : record.buildId,
+            updatedAt: new Date().toISOString(),
+          };
+        } catch {
+          return record;
+        }
+      })).then((reconciled) => saveHistory(reconciled));
+    } catch {
+      window.localStorage.removeItem(HISTORY_KEY);
+    }
+  }, [saveHistory]);
 
   const loadFile = useCallback((file: File) => {
     if (!file.name.toLowerCase().endsWith(".apk")) {
@@ -297,7 +377,7 @@ export default function Home() {
     return job;
   }, [addLog, syncEvents]);
 
-  const uploadAndImport = useCallback(async (file: File) => {
+  const uploadAndImport = useCallback(async (file: File, prompt: string) => {
     setPhase("uploading");
     setStatusMessage("Verifying APK locally...");
     setProgress(2);
@@ -315,6 +395,17 @@ export default function Home() {
     if (session.upload_mode !== "s3" || !session.upload_id || !Number.isInteger(session.part_size) || session.part_size < 5 * 1024 * 1024) {
       throw new Error("Direct S3 upload is unavailable.");
     }
+    const historyId = session.project_id;
+    upsertHistory({
+      id: historyId,
+      projectId: session.project_id,
+      filename: file.name,
+      prompt,
+      operations: operationLabels(prompt),
+      status: "uploading",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
 
     const completedParts = new Map<number, CompletedPart>(
       (session.completed_parts ?? []).map((part) => [part.part_number, part]),
@@ -376,17 +467,31 @@ export default function Home() {
     setStatusMessage("Decoding APK with Apktool...");
     const job = await apiJson<Job>(
       `/v1/uploads/${session.upload_id}/complete?authorized=true`,
-      jsonRequest("POST", { parts: [...completedParts.values()].sort((a, b) => a.part_number - b.part_number) }, key),
+      jsonRequest("POST", {
+        parts: [...completedParts.values()].sort((a, b) => a.part_number - b.part_number),
+        user_request: prompt,
+      }, key),
     );
+    upsertHistory({
+      id: historyId,
+      projectId: session.project_id,
+      jobId: job.job_id,
+      filename: file.name,
+      prompt,
+      operations: operationLabels(prompt),
+      status: job.state,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     const completed = await pollJob(job, 30, 48, "Decoding APK");
     const imported = await apiJson<Project>(`/v1/projects/${completed.project_id}`);
     setProject(imported);
     addLog("IMPORT", "APK decoded and indexed");
     return imported;
-  }, [addLog, pollJob]);
+  }, [addLog, pollJob, upsertHistory]);
 
   const startPreview = useCallback(async () => {
-    if (!selectedFile) {
+    if (!selectedFile && !project) {
       fileInputRef.current?.click();
       setError("Please attach an APK first.");
       return;
@@ -395,21 +500,32 @@ export default function Home() {
     setError("");
     setReview(null);
     try {
-      const activeProject = project ?? await uploadAndImport(selectedFile);
+      const activeProject = project ?? await uploadAndImport(selectedFile as File, request.trim());
       setPhase("previewing");
       setProgress(50);
-      setStatusMessage("AI generating plan & patch preview...");
-      addLog("AI", "Preparing grounded change plan");
+      setStatusMessage(deterministic ? "Generating deterministic patch preview..." : "AI generating plan & patch preview...");
+      addLog(deterministic ? "LOCAL" : "AI", deterministic ? "Preparing deterministic operation spec" : "Preparing grounded change plan");
       const job = await apiJson<Job>(
         `/v1/projects/${activeProject.id}/workflow/prepare`,
         jsonRequest("POST", {
           user_request: request.trim(),
-          allow_ai_upload: true,
+          allow_ai_upload: !deterministic,
           revision: activeProject.workspace_revision,
           model: selectedModel,
         }, crypto.randomUUID()),
       );
       const completed = await pollJob(job, 50, 88, "Generating Patch");
+      upsertHistory({
+        id: activeProject.id,
+        projectId: activeProject.id,
+        jobId: job.job_id,
+        filename: activeProject.original_filename || selectedFile?.name || "APK",
+        prompt: request.trim(),
+        operations: operationLabels(request),
+        status: completed.state,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
       const result = (completed.result_data?.result || {}) as Record<string, unknown>;
       if (result.build_id) {
         setBuildId(String(result.build_id));
@@ -473,13 +589,25 @@ export default function Home() {
       setStatusMessage("Build complete & signed!");
       setPhase("complete");
       addLog("VERIFY", "Signed APK verified and stored in S3");
+      upsertHistory({
+        id: activeProject.id,
+        projectId: activeProject.id,
+        jobId: finishJob.job_id,
+        buildId: resultData.build_id,
+        filename: activeProject.original_filename || selectedFile?.name || "APK",
+        prompt: request.trim(),
+        operations: operationLabels(request),
+        status: "complete",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Workflow failed.";
       setError(message);
       setPhase("error");
       addLog("ERROR", message);
     }
-  }, [addLog, project, request, selectedFile, selectedModel, uploadAndImport, working, pollJob]);
+  }, [addLog, deterministic, project, request, selectedFile, selectedModel, uploadAndImport, upsertHistory, working, pollJob]);
 
   const approveBuild = useCallback(async () => {
     if (!project || !review || phase !== "review") return;
@@ -530,6 +658,43 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
 
+  const resumeHistory = useCallback(async (record: HistoryRecord) => {
+    setError("");
+    setRequest(record.prompt);
+    try {
+      const savedProject = await apiJson<Project>(`/v1/projects/${record.projectId}`);
+      setProject(savedProject);
+      if (record.buildId) {
+        setBuildId(record.buildId);
+        setPhase("complete");
+        return;
+      }
+      if (record.jobId && !["failed", "cancelled"].includes(record.status)) {
+        setPhase("previewing");
+        const job = await apiJson<Job>(`/v1/jobs/${record.jobId}`);
+        const completed = ["succeeded", "failed", "cancelled"].includes(job.state)
+          ? job
+          : await pollJob(job, 20, 88, "Resuming");
+        const result = (completed.result_data?.result || {}) as Record<string, unknown>;
+        if (result.build_id) {
+          setBuildId(String(result.build_id));
+          setPhase("complete");
+          upsertHistory({ ...record, buildId: String(result.build_id), status: "complete", updatedAt: new Date().toISOString() });
+          return;
+        }
+      }
+      setPhase("ready");
+      setStatusMessage("Workspace restored. Submit to retry from the clean revision.");
+    } catch (caught) {
+      setPhase("error");
+      setError(caught instanceof Error ? caught.message : "Unable to resume this build.");
+    }
+  }, [pollJob, upsertHistory]);
+
+  const removeHistory = useCallback((id: string) => {
+    saveHistory(history.filter((record) => record.id !== id));
+  }, [history, saveHistory]);
+
   const selectedModelObj = models.find((m) => m.id === selectedModel) || models[0];
 
   return (
@@ -555,16 +720,71 @@ export default function Home() {
             aria-label="NOIR home"
             onClick={(e) => { e.preventDefault(); reset(); }}
           >
-            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-              <rect width="32" height="32" rx="7" fill="#080909" stroke="rgba(217, 255, 67, 0.45)" strokeWidth="1.2" />
-              <path d="M8 23V9l16 14V9" fill="none" stroke="#d9ff43" strokeWidth="3" strokeLinejoin="bevel" />
-            </svg>
+            <img
+              src="/noir-logo.png"
+              alt="NOIR"
+              className="brand-mark-img"
+            />
             <span className="brand-name">NOIR</span>
           </a>
+          <Sheet>
+            <SheetTrigger asChild>
+              <button type="button" className="history-trigger">
+                <History size={15} /> History
+              </button>
+            </SheetTrigger>
+            <SheetContent className="history-sheet">
+              <SheetHeader className="history-head">
+                <SheetTitle>History</SheetTitle>
+                <SheetDescription>Builds saved in this browser.</SheetDescription>
+              </SheetHeader>
+              <div className="history-list">
+                {history.length === 0 ? (
+                  <p className="history-empty">Your recent APK builds will appear here.</p>
+                ) : history.map((record) => (
+                  <article className="history-card" key={record.id}>
+                    <div className="history-card-top">
+                      <div>
+                        <strong>{record.filename}</strong>
+                        <span>{new Date(record.updatedAt).toLocaleString()}</span>
+                      </div>
+                      <span className={`history-status status-${record.status}`}>{record.status}</span>
+                    </div>
+                    <p>{record.prompt}</p>
+                    <div className="history-ops">
+                      {record.operations.map((operation) => <span key={operation}>{operation}</span>)}
+                    </div>
+                    <div className="history-actions">
+                      {record.buildId ? (
+                        <a href={`/api/noir/v1/projects/${record.projectId}/builds/${record.buildId}/download?artifact=signed`} download>
+                          <Download size={13} /> Download
+                        </a>
+                      ) : (
+                        <button type="button" onClick={() => void resumeHistory(record)}>
+                          <RefreshCw size={13} /> {record.status === "failed" ? "Retry" : "Resume"}
+                        </button>
+                      )}
+                      <button type="button" className="history-remove" onClick={() => removeHistory(record.id)} aria-label={`Remove ${record.filename} from this browser`}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </SheetContent>
+          </Sheet>
         </header>
 
         {/* Hero Section */}
         <main className="hero">
+          {/* Floating Glassmorphic Logo in Teleportation Chamber */}
+          <div className="chamber-emblem-wrapper" aria-hidden="true">
+            <div className="chamber-emblem-glass">
+              <img src="/noir-logo.png" alt="NOIR Hologram" className="chamber-logo-img" />
+              <div className="chamber-emblem-glow" />
+            </div>
+          </div>
+
           <h1 className="h1">Describe an APK change. We&apos;ll build it.</h1>
 
           {/* Composer Card */}
@@ -697,7 +917,7 @@ export default function Home() {
               {/* Right Action Cluster */}
               <div className="desktop-right-cluster">
                 {/* Model Selector Popover */}
-                <div className="relative">
+                {!deterministic && <div className="relative">
                   <button
                     type="button"
                     className="model-trigger"
@@ -726,7 +946,7 @@ export default function Home() {
                       ))}
                     </div>
                   )}
-                </div>
+                </div>}
 
                 {/* Paperclip Attach Button */}
                 <button
@@ -747,7 +967,7 @@ export default function Home() {
                   </svg>
                 </button>
 
-                {/* Send Button (Orange Circle) */}
+                {/* Send / Upload Button */}
                 <button
                   type="button"
                   className="send-btn"
@@ -756,9 +976,9 @@ export default function Home() {
                   aria-label="Submit APK Change"
                 >
                   {working ? (
-                    <RefreshCw className="animate-spin text-white w-3.5 h-3.5" />
+                    <RefreshCw className="animate-spin text-black stroke-black w-3.5 h-3.5" strokeWidth={2.8} />
                   ) : (
-                    <ArrowUp className="text-white w-3.5 h-3.5" />
+                    <ArrowUp className="text-black stroke-black w-3.5 h-3.5" strokeWidth={2.8} />
                   )}
                 </button>
               </div>
