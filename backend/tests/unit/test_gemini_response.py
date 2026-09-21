@@ -602,6 +602,33 @@ def test_smali_insert_requires_complete_operation_metadata(provider, missing):
         provider._parse_patch_operation(operation, 0)
 
 
+def test_ai_cannot_create_a_standalone_smali_payload(provider):
+    with pytest.raises(GeminiProviderError, match="AI-generated Smali classes"):
+        provider._parse_patch_operation(
+            {
+                "relative_path": "smali/in/v0id/Generated.smali",
+                "operation": "create_file",
+                "new_content": ".class public Lin/v0id/Generated;",
+            },
+            0,
+        )
+
+
+def test_ai_smali_bridge_has_a_strict_size_limit(provider):
+    with pytest.raises(GeminiProviderError, match="4096-byte"):
+        provider._parse_patch_operation(
+            {
+                "relative_path": "smali/example/App.smali",
+                "operation": "smali_insert_at_anchor",
+                "class_descriptor": "Lexample/App;",
+                "method_signature": "onCreate()V",
+                "anchor": "invoke-super {p0}, Landroid/app/Activity;->onCreate()V",
+                "new_content": "#" * 4097,
+            },
+            0,
+        )
+
+
 def inject_sequence(monkeypatch, provider, responses):
     """Inject real SDK response objects, not a simulated production provider."""
     from google.genai import types

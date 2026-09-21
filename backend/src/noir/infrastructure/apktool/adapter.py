@@ -6,13 +6,18 @@ Manages framework-cache isolation and version compatibility.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import tempfile
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 from noir.domain.config import NoirConfig
 from noir.domain.models import ProcessResult
 from noir.infrastructure.processes.runner import run_tool
+from noir.security.xml import fromstring as secure_fromstring
 
 
 class ApkToolError(Exception):
@@ -36,21 +41,31 @@ class ApkToolAdapter:
         patterns = (
             re.compile(r"(?P<file>[^\s\[]+\.smali)\[(?P<line>\d+),(?P<column>\d+)\]\s*(?P<message>.+)"),
             re.compile(r"(?P<file>[^:\n]+\.xml):(?P<line>\d+):(?P<column>\d+):?\s*(?P<message>.+)"),
+            re.compile(r"(?P<file>[^:\n]+\.xml):(?P<line>\d+):\s*(?P<message>.+)"),
         )
         for raw_line in output.splitlines():
             for pattern in patterns:
                 match = pattern.search(raw_line)
                 if match:
                     details = match.groupdict()
-                    return {
-                        "stage": "apktool_build",
+                    failure = {
+                        "stage": (
+                            "manifest_compile"
+                            if result.tool_name == "aapt2"
+                            else "apktool_build"
+                        ),
                         "file": details["file"],
                         "line": int(details["line"]),
-                        "column": int(details["column"]),
                         "diagnostic": details["message"].strip(),
                     }
+                    if details.get("column"):
+                        failure["column"] = int(details["column"])
+                    return failure
         last = next((line.strip() for line in reversed(output.splitlines()) if line.strip()), "")
-        return {"stage": "apktool_build", "diagnostic": last[:1000]}
+        return {
+            "stage": "manifest_compile" if result.tool_name == "aapt2" else "apktool_build",
+            "diagnostic": last[:1000],
+        }
 
     def __init__(self, config: NoirConfig):
         self.config = config
@@ -136,10 +151,11 @@ class ApkToolAdapter:
         cmd.extend(["d", str(apk_path)])
         cmd.extend(["-o", str(output_dir)])
         if manifest_only:
-            # Keep resources.arsc and every original dex opaque. This avoids
-            # lossy resource/smali decoding while still producing an editable
-            # text manifest and a rebuildable apktool workspace.
-            cmd.extend(["--only-manifest", "-s"])
+            # Apktool validates and repacks the container while all app payload
+            # remains opaque. Its text manifest is replaced below by a binary-
+            # XML-only decoder because apktool loses unresolved resource refs in
+            # this mode. The edited manifest is compiled separately with aapt2.
+            cmd.extend(["--only-manifest", "-s", "--no-assets"])
 
         # Do not use --force against user-controlled paths
         # Use a new output directory instead
@@ -187,7 +203,176 @@ class ApkToolAdapter:
                 error_msg += f": {critical_warning[:300]}"
             raise ApkToolError(error_msg, result)
 
+        self._strip_extended_attributes(output_dir)
+        if manifest_only:
+            self._decode_binary_manifest(apk_path, output_dir / "AndroidManifest.xml")
+
         return result
+
+    @staticmethod
+    def _decode_binary_manifest(apk_path: Path, output_manifest: Path) -> None:
+        logger_to_restore = None
+        previous_level = None
+        try:
+            from axml.arsc import ARSCParser
+            from axml.axml import AXMLPrinter
+            from axml.helper.logging import LOGGER as AXML_LOGGER
+
+            with zipfile.ZipFile(apk_path) as archive:
+                binary_manifest = archive.read("AndroidManifest.xml")
+                resource_table = archive.read("resources.arsc")
+            logger_to_restore = AXML_LOGGER
+            previous_level = AXML_LOGGER.level
+            AXML_LOGGER.setLevel("CRITICAL")
+            printer = AXMLPrinter(binary_manifest)
+            decoded = printer.get_xml()
+            if not decoded or b"<manifest" not in decoded:
+                raise ValueError("AXML decoder returned no Android manifest")
+            apktool_root = secure_fromstring(output_manifest.read_bytes())
+            binary_root = secure_fromstring(decoded)
+            resources = ARSCParser(resource_table)
+
+            def merge_references(apktool_node: ET.Element, binary_node: ET.Element) -> None:
+                if apktool_node.tag != binary_node.tag:
+                    raise ValueError("Manifest element mismatch during reference recovery")
+                for attribute, current in apktool_node.attrib.items():
+                    alternate = binary_node.get(attribute, "")
+                    framework_reference = re.fullmatch(
+                        r"([@?])android:([0-9A-Fa-f]{8})", alternate
+                    )
+                    reference = re.fullmatch(r"([@?])([0-9A-Fa-f]{8})", alternate)
+                    if framework_reference and current.startswith(framework_reference.group(1)):
+                        prefix = framework_reference.group(1)
+                        if not current.startswith(f"{prefix}android:"):
+                            apktool_node.set(
+                                attribute,
+                                f"{prefix}android:{current[1:]}",
+                            )
+                        continue
+                    if not reference:
+                        continue
+                    prefix, encoded_id = reference.groups()
+                    resource_id = int(encoded_id, 16)
+                    if (resource_id >> 24) == 0x01 and current.startswith(prefix):
+                        if not current.startswith(f"{prefix}android:"):
+                            apktool_node.set(
+                                attribute,
+                                f"{prefix}android:{current[1:]}",
+                            )
+                    elif current == "":
+                        resource_name = resources.get_resource_xml_name(resource_id)
+                        if not resource_name:
+                            raise ValueError(
+                                f"Unable to resolve manifest resource reference {alternate}"
+                            )
+                        if prefix == "?":
+                            resource_name = "?" + resource_name[1:]
+                        apktool_node.set(attribute, resource_name)
+                binary_by_tag: dict[str, list[ET.Element]] = {}
+                for child in binary_node:
+                    binary_by_tag.setdefault(child.tag, []).append(child)
+                seen: dict[str, int] = {}
+                for apktool_child in apktool_node:
+                    index = seen.get(apktool_child.tag, 0)
+                    candidates = binary_by_tag.get(apktool_child.tag, [])
+                    android_name = apktool_child.get(
+                        "{http://schemas.android.com/apk/res/android}name"
+                    )
+                    named_candidates = (
+                        [
+                            candidate
+                            for candidate in candidates
+                            if candidate.get(
+                                "{http://schemas.android.com/apk/res/android}name"
+                            )
+                            == android_name
+                        ]
+                        if android_name
+                        else []
+                    )
+                    if len(named_candidates) == 1:
+                        selected = named_candidates[0]
+                    elif index < len(candidates):
+                        selected = candidates[index]
+                    else:
+                        raise ValueError(
+                            "Manifest structure mismatch during reference recovery"
+                        )
+                    seen[apktool_child.tag] = index + 1
+                    merge_references(apktool_child, selected)
+
+            merge_references(apktool_root, binary_root)
+            ET.indent(apktool_root, space="    ")
+            output_manifest.write_bytes(
+                ET.tostring(apktool_root, encoding="utf-8", xml_declaration=True)
+            )
+        except Exception as exc:
+            raise ApkToolError(f"Binary Android manifest decode failed: {exc}") from exc
+        finally:
+            if logger_to_restore is not None and previous_level is not None:
+                logger_to_restore.setLevel(previous_level)
+
+    def compile_manifest(
+        self,
+        original_apk: Path,
+        decoded_manifest: Path,
+        rebuilt_apk: Path,
+    ) -> None:
+        """Compile one edited manifest and insert it into an apktool rebuild."""
+        aapt2 = self.config.resolve_tool_path("aapt2")
+        sdk = Path(self.config.android_sdk_dir) if self.config.android_sdk_dir else None
+        platform_jars = list((sdk / "platforms").glob("android-*/android.jar")) if sdk else []
+        platform_jars.sort(
+            key=lambda path: int(path.parent.name.removeprefix("android-"))
+            if path.parent.name.removeprefix("android-").isdigit()
+            else -1
+        )
+        if not platform_jars:
+            raise ApkToolError("Android platform android.jar is required to compile the manifest")
+
+        with tempfile.TemporaryDirectory(prefix="noir-manifest-") as temporary_name:
+            compiled_apk = Path(temporary_name) / "compiled-manifest.apk"
+            result = run_tool(
+                [
+                    aapt2,
+                    "link",
+                    "-o",
+                    str(compiled_apk),
+                    "-I",
+                    str(platform_jars[-1]),
+                    "-I",
+                    str(original_apk),
+                    "--manifest",
+                    str(decoded_manifest),
+                ],
+                timeout=120,
+                tool_name="aapt2",
+            )
+            if result.exit_code != 0 or not compiled_apk.is_file():
+                diagnostic = (result.stderr or result.stdout).strip()
+                raise ApkToolError(f"Manifest compilation failed: {diagnostic[:2000]}", result)
+            with zipfile.ZipFile(compiled_apk) as archive:
+                compiled_manifest = archive.read("AndroidManifest.xml")
+            _replace_archive_entry(rebuilt_apk, "AndroidManifest.xml", compiled_manifest)
+
+    @staticmethod
+    def _strip_extended_attributes(output_dir: Path) -> None:
+        """Remove host filesystem metadata from apktool's managed workspace.
+
+        On macOS, provenance/quarantine attributes copied onto decoded resource
+        files can make Java NIO fail later with ``Illegal byte sequence``. They
+        are not APK content and must not participate in a reproducible build.
+        """
+        if not hasattr(os, "listxattr"):
+            return
+        for path in (output_dir, *output_dir.rglob("*")):
+            if path.is_symlink():
+                continue
+            try:
+                for attribute in os.listxattr(path):
+                    os.removexattr(path, attribute)
+            except OSError:
+                continue
 
     def build(
         self,
@@ -247,3 +432,72 @@ class ApkToolAdapter:
             raise ApkToolError("APKTool build produced no output", result)
 
         return result
+
+
+def overlay_preserved_entries(original_apk: Path, rebuilt_apk: Path) -> None:
+    """Restore opaque APK payload entries from the original archive.
+
+    Manifest-only decoding deliberately leaves assets out of the workspace so
+    apktool never has to materialize problematic filenames. The final archive
+    receives the exact original data for every opaque entry while retaining any
+    newly injected dex files produced by NOIR.
+    """
+
+    def is_signature(name: str) -> bool:
+        upper = name.upper()
+        return upper == "META-INF/MANIFEST.MF" or bool(
+            re.fullmatch(r"META-INF/[^/]+\.(?:SF|RSA|DSA|EC)", upper)
+        )
+
+    def preserve(name: str) -> bool:
+        # The hybrid profile changes only the manifest and may add a new Dex.
+        # Carry every other original entry through verbatim, including uncommon
+        # root-level metadata that apktool does not recognize. Old JAR signing
+        # entries must be discarded because the output receives a fresh signature.
+        return name != "AndroidManifest.xml" and not is_signature(name)
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{rebuilt_apk.name}.",
+        suffix=".preserved",
+        dir=rebuilt_apk.parent,
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        with (
+            zipfile.ZipFile(original_apk) as source,
+            zipfile.ZipFile(rebuilt_apk) as rebuilt,
+            zipfile.ZipFile(temporary, "w", allowZip64=True) as output,
+        ):
+            preserved_names = {
+                item.filename for item in source.infolist() if preserve(item.filename)
+            }
+            for item in rebuilt.infolist():
+                if item.filename not in preserved_names and not is_signature(item.filename):
+                    output.writestr(item, rebuilt.read(item.filename))
+            for item in source.infolist():
+                if item.filename in preserved_names:
+                    output.writestr(item, source.read(item.filename))
+        os.replace(temporary, rebuilt_apk)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _replace_archive_entry(apk_path: Path, name: str, content: bytes) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{apk_path.name}.", suffix=".entry", dir=apk_path.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        with (
+            zipfile.ZipFile(apk_path) as source,
+            zipfile.ZipFile(temporary, "w", allowZip64=True) as output,
+        ):
+            for item in source.infolist():
+                if item.filename != name:
+                    output.writestr(item, source.read(item.filename))
+            output.writestr(name, content, compress_type=zipfile.ZIP_DEFLATED)
+        os.replace(temporary, apk_path)
+    finally:
+        temporary.unlink(missing_ok=True)

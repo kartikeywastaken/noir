@@ -144,7 +144,9 @@ const operationLabels = (prompt: string) => {
   const labels: string[] = [];
   if (/\b(rename|change\s+(?:the\s+)?app\s+name|name\s+the\s+app)\b/i.test(prompt)) labels.push("Rename");
   if (/https?:\/\//i.test(prompt) && /\b(launch|startup|open|redirect|website|site)\b/i.test(prompt)) labels.push("Launch redirect");
-  if (/\b(toast|flash|pop-?up)\b/i.test(prompt)) labels.push("Every-tap toast");
+  if (/\b(toast|flash|pop-?up|message)\b/i.test(prompt)) {
+    labels.push(/\b(tap|touch|click|interact|interaction)\b/i.test(prompt) ? "Interaction toast" : "Startup message");
+  }
   return labels;
 };
 

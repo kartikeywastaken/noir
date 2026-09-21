@@ -28,8 +28,8 @@ from noir.domain.models import (
     PlanFileChange,
 )
 from noir.infrastructure.ai.budget import bounded_prompt
-from noir.patches.smali_utils import sanitize_smali_content
 from noir.infrastructure.ai.provider import AiProvider
+from noir.patches.smali_utils import sanitize_smali_content
 
 logger = logging.getLogger(__name__)
 
@@ -491,7 +491,9 @@ class GeminiProvider(AiProvider):
                 )
                 tried_keys_for_model: set[str] = set()
                 current_key = self.api_key
-                if self.key_rotator and (not current_key or self.key_rotator.is_in_cooldown(current_key)):
+                if self.key_rotator and (
+                    not current_key or self.key_rotator.is_in_cooldown(current_key)
+                ):
                     current_key = self.key_rotator.get_next_key()
                     if not current_key:
                         raise GeminiProviderError(
@@ -503,7 +505,11 @@ class GeminiProvider(AiProvider):
                         all_pool = self.key_rotator.get_all_keys()
                         untried = [k for k in all_pool if k not in tried_keys_for_model]
                         if untried:
-                            not_in_cooldown = [k for k in untried if not self.key_rotator.is_in_cooldown(k)]
+                            not_in_cooldown = [
+                                k
+                                for k in untried
+                                if not self.key_rotator.is_in_cooldown(k)
+                            ]
                             if not not_in_cooldown:
                                 raise GeminiProviderError(
                                     "All Gemini credentials are cooling down; retry after "
@@ -511,7 +517,11 @@ class GeminiProvider(AiProvider):
                                 )
                             current_key = not_in_cooldown[0]
 
-                    client = self._client_for_key(current_key) if current_key else self._get_client()
+                    client = (
+                        self._client_for_key(current_key)
+                        if current_key
+                        else self._get_client()
+                    )
                     config = types.GenerateContentConfig(
                         max_output_tokens=token_budget,
                         system_instruction=system_instruction or None,
@@ -549,9 +559,15 @@ class GeminiProvider(AiProvider):
                             all_keys = self.key_rotator.get_all_keys()
                             remaining_keys = [k for k in all_keys if k not in tried_keys_for_model]
                             if remaining_keys:
-                                redacted = current_key[:4] + "..." + current_key[-4:] if len(current_key) > 8 else "***"
+                                redacted = (
+                                    current_key[:4] + "..." + current_key[-4:]
+                                    if len(current_key) > 8
+                                    else "***"
+                                )
                                 logger.warning(
-                                    "Gemini key [%s] hit rate limit (429/quota); rotating to next API key in pool for model %s (%d untried key(s) remaining)",
+                                    "Gemini key [%s] hit rate limit (429/quota); rotating to "
+                                    "next API key in pool for model %s "
+                                    "(%d untried key(s) remaining)",
                                     redacted,
                                     model_name,
                                     len(remaining_keys),
@@ -565,22 +581,32 @@ class GeminiProvider(AiProvider):
                         ):
                             next_model = models[model_index + 1]
                             logger.warning(
-                                "Gemini model %s is temporarily unavailable or quota exhausted across keys; retrying with %s",
+                                "Gemini model %s is temporarily unavailable or quota "
+                                "exhausted across keys; retrying with %s",
                                 model_name,
                                 next_model,
                             )
                             break
                         # Fail fast with a clear message on quota exhaustion.
                         if is_quota and not can_fallback:
-                            num_keys = len(self.key_rotator.get_all_keys()) if self.key_rotator else 1
+                            num_keys = (
+                                len(self.key_rotator.get_all_keys())
+                                if self.key_rotator
+                                else 1
+                            )
                             raise GeminiProviderError(
-                                f"Gemini daily quota exhausted across all {num_keys} configured API key(s). "
+                                "Gemini daily quota exhausted across all "
+                                f"{num_keys} configured API key(s). "
                                 "No fallback model is configured. "
                                 "Wait for the quota to reset, configure NOIR_AI_FALLBACK_MODEL "
                                 "in your environment, or reduce usage."
                             ) from None
                         detail = str(exc)
-                        redact_keys = self.key_rotator.get_all_keys() if self.key_rotator else [self.api_key]
+                        redact_keys = (
+                            self.key_rotator.get_all_keys()
+                            if self.key_rotator
+                            else [self.api_key]
+                        )
                         for k in redact_keys:
                             if k:
                                 detail = detail.replace(k, "[REDACTED]")
@@ -715,6 +741,7 @@ class GeminiProvider(AiProvider):
             "You must output valid JSON matching the schema provided. "
             "Be precise about file paths, class descriptors, and method signatures. "
             "Always disclose permission changes, network behavior, and risks."
+            " Never create Smali classes; Smali inserts must be small bridges to evidenced code."
             "Completing the User's request takes priority "
         )
 
@@ -1099,6 +1126,14 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
             raise GeminiProviderError(f"{prefix} has invalid fields: {fields}") from None
         if not operation.relative_path.strip():
             raise GeminiProviderError(f"{prefix} requires relative_path")
+        if (
+            operation.operation == PatchOperationType.CREATE_FILE
+            and operation.relative_path.endswith(".smali")
+        ):
+            raise GeminiProviderError(
+                f"{prefix}: AI-generated Smali classes are not supported; use the verified "
+                "runtime or a minimal bridge into existing code"
+            )
         if operation.operation == PatchOperationType.MANIFEST_UPDATE and (
             not operation.xml_element or not operation.xml_attributes
         ):
@@ -1176,6 +1211,13 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
                 not operation.anchor or not operation.anchor.strip()
             ):
                 raise GeminiProviderError(f"{prefix}: smali_insert_at_anchor requires anchor")
+            if (
+                operation.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR
+                and len(operation.new_content.encode("utf-8")) > 4096
+            ):
+                raise GeminiProviderError(
+                    f"{prefix}: Smali bridge exceeds the 4096-byte deterministic bridge limit"
+                )
             operation.new_content = sanitize_smali_content(operation.new_content)
         if operation.operation in {
             PatchOperationType.CIL_REPLACE_METHOD_BODY,

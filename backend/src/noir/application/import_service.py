@@ -18,7 +18,11 @@ from noir.domain.enums import (
     WorkflowStage,
 )
 from noir.domain.models import AuditEvent, JobInfo, ProjectInfo
-from noir.infrastructure.apktool.adapter import ApkToolAdapter, ApkToolError
+from noir.infrastructure.apktool.adapter import (
+    ApkToolAdapter,
+    ApkToolError,
+    overlay_preserved_entries,
+)
 from noir.infrastructure.artifacts import ArtifactStore, ArtifactStoreError
 from noir.infrastructure.database.engine import init_db
 from noir.infrastructure.database.repositories import (
@@ -224,10 +228,10 @@ class ImportService:
             known_compatibility = load_compatibility_record(self.config, sha256)
             manifest_only = deterministic_spec is not None
             project.execution_profile = (
-                "deterministic_manifest_only" if manifest_only else "full_decode"
+                "hybrid_manifest_only" if manifest_only else "full_decode"
             )
             project.supported_operations = (
-                ["app_name", "launch_redirect", "every_tap_toast"]
+                ["app_name", "launch_redirect", "startup_message", "interaction_toast"]
                 if manifest_only
                 else []
             )
@@ -296,14 +300,14 @@ class ImportService:
                 )
                 project.compatibility_status = "compatible"
                 project.compatibility_reasons = [
-                    "Unchanged manifest-only apktool round-trip passed",
+                    "Unchanged hybrid apktool round-trip passed",
                     "Original dex, resources, native libraries, and assets are preserved",
                 ]
                 if known_compatibility:
                     project.compatibility_reasons.append(
                         "Certified SHA-256 profile reused after upload integrity verification"
                     )
-                project.payload_version = "1"
+                project.payload_version = "runtime-v1"
                 self.project_repo.update(project)
                 from noir.application.deterministic_service import save_compatibility_record
 
@@ -399,6 +403,12 @@ class ImportService:
                 candidate,
                 framework_dir=framework_dir,
             )
+            self.apktool.compile_manifest(
+                original_apk,
+                workspace.decoded_dir / "AndroidManifest.xml",
+                candidate,
+            )
+            overlay_preserved_entries(original_apk, candidate)
             if not zipfile.is_zipfile(candidate):
                 raise ApkImportError(
                     "Manifest-only compatibility round-trip produced an invalid APK",

@@ -206,6 +206,8 @@ class ChangePlan(BaseModel):
     discovery_stop_reason: str = ""
     execution_mode: str = "ai"
     detected_intents: list[str] = Field(default_factory=list)
+    patch_strategies: list[str] = Field(default_factory=list)
+    runtime_configuration: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_now)
 
     def compute_hash(self) -> str:
@@ -226,6 +228,7 @@ class PatchOperation(BaseModel):
     expected_absent: bool = False
     match_content: str | None = None
     new_content: str | None = None
+    new_content_base64: str | None = None
     class_descriptor: str | None = None
     method_signature: str | None = None
     anchor: str | None = None
@@ -266,6 +269,8 @@ class PatchSet(BaseModel):
     provenance: Provenance = Provenance.AI_GENERATED
     execution_mode: str = "ai"
     detected_intents: list[str] = Field(default_factory=list)
+    patch_strategies: list[str] = Field(default_factory=list)
+    runtime_configuration: dict[str, Any] = Field(default_factory=dict)
     operations: list[PatchOperation] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
 

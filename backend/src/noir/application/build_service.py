@@ -10,7 +10,11 @@ from datetime import UTC, datetime
 from noir.domain.config import NoirConfig, get_config
 from noir.domain.enums import EventSeverity, JobState, ProjectStatus, WorkflowStage
 from noir.domain.models import AuditEvent, BuildResult, JobInfo
-from noir.infrastructure.apktool.adapter import ApkToolAdapter, ApkToolError
+from noir.infrastructure.apktool.adapter import (
+    ApkToolAdapter,
+    ApkToolError,
+    overlay_preserved_entries,
+)
 from noir.infrastructure.database.repositories import (
     BuildRepository,
     EventRepository,
@@ -103,12 +107,28 @@ class BuildService:
                 workspace.decoded_dir / "build",
                 workspace.decoded_dir / "dist",
             ]
-            direct_build = not any(path.exists() or path.is_symlink() for path in generated_paths)
+            hybrid_build = project.execution_profile == "hybrid_manifest_only"
+            direct_build = not hybrid_build and not any(
+                path.exists() or path.is_symlink() for path in generated_paths
+            )
             if direct_build:
                 build_workspace = workspace.decoded_dir
             else:
                 build_workspace = build_dir / "workspace"
                 shutil.copytree(workspace.decoded_dir, build_workspace, symlinks=False)
+
+            original_apk = None
+            if project.execution_profile == "hybrid_manifest_only":
+                inputs = [
+                    path
+                    for path in workspace.input_dir.iterdir()
+                    if path.is_file() and not path.is_symlink()
+                ]
+                if len(inputs) != 1:
+                    raise BuildServiceError(
+                        "Hybrid build requires exactly one preserved original APK"
+                    )
+                original_apk = inputs[0]
             # Run APKTool build
             from noir.application.jobs import job_runtime
 
@@ -116,7 +136,7 @@ class BuildService:
             try:
                 with runtime:
                     max_attempts = (
-                        2 if project.execution_profile == "deterministic_manifest_only" else 1
+                        2 if project.execution_profile == "hybrid_manifest_only" else 1
                     )
                     result = None
                     for attempt in range(1, max_attempts + 1):
@@ -128,22 +148,45 @@ class BuildService:
                                 output_apk,
                                 framework_dir=framework_dir,
                             )
+                            if original_apk is not None:
+                                self.apktool.compile_manifest(
+                                    original_apk,
+                                    build_workspace / "AndroidManifest.xml",
+                                    output_apk,
+                                )
+                                overlay_preserved_entries(original_apk, output_apk)
                             break
                         except ApkToolError as exc:
                             build.failure_info = self.apktool.structured_failure(exc.result)
                             build.retryable = attempt < max_attempts
                             if attempt >= max_attempts:
                                 raise
-                            for generated in (
-                                build_workspace / "build",
-                                build_workspace / "dist",
-                            ):
+                            if hybrid_build:
                                 if (
-                                    generated.exists()
-                                    and generated.is_dir()
-                                    and not generated.is_symlink()
+                                    build_workspace.is_symlink()
+                                    or build_workspace.parent.resolve()
+                                    != build_dir.resolve()
                                 ):
-                                    shutil.rmtree(generated)
+                                    raise BuildServiceError(
+                                        "Unsafe hybrid retry workspace; restore blocked"
+                                    ) from exc
+                                shutil.rmtree(build_workspace)
+                                shutil.copytree(
+                                    workspace.decoded_dir,
+                                    build_workspace,
+                                    symlinks=False,
+                                )
+                            else:
+                                for generated in (
+                                    build_workspace / "build",
+                                    build_workspace / "dist",
+                                ):
+                                    if (
+                                        generated.exists()
+                                        and generated.is_dir()
+                                        and not generated.is_symlink()
+                                    ):
+                                        shutil.rmtree(generated)
                     if result is None:
                         raise BuildServiceError("APKTool did not return a build result")
             finally:
@@ -237,6 +280,12 @@ class BuildService:
                     stage=WorkflowStage.REBUILDING,
                     severity=EventSeverity.ERROR,
                     message=f"Build failed: {e}",
+                    metadata={
+                        "build_id": build.build_id,
+                        "attempt_number": build.attempt_number,
+                        "failure": build.failure_info,
+                        "tool_logs": build.tool_logs,
+                    },
                 )
             )
 

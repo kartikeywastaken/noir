@@ -2,7 +2,6 @@
 
 import logging
 import re
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,24 +9,24 @@ from noir.domain.config import NoirConfig
 from noir.domain.models import AnalysisResult, ComponentInfo, SmaliClassInfo
 from noir.infrastructure.ai.context import AiContextTools
 from noir.infrastructure.ai.intent_router import (
-    INTENT_RULES,
-    IntentRouteResult,
     IntentRouter,
     IntentRule,
     detect_runtimes,
-    scan_directory_markers,
 )
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace
 
 
 @pytest.fixture
 def workspace(tmp_path):
+    from noir.domain.models import ProjectInfo
     from noir.infrastructure.database.engine import init_db
     from noir.infrastructure.database.repositories import ProjectRepository
-    from noir.domain.models import ProjectInfo
+
     config = NoirConfig(_env_file=None, data_dir=str(tmp_path), gemini_api_key="test-key")
     init_db(config.effective_database_url)
-    ProjectRepository().create(ProjectInfo(id="test_router", name="Test", package_name="com.example"))
+    ProjectRepository().create(
+        ProjectInfo(id="test_router", name="Test", package_name="com.example")
+    )
     ws = ProjectWorkspace("test_router", config)
     ws.create()
     return ws
@@ -518,7 +517,9 @@ def test_fallback_behavior_and_warning_logged(sample_dex_workspace, sample_analy
     router = IntentRouter()
 
     with caplog.at_level(logging.WARNING):
-        result = router.route("clean up unused database tables and refactor", tools, sample_analysis)
+        result = router.route(
+            "clean up unused database tables and refactor", tools, sample_analysis
+        )
 
     assert result.matched_intents == []
     assert result.seen_files == {}
@@ -585,7 +586,7 @@ def test_ai_service_generate_plan_bypasses_discovery_on_match(
     plan = generate_plan(cfg, sample_dex_workspace.project_id, "rename app to BestApp", True)
 
     assert plan.discovery_api_calls == 0
-    assert plan.discovery_stop_reason == "intent_matched"
+    assert plan.discovery_stop_reason == "hybrid_deterministic_router"
     assert plan.discovery_transcript == []
 
 

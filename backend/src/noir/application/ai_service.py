@@ -189,6 +189,30 @@ def _create_discovery_provider(config):
         return LocalDiscoveryProvider(config)
 
 
+def _apply_strategy_metadata(plan, detected_intents: list[str]):
+    """Describe how an advanced plan reaches the existing APK.
+
+    The deterministic runtime path sets this metadata directly. Advanced plans
+    are grounded in model-selected files, so derive the strategy only from the
+    approved plan shape instead of claiming that a runtime Dex was injected.
+    """
+    strategies: list[str] = []
+    if plan.file_changes:
+        strategies.append("existing_file")
+    if plan.component_changes:
+        strategies.append("manifest_component")
+    if any(
+        change.operation.value == "smali_insert_at_anchor"
+        for change in plan.file_changes
+    ):
+        strategies.append("minimal_smali_bridge")
+    if len(strategies) > 1:
+        strategies.append("hybrid")
+    plan.detected_intents = list(dict.fromkeys(detected_intents))
+    plan.patch_strategies = strategies
+    return plan
+
+
 def generate_plan(config, project_id, request, consent, *, analysis=None, model=None):
     with project_lock(config, project_id):
         require_clean_workspace(config, project_id)
@@ -236,6 +260,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         discovery_transcript: list[dict] = []
         discovery_api_calls = 0
         discovery_stop_reason = ""
+        detected_intents: list[str] = []
         try:
             from noir.infrastructure.ai.discovery import build_discovered_context
             from noir.infrastructure.ai.intent_router import IntentRouter
@@ -249,6 +274,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
                     context_tools, route_result, user_request=request
                 )
                 context["detected_intents"] = route_result.matched_intents
+                detected_intents = route_result.matched_intents
             else:
                 logger.warning(
                     "No intent matched for request; falling through to AI discovery"
@@ -290,6 +316,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         plan.discovery_transcript = discovery_transcript
         plan.discovery_api_calls = discovery_api_calls
         plan.discovery_stop_reason = discovery_stop_reason
+        _apply_strategy_metadata(plan, detected_intents)
 
         # The human-readable inventory is independently byte-bounded and can omit a
         # binary that was deliberately selected for structured inspection. Evidence
@@ -310,6 +337,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             plan.discovery_transcript = discovery_transcript
             plan.discovery_api_calls = discovery_api_calls
             plan.discovery_stop_reason = discovery_stop_reason
+            _apply_strategy_metadata(plan, detected_intents)
             invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
         if invalid:
             missing = ", ".join(invalid[:10])
@@ -361,4 +389,7 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None,
             [change.relative_path for change in plan.file_changes], user_request=plan.user_request
         )
         patch = _create_generation_provider(config, model).generate_patch(plan, context)
+        patch.detected_intents = plan.detected_intents
+        patch.patch_strategies = plan.patch_strategies
+        patch.runtime_configuration = plan.runtime_configuration
         return PatchService(config).store_patch(patch, preview=preview)

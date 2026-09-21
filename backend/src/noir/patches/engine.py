@@ -7,6 +7,8 @@ Uses a transaction journal for crash-safe application.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import difflib
 import json
 import os
@@ -105,12 +107,22 @@ class PatchEngine:
             if op.operation == PatchOperationType.CREATE_FILE:
                 if target.exists():
                     errors.append(f"{prefix}: File already exists")
+                elif op.new_content is not None and op.new_content_base64 is not None:
+                    errors.append(f"{prefix}: Text and binary content are mutually exclusive")
+                elif op.new_content_base64 is not None:
+                    try:
+                        payload = base64.b64decode(op.new_content_base64, validate=True)
+                        if not payload or len(payload) > 16 * 1024 * 1024:
+                            errors.append(f"{prefix}: Binary payload has an invalid size")
+                    except (binascii.Error, ValueError):
+                        errors.append(f"{prefix}: Binary payload is not valid base64")
                 elif op.relative_path.endswith(".smali") and op.new_content:
                     validation = SmaliBytecodeValidator.validate(op.new_content)
                     if not validation.is_valid:
                         for diag in validation.diagnostics:
                             errors.append(
-                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
                             )
 
             elif op.operation == PatchOperationType.REPLACE_FILE:
@@ -124,12 +136,22 @@ class PatchEngine:
                             f"(expected {op.expected_preimage_hash[:16]}..., "
                             f"got {actual[:16]}...)"
                         )
+                if op.new_content is not None and op.new_content_base64 is not None:
+                    errors.append(f"{prefix}: Text and binary content are mutually exclusive")
+                elif op.new_content_base64 is not None:
+                    try:
+                        payload = base64.b64decode(op.new_content_base64, validate=True)
+                        if not payload or len(payload) > 16 * 1024 * 1024:
+                            errors.append(f"{prefix}: Binary payload has an invalid size")
+                    except (binascii.Error, ValueError):
+                        errors.append(f"{prefix}: Binary payload is not valid base64")
                 if op.relative_path.endswith(".smali") and op.new_content:
                     validation = SmaliBytecodeValidator.validate(op.new_content)
                     if not validation.is_valid:
                         for diag in validation.diagnostics:
                             errors.append(
-                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
                             )
 
             elif op.operation == PatchOperationType.REPLACE_BLOCK:
@@ -147,12 +169,15 @@ class PatchEngine:
                                 f"({count} occurrences found, expected exactly 1)"
                             )
                         elif op.relative_path.endswith(".smali") and op.new_content:
-                            new_content_simulated = content.replace(op.match_content, op.new_content, 1)
+                            new_content_simulated = content.replace(
+                                op.match_content, op.new_content, 1
+                            )
                             validation = SmaliBytecodeValidator.validate(new_content_simulated)
                             if not validation.is_valid:
                                 for diag in validation.diagnostics:
                                     errors.append(
-                                        f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                                        f"{prefix}: Line {diag.line_number}: "
+                                        f"[{diag.error_code}] {diag.message}"
                                     )
                     except OSError as e:
                         errors.append(f"{prefix}: Cannot read file: {e}")
@@ -206,7 +231,8 @@ class PatchEngine:
                     if not validation.is_valid:
                         for diag in validation.diagnostics:
                             errors.append(
-                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
                             )
 
             elif op.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR:
@@ -235,7 +261,8 @@ class PatchEngine:
                     if not validation.is_valid:
                         for diag in validation.diagnostics:
                             errors.append(
-                                f"{prefix}: Line {diag.line_number}: [{diag.error_code}] {diag.message}"
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
                             )
 
             elif op.operation in CIL_OPERATIONS:
@@ -780,10 +807,22 @@ class PatchEngine:
 
         if op.operation == PatchOperationType.CREATE_FILE:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(op.new_content or "")
+            if op.new_content_base64 is not None:
+                target.write_bytes(base64.b64decode(op.new_content_base64, validate=True))
+            else:
+                target.write_text(op.new_content or "")
             diff["action"] = "created"
+            if op.new_content_base64 is not None:
+                diff["after_hash"] = compute_file_hash(target)
 
         elif op.operation == PatchOperationType.REPLACE_FILE:
+            if op.new_content_base64 is not None:
+                old_hash = compute_file_hash(target) if target.exists() else ""
+                target.write_bytes(base64.b64decode(op.new_content_base64, validate=True))
+                diff["before_hash"] = old_hash
+                diff["after_hash"] = compute_file_hash(target)
+                diff["action"] = "replaced"
+                return diff
             old_content = target.read_text(errors="replace") if target.exists() else ""
             target.write_text(op.new_content or "")
             diff["action"] = "replaced"
