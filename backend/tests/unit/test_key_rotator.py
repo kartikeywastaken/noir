@@ -58,8 +58,9 @@ def test_key_rotator_all_in_cooldown():
     rotator.mark_rate_limited("key1", cooldown_seconds=10.0)
     rotator.mark_rate_limited("key2", cooldown_seconds=50.0)
 
-    # When all are in cooldown, it picks the earliest expiring one (key1)
-    assert rotator.get_next_key() == "key1"
+    # The caller must wait instead of immediately reusing a cooling key.
+    assert rotator.get_next_key() == ""
+    assert 0 < rotator.retry_after_seconds() <= 10
 
 
 def test_key_rotator_concurrency():

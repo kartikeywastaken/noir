@@ -223,6 +223,7 @@ class TaskQueue:
                         move_input=bool(durable_object_key)
                         or payload.get("move_input", False),
                         durable_object_key=durable_object_key,
+                        user_request=payload.get("user_request"),
                     )
                 elif job.result_data["operation"] == "build":
                     from noir.application.build_service import BuildService

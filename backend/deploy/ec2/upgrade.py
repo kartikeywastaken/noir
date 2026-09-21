@@ -167,7 +167,6 @@ def main() -> None:
             "NOIR_AI_PROVIDER",
             "NOIR_AI_MODEL",
             "NOIR_AI_FALLBACK_MODEL",
-            "NOIR_GEMINI_API_KEYS",
             "NOIR_DISCOVERY_PROVIDER",
             "NOIR_OPENROUTER_DISCOVERY_MODEL",
             "NOIR_OPENROUTER_DISCOVERY_FALLBACK_MODEL",

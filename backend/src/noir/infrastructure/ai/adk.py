@@ -193,6 +193,11 @@ class AdkGeminiProvider(GeminiProvider):
                 current_key = self.api_key
                 if self.key_rotator and (not current_key or self.key_rotator.is_in_cooldown(current_key)):
                     current_key = self.key_rotator.get_next_key()
+                    if not current_key:
+                        raise GeminiProviderError(
+                            "All Gemini credentials are cooling down; retry after "
+                            f"{self.key_rotator.retry_after_seconds():.1f}s"
+                        )
                 text = None
                 while True:
                     if time.monotonic() > stall_deadline:
@@ -209,7 +214,12 @@ class AdkGeminiProvider(GeminiProvider):
                         untried = [k for k in all_pool if k not in tried_keys_for_model]
                         if untried:
                             not_in_cooldown = [k for k in untried if not self.key_rotator.is_in_cooldown(k)]
-                            current_key = not_in_cooldown[0] if not_in_cooldown else untried[0]
+                            if not not_in_cooldown:
+                                raise GeminiProviderError(
+                                    "All Gemini credentials are cooling down; retry after "
+                                    f"{self.key_rotator.retry_after_seconds():.1f}s"
+                                )
+                            current_key = not_in_cooldown[0]
 
                     try:
                         text = self._run_agent(

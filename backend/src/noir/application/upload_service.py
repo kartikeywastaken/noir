@@ -526,7 +526,9 @@ class ResumableUploadService:
                     if not in_flight:
                         self._in_flight.pop(upload_id, None)
 
-    def complete(self, *, upload_id: str, user_id: str):
+    def complete(
+        self, *, upload_id: str, user_id: str, user_request: str | None = None
+    ):
         with _upload_lock(upload_id):
             session = self._load(upload_id, user_id)
             if session.job_id:
@@ -555,16 +557,19 @@ class ResumableUploadService:
             project_id = uuid4().hex[:16]
             AccessService().claim_project(user_id, project_id)
             try:
+                payload = {
+                    "path": str(part),
+                    "sha256": digest,
+                    "size": session.size,
+                    "move_input": True,
+                    "original_filename": session.filename,
+                }
+                if user_request:
+                    payload["user_request"] = user_request
                 job = self.queue.submit(
                     "import",
                     project_id,
-                    {
-                        "path": str(part),
-                        "sha256": digest,
-                        "size": session.size,
-                        "move_input": True,
-                        "original_filename": session.filename,
-                    },
+                    payload,
                     scoped_key,
                 )
             except ValueError as exc:
@@ -920,7 +925,9 @@ class S3MultipartUploadService:
             self._save(session)
             return session
 
-    def complete(self, *, upload_id: str, user_id: str):
+    def complete(
+        self, *, upload_id: str, user_id: str, user_request: str | None = None
+    ):
         with _upload_lock(f"s3-{upload_id}"):
             session = self._load(upload_id, user_id)
             scoped_key = f"{user_id}:{session.idempotency_key}"
@@ -999,6 +1006,8 @@ class S3MultipartUploadService:
                 "original_filename": session.filename,
                 "durable_original": True,
             }
+            if user_request:
+                payload["user_request"] = user_request
             try:
                 job = self.queue.submit(
                     "import",

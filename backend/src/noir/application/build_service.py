@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from noir.domain.config import NoirConfig, get_config
 from noir.domain.enums import EventSeverity, JobState, ProjectStatus, WorkflowStage
 from noir.domain.models import AuditEvent, BuildResult, JobInfo
-from noir.infrastructure.apktool.adapter import ApkToolAdapter
+from noir.infrastructure.apktool.adapter import ApkToolAdapter, ApkToolError
 from noir.infrastructure.database.repositories import (
     BuildRepository,
     EventRepository,
@@ -115,11 +115,37 @@ class BuildService:
             runtime = nullcontext() if not owns_job else job_runtime(job.job_id)
             try:
                 with runtime:
-                    result = self.apktool.build(
-                        build_workspace,
-                        output_apk,
-                        framework_dir=framework_dir,
+                    max_attempts = (
+                        2 if project.execution_profile == "deterministic_manifest_only" else 1
                     )
+                    result = None
+                    for attempt in range(1, max_attempts + 1):
+                        build.attempt_number = attempt
+                        output_apk.unlink(missing_ok=True)
+                        try:
+                            result = self.apktool.build(
+                                build_workspace,
+                                output_apk,
+                                framework_dir=framework_dir,
+                            )
+                            break
+                        except ApkToolError as exc:
+                            build.failure_info = self.apktool.structured_failure(exc.result)
+                            build.retryable = attempt < max_attempts
+                            if attempt >= max_attempts:
+                                raise
+                            for generated in (
+                                build_workspace / "build",
+                                build_workspace / "dist",
+                            ):
+                                if (
+                                    generated.exists()
+                                    and generated.is_dir()
+                                    and not generated.is_symlink()
+                                ):
+                                    shutil.rmtree(generated)
+                    if result is None:
+                        raise BuildServiceError("APKTool did not return a build result")
             finally:
                 if direct_build:
                     decoded_root = workspace.decoded_dir.resolve()
@@ -151,6 +177,8 @@ class BuildService:
             build.unsigned_apk_path = str(output_apk)
             build.unsigned_apk_hash = compute_file_hash(output_apk)
             build.success = True
+            build.retryable = False
+            build.failure_info = {}
             build.apktool_version = result.tool_version
             build.build_tools_version = self.config.build_tools_version
             build.tool_logs = result.stdout + "\n" + result.stderr
@@ -192,6 +220,8 @@ class BuildService:
             build.error_message = str(e)
             if hasattr(e, "result") and e.result:
                 build.tool_logs = e.result.stdout + "\n" + e.result.stderr
+                build.failure_info = self.apktool.structured_failure(e.result)
+            build.retryable = False
             self.build_repo.create(build)
 
             if owns_job:

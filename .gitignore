@@ -19,5 +19,6 @@ node_modules
 .next/
 next-env.d.ts
 .agents/
+.sites-runtime/
 tsconfig.tsbuildinfo
 .env*.local

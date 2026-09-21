@@ -324,7 +324,12 @@ class SmaliBytecodeValidator:
 
         # If snippet inside an existing method from enclosing_file_content:
         if enclosing_file_content and context_method and not in_method:
-            out_ctx: dict[str, Any] = {"locals": None, "registers": None, "static": False}
+            out_ctx: dict[str, Any] = {
+                "locals": None,
+                "registers": None,
+                "static": False,
+                "labels": set(),
+            }
             cls._extract_enclosing_context(
                 enclosing_file_content,
                 context_method,
@@ -335,6 +340,7 @@ class SmaliBytecodeValidator:
             if out_ctx.get("registers") is not None:
                 declared_registers = out_ctx["registers"]
             is_static = bool(out_ctx.get("static", False))
+            labels_defined.update(out_ctx.get("labels", set()))
 
         param_reg_count = _get_param_reg_count(method_sig, is_static)
 
@@ -548,6 +554,18 @@ class SmaliBytecodeValidator:
             # Check for label definition
             if code_line.startswith(":"):
                 label_name = code_line.split()[0]
+                if label_name in labels_defined:
+                    diagnostics.append(
+                        SmaliDiagnostic(
+                            line_number=line_idx,
+                            line_content=raw_line,
+                            message=(
+                                f"Label '{label_name}' is defined more than once in the "
+                                "same method."
+                            ),
+                            error_code="DUPLICATE_LABEL",
+                        )
+                    )
                 labels_defined.add(label_name)
                 continue
 
@@ -2252,7 +2270,9 @@ class SmaliBytecodeValidator:
                 out_state["static"] = " static " in f" {line_str} "
                 continue
             if found_target:
-                if line_str.startswith(".locals"):
+                if line_str.startswith(":"):
+                    out_state.setdefault("labels", set()).add(line_str.split()[0])
+                elif line_str.startswith(".locals"):
                     parts = line_str.split()
                     if len(parts) >= 2 and parts[1].isdigit():
                         out_state["locals"] = int(parts[1])

@@ -190,8 +190,6 @@ def _create_discovery_provider(config):
 
 
 def generate_plan(config, project_id, request, consent, *, analysis=None, model=None):
-    if not consent:
-        raise PlanServiceError("Explicit AI upload consent required")
     with project_lock(config, project_id):
         require_clean_workspace(config, project_id)
         analysis = analysis or AnalysisService(config).analyze(
@@ -200,8 +198,29 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         if not analysis:
             raise PlanServiceError("No analysis available")
 
-        # Check the plan cache before making any API calls.
+        # Guaranteed operations are parsed and generated locally. Intent routing
+        # is used only as a guard against silently dropping an advanced clause.
+        from noir.application.deterministic_service import (
+            create_deterministic_plan,
+            parse_operation_spec,
+        )
+        from noir.infrastructure.ai.intent_router import IntentRouter
+
+        workspace = ProjectWorkspace(project_id, config)
+        deterministic_context = AiContextTools(workspace, analysis)
+        routed = IntentRouter().route(request, deterministic_context, analysis)
+        spec = parse_operation_spec(request, set(routed.matched_intents))
         project = ProjectRepository().get(project_id)
+        if spec and project:
+            plan = create_deterministic_plan(
+                project_id, project.workspace_revision, request, spec
+            )
+            return PlanService(config).create_plan(plan)
+
+        if not consent:
+            raise PlanServiceError("Explicit AI upload consent required for advanced requests")
+
+        # Check the plan cache before making any API calls.
         revision = project.workspace_revision if project else 0
         selected_model = model or config.ai_model
         cached = _plan_cache.get(project_id, revision, request, selected_model)
@@ -209,7 +228,6 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             logger.info("Plan cache hit for project=%s revision=%d", project_id, revision)
             return cached
 
-        workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
         generation_provider = _create_generation_provider(config, selected_model)
         budget = _WorkflowCallBudget(config)
@@ -320,6 +338,22 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None,
         ):
             raise PlanServiceError("Approve the plan before any AI patch request")
         require_clean_workspace(config, project_id)
+        if plan.execution_mode == "deterministic":
+            from noir.application.deterministic_service import (
+                create_deterministic_patch,
+                parse_operation_spec,
+            )
+
+            spec = parse_operation_spec(plan.user_request)
+            if spec is None:
+                raise PlanServiceError("Stored deterministic operation specification is invalid")
+            patch = create_deterministic_patch(
+                ProjectWorkspace(project_id, config),
+                plan,
+                spec,
+                project.original_sha256,
+            )
+            return PatchService(config).store_patch(patch, preview=preview)
         analysis = analysis or AnalysisService(config).analyze(
             project_id, ProjectWorkspace(project_id, config), persist=False
         )

@@ -20,8 +20,9 @@ def main() -> None:
     config = NoirConfig()
     gemini_discovery = config.gemini_key_for("discovery")
     gemini_generation = config.gemini_key_for("generation")
+    gemini_pool = ",".join(config.get_gemini_generation_keys())
     openrouter = config.openrouter_api_key.get_secret_value()
-    if not gemini_discovery or not gemini_generation:
+    if not gemini_discovery or not gemini_generation or not gemini_pool:
         raise SystemExit(
             "Gemini credentials are required. Configure GEMINI_API_KEY_1 and "
             "GEMINI_API_KEY_2, or legacy GEMINI_API_KEY."
@@ -39,6 +40,7 @@ def main() -> None:
         {
             "gemini-discovery-api-key": gemini_discovery,
             "gemini-generation-api-key": gemini_generation,
+            "gemini-api-keys": gemini_pool,
             "openrouter-api-key": openrouter,
             "api-token": token,
             "signing-password": secrets.token_urlsafe(48),

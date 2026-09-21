@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from datetime import UTC, datetime
@@ -83,6 +86,7 @@ class ImportService:
         input_size: int | None = None,
         move_input: bool = False,
         durable_object_key: str | None = None,
+        user_request: str | None = None,
     ) -> dict:
         """Import and decode an APK.
 
@@ -208,7 +212,27 @@ class ImportService:
                     sha256=sha256,
                 )
 
-            # Step 3: Decode with APKTool — runs in parallel with S3 upload above.
+            # Step 3: choose the least-invasive profile before decoding. Core
+            # operations keep dex/resources opaque; advanced requests retain the
+            # legacy full-decode workspace.
+            from noir.application.deterministic_service import (
+                load_compatibility_record,
+                parse_operation_spec,
+            )
+
+            deterministic_spec = parse_operation_spec(user_request or "")
+            known_compatibility = load_compatibility_record(self.config, sha256)
+            manifest_only = deterministic_spec is not None
+            project.execution_profile = (
+                "deterministic_manifest_only" if manifest_only else "full_decode"
+            )
+            project.supported_operations = (
+                ["app_name", "launch_redirect", "every_tap_toast"]
+                if manifest_only
+                else []
+            )
+
+            # Decode with APKTool — runs in parallel with S3 upload above.
             job.stage = WorkflowStage.DECODING
             self.job_repo.update(job)
 
@@ -230,6 +254,7 @@ class ImportService:
                         stored_apk,
                         workspace.decoded_dir,
                         framework_dir=framework_dir,
+                        manifest_only=manifest_only,
                     )
                 if artifact_future is not None:
                     object_key = artifact_future.result()
@@ -264,6 +289,33 @@ class ImportService:
             log_file.write_text(
                 f"=== stdout ===\n{decode_result.stdout}\n=== stderr ===\n{decode_result.stderr}\n"
             )
+
+            if manifest_only:
+                self._validate_manifest_roundtrip(
+                    stored_apk, workspace, framework_dir=framework_dir
+                )
+                project.compatibility_status = "compatible"
+                project.compatibility_reasons = [
+                    "Unchanged manifest-only apktool round-trip passed",
+                    "Original dex, resources, native libraries, and assets are preserved",
+                ]
+                if known_compatibility:
+                    project.compatibility_reasons.append(
+                        "Certified SHA-256 profile reused after upload integrity verification"
+                    )
+                project.payload_version = "1"
+                self.project_repo.update(project)
+                from noir.application.deterministic_service import save_compatibility_record
+
+                save_compatibility_record(
+                    self.config,
+                    sha256,
+                    execution_profile=project.execution_profile,
+                    compatibility_status=project.compatibility_status,
+                    supported_operations=project.supported_operations,
+                    payload_version=project.payload_version,
+                    apktool_version=decode_result.tool_version,
+                )
 
             # Step 4: Build baseline file manifest
             manifest = workspace.build_file_manifest()
@@ -315,6 +367,9 @@ class ImportService:
                 "file_count": len(manifest),
                 "classification": validation.get("classification", "unknown"),
                 "warnings": validation.get("warnings", []),
+                "execution_profile": project.execution_profile,
+                "supported_operations": project.supported_operations,
+                "compatibility_status": project.compatibility_status,
             }
 
         except ApkValidationError as e:
@@ -325,6 +380,55 @@ class ImportService:
             return self._fail_job(project, job, str(e), "durable_storage_error", owns_job)
         except Exception as e:
             return self._fail_job(project, job, str(e), "internal_error", owns_job)
+
+    def _validate_manifest_roundtrip(
+        self,
+        original_apk: Path,
+        workspace: ProjectWorkspace,
+        *,
+        framework_dir: Path,
+    ) -> None:
+        """Build the untouched workspace and prove opaque APK entries survived."""
+        import zipfile
+
+        candidate = workspace.metadata_dir / "manifest-roundtrip.apk"
+        candidate.unlink(missing_ok=True)
+        try:
+            self.apktool.build(
+                workspace.decoded_dir,
+                candidate,
+                framework_dir=framework_dir,
+            )
+            if not zipfile.is_zipfile(candidate):
+                raise ApkImportError(
+                    "Manifest-only compatibility round-trip produced an invalid APK",
+                    "incompatible_apk",
+                )
+            preserved = re.compile(
+                r"^(?:classes\d*\.dex|resources\.arsc|assets/|lib/|res/|unknown/)"
+            )
+            with zipfile.ZipFile(original_apk) as source, zipfile.ZipFile(candidate) as rebuilt:
+                rebuilt_names = set(rebuilt.namelist())
+                for name in source.namelist():
+                    if name.endswith("/") or not preserved.match(name):
+                        continue
+                    if name not in rebuilt_names:
+                        raise ApkImportError(
+                            f"Compatibility round-trip omitted preserved entry: {name}",
+                            "incompatible_apk",
+                        )
+                    source_digest = hashlib.sha256(source.read(name)).digest()
+                    rebuilt_digest = hashlib.sha256(rebuilt.read(name)).digest()
+                    if source_digest != rebuilt_digest:
+                        raise ApkImportError(
+                            f"Compatibility round-trip changed preserved entry: {name}",
+                            "incompatible_apk",
+                        )
+        finally:
+            candidate.unlink(missing_ok=True)
+            for generated in (workspace.decoded_dir / "build", workspace.decoded_dir / "dist"):
+                if generated.exists() and generated.is_dir() and not generated.is_symlink():
+                    shutil.rmtree(generated)
 
     def _fail_job(
         self,

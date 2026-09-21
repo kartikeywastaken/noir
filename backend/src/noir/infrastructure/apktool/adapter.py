@@ -28,6 +28,30 @@ class ApkToolAdapter:
 
     MIN_SUPPORTED_VERSION = "2.7.0"
 
+    @staticmethod
+    def structured_failure(result: ProcessResult | None) -> dict:
+        if result is None:
+            return {}
+        output = f"{result.stderr}\n{result.stdout}"
+        patterns = (
+            re.compile(r"(?P<file>[^\s\[]+\.smali)\[(?P<line>\d+),(?P<column>\d+)\]\s*(?P<message>.+)"),
+            re.compile(r"(?P<file>[^:\n]+\.xml):(?P<line>\d+):(?P<column>\d+):?\s*(?P<message>.+)"),
+        )
+        for raw_line in output.splitlines():
+            for pattern in patterns:
+                match = pattern.search(raw_line)
+                if match:
+                    details = match.groupdict()
+                    return {
+                        "stage": "apktool_build",
+                        "file": details["file"],
+                        "line": int(details["line"]),
+                        "column": int(details["column"]),
+                        "diagnostic": details["message"].strip(),
+                    }
+        last = next((line.strip() for line in reversed(output.splitlines()) if line.strip()), "")
+        return {"stage": "apktool_build", "diagnostic": last[:1000]}
+
     def __init__(self, config: NoirConfig):
         self.config = config
         self._version: str | None = None
@@ -90,6 +114,7 @@ class ApkToolAdapter:
         *,
         framework_dir: Path | None = None,
         timeout: int | None = None,
+        manifest_only: bool = False,
     ) -> ProcessResult:
         """Decode an APK using APKTool.
 
@@ -110,6 +135,11 @@ class ApkToolAdapter:
         cmd = self._build_base_command()
         cmd.extend(["d", str(apk_path)])
         cmd.extend(["-o", str(output_dir)])
+        if manifest_only:
+            # Keep resources.arsc and every original dex opaque. This avoids
+            # lossy resource/smali decoding while still producing an editable
+            # text manifest and a rebuildable apktool workspace.
+            cmd.extend(["--only-manifest", "-s"])
 
         # Do not use --force against user-controlled paths
         # Use a new output directory instead
@@ -130,7 +160,20 @@ class ApkToolAdapter:
             tool_version=self._version or "",
         )
 
-        if result.exit_code != 0:
+        output = f"{result.stdout}\n{result.stderr}"
+        critical_warning = next(
+            (
+                line.strip()
+                for line in output.splitlines()
+                if re.search(
+                    r"(?i)(illegal byte sequence|could not decode file|malformed (?:xml|resource)|"
+                    r"exception in thread|outofmemoryerror|brut\.common\.brutexception)",
+                    line,
+                )
+            ),
+            None,
+        )
+        if result.exit_code != 0 or critical_warning:
             error_msg = f"APKTool decode failed (exit {result.exit_code})"
             stderr = result.stderr.strip()
             if "Could not decode" in stderr:
@@ -140,6 +183,8 @@ class ApkToolAdapter:
                     ". Missing vendor framework — install the required framework "
                     "with 'apktool if framework.apk'"
                 )
+            if critical_warning:
+                error_msg += f": {critical_warning[:300]}"
             raise ApkToolError(error_msg, result)
 
         return result
@@ -183,7 +228,19 @@ class ApkToolAdapter:
         )
 
         if result.exit_code != 0:
-            raise ApkToolError(f"APKTool build failed (exit {result.exit_code})", result)
+            failure = self.structured_failure(result)
+            location = ""
+            if failure.get("file"):
+                location = (
+                    f" at {failure['file']}:{failure.get('line', '?')}:"
+                    f"{failure.get('column', '?')}"
+                )
+            diagnostic = failure.get("diagnostic")
+            suffix = f": {diagnostic}" if diagnostic else ""
+            raise ApkToolError(
+                f"APKTool build failed (exit {result.exit_code}){location}{suffix}",
+                result,
+            )
 
         # Verify output exists and is non-empty
         if not output_apk.exists() or output_apk.stat().st_size == 0:

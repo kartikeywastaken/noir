@@ -43,6 +43,7 @@ class ProjectRow(Base):
     authorization_timestamp = Column(DateTime, nullable=True)
     workspace_revision = Column(Integer, default=0)
     dirty = Column(Boolean, default=False)
+    capability_info = Column(JSON, default=dict)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -128,6 +129,9 @@ class BuildRow(Base):
     signed_apk_path = Column(String(512), nullable=True)
     signed_apk_hash = Column(String(64), nullable=True)
     success = Column(Boolean, default=False)
+    attempt_number = Column(Integer, default=1)
+    retryable = Column(Boolean, default=False)
+    failure_info = Column(JSON, default=dict)
     error_message = Column(Text, nullable=True)
     apktool_version = Column(String(32), nullable=True)
     build_tools_version = Column(String(32), nullable=True)
@@ -266,6 +270,28 @@ def init_db(database_url: str) -> None:
         # Additive, transactional migration. Existing CLI projects/tokens belong
         # only to the local owner; never expose them to newly invited users.
         with _engine.begin() as connection:
+            # SQLite's create_all does not add columns to existing databases.
+            # Keep these metadata migrations additive so deployed workspaces can
+            # be upgraded without rebuilding their audit database.
+            existing_columns = {
+                table: {
+                    row[1]
+                    for row in connection.execute(
+                        text(f"PRAGMA table_info({table})")  # noqa: S608 - fixed names
+                    )
+                }
+                for table in ("projects", "builds")
+            }
+            for table, column, declaration in (
+                ("projects", "capability_info", "JSON DEFAULT '{}'") ,
+                ("builds", "attempt_number", "INTEGER DEFAULT 1"),
+                ("builds", "retryable", "BOOLEAN DEFAULT 0"),
+                ("builds", "failure_info", "JSON DEFAULT '{}'") ,
+            ):
+                if column not in existing_columns[table]:
+                    connection.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+                    )
             for statement in (
                 "CREATE INDEX IF NOT EXISTS ix_jobs_state_created ON jobs (state, created_at)",
                 "CREATE INDEX IF NOT EXISTS ix_jobs_project_state ON jobs (project_id, state)",
