@@ -16,7 +16,6 @@ import {
   FileArchive,
   History,
   RefreshCw,
-  ShieldCheck,
   Terminal,
   Trash2,
   X,
@@ -721,10 +720,11 @@ export default function Home() {
             aria-label="NOIR home"
             onClick={(e) => { e.preventDefault(); reset(); }}
           >
-            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-              <rect width="32" height="32" rx="7" fill="#080909" stroke="rgba(217, 255, 67, 0.45)" strokeWidth="1.2" />
-              <path d="M8 23V9l16 14V9" fill="none" stroke="#d9ff43" strokeWidth="3" strokeLinejoin="bevel" />
-            </svg>
+            <img
+              src="/noir-logo.png"
+              alt="NOIR"
+              className="brand-mark-img"
+            />
             <span className="brand-name">NOIR</span>
           </a>
           <Sheet>
@@ -777,6 +777,14 @@ export default function Home() {
 
         {/* Hero Section */}
         <main className="hero">
+          {/* Floating Glassmorphic Logo in Teleportation Chamber */}
+          <div className="chamber-emblem-wrapper" aria-hidden="true">
+            <div className="chamber-emblem-glass">
+              <img src="/noir-logo.png" alt="NOIR Hologram" className="chamber-logo-img" />
+              <div className="chamber-emblem-glow" />
+            </div>
+          </div>
+
           <h1 className="h1">Describe an APK change. We&apos;ll build it.</h1>
 
           {/* Composer Card */}
@@ -823,11 +831,6 @@ export default function Home() {
               disabled={working || phase === "complete"}
               rows={2}
             />
-
-            <div className={`execution-indicator ${deterministic ? "is-local" : "is-ai"}`}>
-              <ShieldCheck size={13} />
-              <span>{deterministic ? "Deterministic · no AI" : "Advanced request · AI assisted"}</span>
-            </div>
 
             {/* Status / Progress Indicator */}
             {working && (
@@ -964,7 +967,7 @@ export default function Home() {
                   </svg>
                 </button>
 
-                {/* Send Button (Orange Circle) */}
+                {/* Send / Upload Button */}
                 <button
                   type="button"
                   className="send-btn"
@@ -973,9 +976,9 @@ export default function Home() {
                   aria-label="Submit APK Change"
                 >
                   {working ? (
-                    <RefreshCw className="animate-spin text-white w-3.5 h-3.5" />
+                    <RefreshCw className="animate-spin text-black stroke-black w-3.5 h-3.5" strokeWidth={2.8} />
                   ) : (
-                    <ArrowUp className="text-white w-3.5 h-3.5" />
+                    <ArrowUp className="text-black stroke-black w-3.5 h-3.5" strokeWidth={2.8} />
                   )}
                 </button>
               </div>
