@@ -71,6 +71,12 @@ def main() -> None:
         ).fetchall()
     if active:
         raise SystemExit("Active jobs exist; let them finish before upgrading")
+    gemini_pool = Path("/etc/credstore.encrypted/noir-gemini-api-keys")
+    if not gemini_pool.is_file():
+        raise SystemExit(
+            "Encrypted Gemini key pool is missing; install "
+            "/etc/credstore.encrypted/noir-gemini-api-keys before upgrading"
+        )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup = Path("/var/backups/noir") / stamp
     backup.mkdir(parents=True, mode=0o700)
