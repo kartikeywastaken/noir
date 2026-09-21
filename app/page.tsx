@@ -16,6 +16,7 @@ import {
   FileArchive,
   History,
   RefreshCw,
+  ShieldCheck,
   Terminal,
   Trash2,
   X,
@@ -229,6 +230,7 @@ export default function Home() {
   const [logsDrawerOpen, setLogsDrawerOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [aiConsent, setAiConsent] = useState(true);
 
   const working = ["uploading", "importing", "previewing", "building"].includes(phase);
   const deterministic = isDeterministicPrompt(request);
@@ -490,10 +492,15 @@ export default function Home() {
     return imported;
   }, [addLog, pollJob, upsertHistory]);
 
-  const startPreview = useCallback(async () => {
+  const startPreview = useCallback(async (overrideConsent?: boolean) => {
     if (!selectedFile && !project) {
       fileInputRef.current?.click();
       setError("Please attach an APK first.");
+      return;
+    }
+    const currentConsent = overrideConsent !== undefined ? overrideConsent : aiConsent;
+    if (!currentConsent) {
+      setError("Consent is required to send APK context to Gemini");
       return;
     }
     if (working) return;
@@ -509,7 +516,7 @@ export default function Home() {
         `/v1/projects/${activeProject.id}/workflow/prepare`,
         jsonRequest("POST", {
           user_request: request.trim(),
-          allow_ai_upload: !deterministic,
+          allow_ai_upload: true,
           revision: activeProject.workspace_revision,
           model: selectedModel,
         }, crypto.randomUUID()),
@@ -607,7 +614,7 @@ export default function Home() {
       setPhase("error");
       addLog("ERROR", message);
     }
-  }, [addLog, deterministic, project, request, selectedFile, selectedModel, uploadAndImport, upsertHistory, working, pollJob]);
+  }, [addLog, aiConsent, deterministic, project, request, selectedFile, selectedModel, uploadAndImport, upsertHistory, working, pollJob]);
 
   const approveBuild = useCallback(async () => {
     if (!project || !review || phase !== "review") return;
@@ -886,13 +893,30 @@ export default function Home() {
             {/* Error Notification */}
             {error && (
               <div className="error-pane">
-                <span>{error}</span>
+                <div className="error-msg-wrap">
+                  <span>{error}</span>
+                  {error.toLowerCase().includes("consent") && (
+                    <button
+                      type="button"
+                      className="error-consent-btn"
+                      onClick={() => {
+                        setAiConsent(true);
+                        setError("");
+                        void startPreview(true);
+                      }}
+                    >
+                      <ShieldCheck size={13} />
+                      <span>Grant Consent &amp; Retry</span>
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setError("")}
-                  className="text-red-500 hover:text-red-700"
+                  className="error-close-btn"
+                  aria-label="Dismiss error"
                 >
-                  <X size={12} />
+                  <X size={13} />
                 </button>
               </div>
             )}
@@ -916,6 +940,19 @@ export default function Home() {
 
               {/* Right Action Cluster */}
               <div className="desktop-right-cluster">
+                {/* AI Consent Toggle Button */}
+                <button
+                  type="button"
+                  className={`consent-btn ${aiConsent ? "is-granted" : "is-revoked"}`}
+                  onClick={() => setAiConsent((v) => !v)}
+                  disabled={working || phase === "complete"}
+                  title={aiConsent ? "AI upload consent is granted (click to toggle off)" : "Click to grant AI upload consent"}
+                  aria-label="Toggle AI Upload Consent"
+                >
+                  <ShieldCheck size={12} className={aiConsent ? "text-emerald-600" : "text-slate-400"} />
+                  <span>{aiConsent ? "AI Consent" : "No Consent"}</span>
+                </button>
+
                 {/* Model Selector Popover */}
                 {!deterministic && <div className="relative">
                   <button
@@ -971,7 +1008,7 @@ export default function Home() {
                 <button
                   type="button"
                   className="send-btn"
-                  onClick={phase === "review" ? approveBuild : startPreview}
+                  onClick={() => (phase === "review" ? approveBuild() : startPreview())}
                   disabled={working || (!selectedFile && !request.trim())}
                   aria-label="Submit APK Change"
                 >

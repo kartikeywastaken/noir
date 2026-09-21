@@ -440,6 +440,44 @@ main.hero {
   position: relative;
 }
 
+/* AI Consent Toggle Button */
+.consent-btn {
+  height: calc(var(--chip-h) * var(--u));
+  border-radius: calc(var(--chip-r) * var(--u));
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 8px rgba(0, 0, 0, 0.04);
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5 * var(--u));
+  padding: 0 calc(9 * var(--u));
+  font-family: var(--font-text);
+  font-size: calc(var(--chip-fs) * var(--u));
+  font-weight: 700;
+  color: #000000;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.consent-btn:hover {
+  background: rgba(255, 255, 255, 0.38);
+  transform: translateY(-1px);
+}
+
+.consent-btn.is-granted {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.consent-btn.is-revoked {
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #b91c1c;
+  opacity: 0.85;
+}
+
 /* Model Dropdown Trigger */
 .model-trigger {
   display: inline-flex;
@@ -707,20 +745,64 @@ main.hero {
   transform: translateY(-1px);
 }
 
-/* Error Notification */
+/* Error Notification & Inline Grant Button */
 .error-pane {
-  background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: calc(10 * var(--u));
-  padding: calc(10 * var(--u)) calc(14 * var(--u));
-  font-size: calc(10 * var(--u));
+  padding: calc(8 * var(--u)) calc(12 * var(--u));
+  font-size: calc(9.8 * var(--u));
+  font-weight: 600;
   color: #b91c1c;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+}
+
+.error-msg-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.error-consent-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #000000;
+  color: #ffffff;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: calc(8.8 * var(--u));
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.error-consent-btn:hover {
+  background: #1e293b;
+  transform: translateY(-1px);
+}
+
+.error-close-btn {
+  cursor: pointer;
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.error-close-btn:hover {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.15);
 }
 
 /* Activity / Logs Bottom Drawer */
