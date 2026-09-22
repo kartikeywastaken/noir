@@ -57,13 +57,18 @@ type Review = {
   paths: string[];
   operationCount: number;
 };
-type S3UploadSession = {
+type UploadSession = {
   upload_id: string;
-  project_id: string;
-  upload_mode: "s3";
-  part_size: number;
-  total_parts: number;
+  project_id?: string;
+  upload_mode: "s3" | "proxy";
+  // S3 mode fields
+  part_size?: number;
+  total_parts?: number;
   completed_parts?: CompletedPart[];
+  // Proxy mode fields
+  chunk_size?: number;
+  offset?: number;
+  size?: number;
 };
 type PendingPart = { part_number: number; bytes: ArrayBuffer; checksum_sha256: string };
 type CompletedPart = { part_number: number; etag: string; checksum_sha256: string; size: number };
@@ -282,27 +287,64 @@ export default function Home() {
     const fileBytes = await file.arrayBuffer();
     const sha256 = hexDigest(await crypto.subtle.digest("SHA-256", fileBytes));
     setProgress(5);
-    addLog("UPLOAD", "Opening direct S3 upload");
-    const session = await apiJson<S3UploadSession>(
+
+    addLog("UPLOAD", "Opening upload session");
+    const session = await apiJson<UploadSession>(
       "/v1/uploads",
-      jsonRequest("POST", { filename: file.name, size: file.size, sha256, upload_mode: "s3" }, key),
+      jsonRequest("POST", { filename: file.name, size: file.size, sha256 }, key),
     );
-    if (session.upload_mode !== "s3" || !session.upload_id || !Number.isInteger(session.part_size) || session.part_size < 5 * 1024 * 1024) {
-      throw new Error("Direct S3 upload is unavailable.");
+
+    if (session.upload_mode === "proxy") {
+      // ── Proxy chunked PATCH (localhost / no-S3) ──────────────────────────
+      const chunkSize = session.chunk_size ?? 2 * 1024 * 1024;
+      let offset = session.offset ?? 0;
+      while (offset < file.size) {
+        const chunk = fileBytes.slice(offset, offset + chunkSize);
+        await retry(() => apiJson<UploadSession>(
+          `/v1/uploads/${session.upload_id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/octet-stream",
+              "Upload-Offset": String(offset),
+              "Upload-Length": String(file.size),
+            },
+            body: chunk,
+          },
+        ));
+        offset += chunk.byteLength;
+        setProgress(5 + Math.round((offset / file.size) * 25));
+      }
+      addLog("PROXY", "Upload complete; import queued");
+      setPhase("importing");
+      const job = await apiJson<Job>(
+        `/v1/uploads/${session.upload_id}/complete?authorized=true`,
+        jsonRequest("POST", {}, key),
+      );
+      const completed = await pollJob(job, 30, 48);
+      const projectId = completed.project_id ?? session.upload_id;
+      const imported = await apiJson<Project>(`/v1/projects/${projectId}`);
+      setProject(imported);
+      addLog("IMPORT", "APK decoded and indexed");
+      return imported;
     }
 
+    // ── S3 multipart (production) ────────────────────────────────────────
+    if (!session.upload_id || !Number.isInteger(session.part_size) || (session.part_size ?? 0) < 5 * 1024 * 1024) {
+      throw new Error("Upload session is invalid.");
+    }
     const completedParts = new Map<number, CompletedPart>(
       (session.completed_parts ?? []).map((part) => [part.part_number, part]),
     );
     let uploadedBytes = [...completedParts.values()].reduce((sum, part) => sum + part.size, 0);
-    const pendingNumbers = Array.from({ length: session.total_parts }, (_, index) => index + 1)
+    const pendingNumbers = Array.from({ length: session.total_parts ?? 1 }, (_, index) => index + 1)
       .filter((partNumber) => !completedParts.has(partNumber));
 
     for (let start = 0; start < pendingNumbers.length; start += 4) {
       const numbers = pendingNumbers.slice(start, start + 4);
       const pending = await Promise.all(numbers.map(async (partNumber): Promise<PendingPart> => {
-        const offset = (partNumber - 1) * session.part_size;
-        const bytes = fileBytes.slice(offset, Math.min(offset + session.part_size, file.size));
+        const offset = (partNumber - 1) * (session.part_size ?? 0);
+        const bytes = fileBytes.slice(offset, Math.min(offset + (session.part_size ?? 0), file.size));
         return {
           part_number: partNumber,
           bytes,
@@ -338,12 +380,12 @@ export default function Home() {
         setProgress(5 + Math.round((uploadedBytes / file.size) * 25));
         return result;
       }));
-      await retry(() => apiJson<S3UploadSession>(
+      await retry(() => apiJson<UploadSession>(
         `/v1/uploads/${session.upload_id}/parts`,
         jsonRequest("PUT", { parts: uploaded }),
       ));
     }
-    if (uploadedBytes !== file.size || completedParts.size !== session.total_parts) throw new Error("S3 upload is incomplete.");
+    if (uploadedBytes !== file.size || completedParts.size !== (session.total_parts ?? 0)) throw new Error("S3 upload is incomplete.");
     addLog("AWS", "Direct upload complete; import queued");
     setPhase("importing");
     const job = await apiJson<Job>(
