@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -9,6 +11,18 @@ from pathlib import Path
 from noir.domain.config import NoirConfig
 from noir.domain.models import DoctorReport, ToolCheck
 from noir.infrastructure.processes.runner import get_tool_version, run_tool
+
+
+def _parse_java_major_version(version_str: str) -> int | None:
+    match = re.search(r'version\s+"?(\d+)(?:\.(\d+))?', version_str, re.IGNORECASE)
+    if not match:
+        match = re.search(r"\b(?:openjdk|java)\s+(\d+)(?:\.(\d+))?", version_str, re.IGNORECASE)
+    if match:
+        major = int(match.group(1))
+        if major == 1 and match.group(2):
+            return int(match.group(2))
+        return major
+    return None
 
 
 def _check_python() -> ToolCheck:
@@ -32,7 +46,7 @@ def _check_java(config: NoirConfig) -> ToolCheck:
             name="Java",
             available=False,
             required_for="required_for_import",
-            message="Java not found. Install JDK 11+ (JDK 21 recommended).",
+            message="Java not found. Install JDK 17+ (JDK 21 recommended).",
         )
     result = run_tool([java, "-version"], timeout=10, tool_name="java")
     version = ""
@@ -40,6 +54,20 @@ def _check_java(config: NoirConfig) -> ToolCheck:
         if "version" in line.lower():
             version = line.strip()
             break
+    if not version and (result.stdout or result.stderr):
+        version = (result.stdout or result.stderr).splitlines()[0].strip()
+
+    major = _parse_java_major_version(version)
+    if major is not None and major < 17:
+        return ToolCheck(
+            name="Java",
+            available=False,
+            path=java_home,
+            version=version,
+            required_for="required_for_import",
+            message=f"JDK 17+ required (found Java {major}: {version})",
+        )
+
     return ToolCheck(
         name="Java",
         available=True,
@@ -96,7 +124,7 @@ def _check_apktool(config: NoirConfig) -> ToolCheck:
 def _check_sdk_tool(config: NoirConfig, tool_name: str, required_for: str) -> ToolCheck:
     tool_path = config.resolve_tool_path(tool_name)
     found = shutil.which(tool_path)
-    if not found and Path(tool_path).exists():
+    if not found and Path(tool_path).is_absolute() and Path(tool_path).exists():
         found = tool_path
 
     if not found:
@@ -139,7 +167,7 @@ def _check_keytool() -> ToolCheck:
 def _check_adb(config: NoirConfig) -> ToolCheck:
     adb_path = config.resolve_tool_path("adb")
     found = shutil.which(adb_path)
-    if not found and Path(adb_path).exists():
+    if not found and Path(adb_path).is_absolute() and Path(adb_path).exists():
         found = adb_path
     if not found:
         return ToolCheck(
@@ -284,6 +312,28 @@ def _check_data_dir(config: NoirConfig) -> ToolCheck:
         )
 
 
+def _check_xattr_support() -> ToolCheck:
+    """Check Apple metadata / filesystem extended attributes capability."""
+    has_py_xattr = hasattr(os, "listxattr")
+    cli_path = shutil.which("xattr")
+    available = has_py_xattr or bool(cli_path)
+    if available:
+        details = "os.listxattr" if has_py_xattr else f"xattr CLI ({cli_path})"
+        return ToolCheck(
+            name="xattr",
+            available=True,
+            path=cli_path or "builtin",
+            required_for="optional_for_environment",
+            message=f"Extended attributes (xattr) support active via {details}",
+        )
+    return ToolCheck(
+        name="xattr",
+        available=False,
+        required_for="optional_for_environment",
+        message="Neither os.listxattr nor xattr CLI found",
+    )
+
+
 def run_doctor(config: NoirConfig) -> DoctorReport:
     """Run all toolchain checks and produce a report."""
     checks: list[ToolCheck] = [
@@ -295,6 +345,7 @@ def run_doctor(config: NoirConfig) -> DoctorReport:
         _check_sdk_tool(config, "apksigner", "required_for_build"),
         _check_sdk_tool(config, "aapt2", "required_for_build"),
         _check_keytool(),
+        _check_xattr_support(),
         _check_cil_tool(config),
         _check_native_libraries(),
         _check_adb(config),
@@ -335,3 +386,32 @@ def run_doctor(config: NoirConfig) -> DoctorReport:
         device_capable=device_ok,
         summary=" | ".join(summary_parts),
     )
+
+
+class DoctorService:
+    """Service to evaluate toolchain status and capability truth."""
+
+    def __init__(self, config: NoirConfig | None = None) -> None:
+        from noir.domain.config import get_config
+
+        self.config = config or get_config()
+
+    def run_doctor(self) -> DoctorReport:
+        """Run all toolchain checks and produce a report."""
+        return run_doctor(self.config)
+
+    def check_capabilities(self) -> DoctorReport:
+        """Alias for capability inventory."""
+        return self.run_doctor()
+
+    def check_toolchain_for_build(self) -> tuple[bool, list[str]]:
+        """Verify toolchain is capable of building and signing APKs."""
+        report = self.run_doctor()
+        diagnostics: list[str] = []
+        for check in report.checks:
+            if not check.available and check.required_for in (
+                "required_for_import",
+                "required_for_build",
+            ):
+                diagnostics.append(f"{check.name}: {check.message}")
+        return report.build_capable, diagnostics

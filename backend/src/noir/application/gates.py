@@ -64,7 +64,13 @@ class PreflightGateEngine:
         elif re.search(
             r"\b(?:xposed|lsposed|module)\b",
             text,
-        ) or (analysis and any("anti_tamper" in ind.lower() for ind in getattr(analysis, "obfuscation_indicators", []))):
+        ) or (
+            analysis
+            and any(
+                "anti_tamper" in ind.lower()
+                for ind in getattr(analysis, "obfuscation_indicators", [])
+            )
+        ):
             form = DeliverableForm.MODULE
         else:
             form = DeliverableForm.REBUILT_APK
@@ -92,10 +98,7 @@ class PreflightGateEngine:
             )
 
         # Non-deterministic or advanced request requiring AI or specialized form
-        msg = (
-            f"Deliverable form classified as '{form.value}'. "
-            "Proceeding to AI planning pipeline."
-        )
+        msg = f"Deliverable form classified as '{form.value}'. Proceeding to AI planning pipeline."
         if form == DeliverableForm.REPORT:
             msg = (
                 f"Deliverable form classified as '{form.value}': Target behavior is "
@@ -124,9 +127,8 @@ class PreflightGateEngine:
 
         for check in report.checks:
             normalized_name = check.name.lower()
-            if normalized_name in critical_tools:
-                if not check.available:
-                    critical_missing.append(f"{check.name}: {check.message}")
+            if normalized_name in critical_tools and not check.available:
+                critical_missing.append(f"{check.name}: {check.message}")
             if not check.available and check.required_for in (
                 "required_for_import",
                 "required_for_build",
@@ -177,7 +179,7 @@ class PreflightGateEngine:
         # 1. Determine Owning Execution Layer
         layer = ExecutionLayer.DEX
         if analysis is not None:
-            runtimes = getattr(analysis, "runtimes", set())
+            runtimes: set[str] = set(getattr(analysis, "runtimes", set()))
             if "flutter" in runtimes:
                 layer = ExecutionLayer.FLUTTER_DART
             elif "il2cpp" in runtimes:
@@ -228,7 +230,10 @@ class PreflightGateEngine:
         dex_patch_attempt = bool(
             re.search(r"\b(?:smali|dex\s+patch|bytecode|hook\s+method|smali\s+edit)\b", text)
         )
-        if layer in (ExecutionLayer.FLUTTER_DART, ExecutionLayer.UNITY_IL2CPP) and dex_patch_attempt:
+        if (
+            layer in (ExecutionLayer.FLUTTER_DART, ExecutionLayer.UNITY_IL2CPP)
+            and dex_patch_attempt
+        ):
             diagnostic = (
                 f"Attempted DEX/Smali modification on an application whose core logic is "
                 f"compiled to {layer.value} binary. DEX patches cannot alter Dart AOT or "
@@ -380,11 +385,13 @@ class PreflightGateEngine:
         all_passed = all(r.passed for r in results)
         failed_gate = next((r for r in results if not r.passed), None)
 
-        summary = (
-            "All deterministic preflight gates passed (G1–G4)."
-            if all_passed
-            else f"Preflight gate check failed at {failed_gate.gate_id} ({failed_gate.name}): {failed_gate.message}"
-        )
+        if failed_gate is None:
+            summary = "All deterministic preflight gates passed (G1–G4)."
+        else:
+            summary = (
+                f"Preflight gate check failed at {failed_gate.gate_id} "
+                f"({failed_gate.name}): {failed_gate.message}"
+            )
 
         return PreflightReport(
             all_passed=all_passed,

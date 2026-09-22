@@ -849,9 +849,7 @@ class _FakeDirectStore:
         self.begun.append((user_id, project_id, sha256, size))
         return f"noir/users/{user_id}/projects/{project_id}/original/input.apk", "s3-id"
 
-    def presign_multipart_part(
-        self, *, key, upload_id, part_number, checksum_sha256
-    ):
+    def presign_multipart_part(self, *, key, upload_id, part_number, checksum_sha256):
         self.presigned.append((key, upload_id, part_number, checksum_sha256))
         return f"https://s3.example/part/{part_number}"
 

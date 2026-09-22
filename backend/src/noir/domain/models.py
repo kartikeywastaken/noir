@@ -51,6 +51,11 @@ class ProjectInfo(BaseModel):
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     dirty: bool = False
+    execution_profile: str = "full_decode"
+    supported_operations: list[str] = Field(default_factory=list)
+    compatibility_status: str = "unknown"
+    compatibility_reasons: list[str] = Field(default_factory=list)
+    payload_version: str | None = None
 
 
 # ── Analysis ─────────────────────────────────────────────────────────
@@ -66,6 +71,7 @@ class ComponentInfo(BaseModel):
     intent_filters: list[dict[str, Any]] = Field(default_factory=list)
     is_launcher: bool = False
     is_alias: bool = False
+    target_activity: str | None = None
 
 
 class SmaliClassInfo(BaseModel):
@@ -198,6 +204,10 @@ class ChangePlan(BaseModel):
     discovery_transcript: list[dict[str, Any]] = Field(default_factory=list)
     discovery_api_calls: int = 0
     discovery_stop_reason: str = ""
+    execution_mode: str = "ai"
+    detected_intents: list[str] = Field(default_factory=list)
+    patch_strategies: list[str] = Field(default_factory=list)
+    runtime_configuration: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_now)
 
     def compute_hash(self) -> str:
@@ -218,6 +228,7 @@ class PatchOperation(BaseModel):
     expected_absent: bool = False
     match_content: str | None = None
     new_content: str | None = None
+    new_content_base64: str | None = None
     class_descriptor: str | None = None
     method_signature: str | None = None
     anchor: str | None = None
@@ -256,6 +267,10 @@ class PatchSet(BaseModel):
     project_id: str
     workspace_revision: int
     provenance: Provenance = Provenance.AI_GENERATED
+    execution_mode: str = "ai"
+    detected_intents: list[str] = Field(default_factory=list)
+    patch_strategies: list[str] = Field(default_factory=list)
+    runtime_configuration: dict[str, Any] = Field(default_factory=dict)
     operations: list[PatchOperation] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
 
@@ -364,6 +379,9 @@ class BuildResult(BaseModel):
     apktool_version: str | None = None
     build_tools_version: str | None = None
     tool_logs: str = ""
+    attempt_number: int = 1
+    retryable: bool = False
+    failure_info: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_now)
 
 

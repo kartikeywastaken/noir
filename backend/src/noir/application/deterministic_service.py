@@ -12,7 +12,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from noir.domain.enums import PatchOperationType, Provenance
 from noir.domain.models import ChangePlan, PatchOperation, PatchSet, PlanFileChange
@@ -29,8 +29,11 @@ ET.register_namespace("android", ANDROID_NS)
 
 
 class DeterministicWorkspace(Protocol):
-    input_dir: Path
-    decoded_dir: Path
+    @property
+    def input_dir(self) -> Path: ...
+
+    @property
+    def decoded_dir(self) -> Path: ...
 
 
 @dataclass(frozen=True)
@@ -104,9 +107,7 @@ def parse_operation_spec(
         text,
     )
     if rename:
-        candidate = re.sub(
-            r"(?i)\s+and\s+preserve\b.*$", "", _clean(rename.group("value"))
-        ).strip()
+        candidate = re.sub(r"(?i)\s+and\s+preserve\b.*$", "", _clean(rename.group("value"))).strip()
         if 1 <= len(candidate) <= 80 and not candidate.lower().startswith(("http://", "https://")):
             app_name = candidate
 
@@ -330,9 +331,7 @@ def _runtime_dex() -> bytes:
 
 def _original_apk(workspace: DeterministicWorkspace) -> Path:
     candidates = [
-        path
-        for path in workspace.input_dir.iterdir()
-        if path.is_file() and not path.is_symlink()
+        path for path in workspace.input_dir.iterdir() if path.is_file() and not path.is_symlink()
     ]
     if len(candidates) != 1:
         raise ValueError("Exactly one preserved original APK is required")
@@ -349,9 +348,7 @@ def _existing_runtime_dex(workspace: DeterministicWorkspace, payload: bytes) -> 
                     continue
                 if data == payload:
                     return name
-                raise ValueError(
-                    "APK contains a conflicting or unsupported NOIR runtime payload"
-                )
+                raise ValueError("APK contains a conflicting or unsupported NOIR runtime payload")
     return None
 
 

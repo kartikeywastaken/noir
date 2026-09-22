@@ -226,16 +226,12 @@ class AnalysisService:
                     f"lib/{abi.abi}/{library}"
                 )
 
-        react_native_bundles = [
-            path for path in asset_paths if path.name == "index.android.bundle"
-        ]
+        react_native_bundles = [path for path in asset_paths if path.name == "index.android.bundle"]
         react_native_bundle_paths = [
             path.relative_to(decoded).as_posix() for path in react_native_bundles
         ]
         react_native_library_paths = [
-            path
-            for name in _REACT_NATIVE_LIBRARIES
-            for path in native_paths_by_name.get(name, [])
+            path for name in _REACT_NATIVE_LIBRARIES for path in native_paths_by_name.get(name, [])
         ]
         hermes_library_paths = [
             path

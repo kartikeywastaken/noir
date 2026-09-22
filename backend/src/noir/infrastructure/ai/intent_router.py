@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from noir.domain.models import AnalysisResult
 from noir.infrastructure.ai.context import AiContextTools
@@ -108,8 +109,14 @@ def _extract_manifest_info(context_tools: AiContextTools) -> dict[str, Any]:
             declared = set(re.findall(r"xmlns:([a-zA-Z0-9_-]+)\s*=", raw))
             fixed = raw
             for prefix in prefixes - declared:
-                uri = "http://schemas.android.com/apk/res/android" if prefix == "android" else f"urn:unknown:{prefix}"
-                fixed = re.sub(r"(<\s*[a-zA-Z0-9_:-]+)", f'\\1 xmlns:{prefix}="{uri}"', fixed, count=1)
+                uri = (
+                    "http://schemas.android.com/apk/res/android"
+                    if prefix == "android"
+                    else f"urn:unknown:{prefix}"
+                )
+                fixed = re.sub(
+                    r"(<\s*[a-zA-Z0-9_:-]+)", f'\\1 xmlns:{prefix}="{uri}"', fixed, count=1
+                )
             root = fromstring(fixed)
 
         pkg = root.get("package") or _get_xml_attr(root, "package") or ""
@@ -151,16 +158,16 @@ def _extract_manifest_info(context_tools: AiContextTools) -> dict[str, Any]:
                             info["launcher_activities"].append(name)
 
             for rec in app.findall("{*}receiver"):
-                name = _get_xml_attr(rec, "name")
-                if name and name not in info["receivers"]:
-                    info["receivers"].append(name)
+                receiver_name = _get_xml_attr(rec, "name")
+                if receiver_name and receiver_name not in info["receivers"]:
+                    info["receivers"].append(receiver_name)
 
             for srv in app.findall("{*}service"):
-                name = _get_xml_attr(srv, "name")
-                if name and name not in info["services"]:
-                    info["services"].append(name)
+                service_name = _get_xml_attr(srv, "name")
+                if service_name and service_name not in info["services"]:
+                    info["services"].append(service_name)
     except Exception:
-        pass
+        logger.debug("Manifest intent routing inspection failed", exc_info=True)
     return info
 
 
@@ -175,16 +182,24 @@ def _smali_sort_key(target_name: str | None, path: str) -> tuple[int, int, str]:
         simple_base = target_name.split(".")[-1].lower()
 
         # Exact full package match (non-inner) -> highest priority 0, 0
-        if (p_lower.endswith("/" + target_path) or p_lower == target_path or target_path in p_lower) and not is_inner:
+        if (
+            p_lower.endswith("/" + target_path) or p_lower == target_path or target_path in p_lower
+        ) and not is_inner:
             return (0, 0, p_lower)
         # Simple name match (non-inner) -> priority 0, 1
         if (p_lower.endswith("/" + simple) or p_lower == simple) and not is_inner:
             return (0, 1, p_lower)
         # Inner class of target activity -> priority 1
-        if (target_base in p_lower or f"/{simple_base}$" in p_lower or p_lower.startswith(f"{simple_base}$")) and is_inner:
+        if (
+            target_base in p_lower
+            or f"/{simple_base}$" in p_lower
+            or p_lower.startswith(f"{simple_base}$")
+        ) and is_inner:
             return (1, len(path), p_lower)
 
-    if (p_lower.endswith("/mainactivity.smali") or p_lower == "mainactivity.smali") and not is_inner:
+    if (
+        p_lower.endswith("/mainactivity.smali") or p_lower == "mainactivity.smali"
+    ) and not is_inner:
         return (2, 0, p_lower)
     if not is_inner:
         return (3, 0, p_lower)
@@ -205,10 +220,15 @@ def _find_launcher_smali(
         package_name = analysis.package_name or ""
         if analysis.components:
             # Prioritize non-alias launcher activities first
-            for component in sorted(analysis.components, key=lambda c: (c.is_alias, not c.is_launcher)):
-                if component.is_launcher and component.component_type == "activity":
-                    if component.name not in launcher_names:
-                        launcher_names.append(component.name)
+            for component in sorted(
+                analysis.components, key=lambda c: (c.is_alias, not c.is_launcher)
+            ):
+                if (
+                    component.is_launcher
+                    and component.component_type == "activity"
+                    and component.name not in launcher_names
+                ):
+                    launcher_names.append(component.name)
 
     # Fallback to AndroidManifest.xml if no launcher found from analysis
     manifest_info = _extract_manifest_info(context_tools)
@@ -233,7 +253,11 @@ def _find_launcher_smali(
         if l_name not in expanded_launcher_names:
             expanded_launcher_names.append(l_name)
 
-    primary_launcher = expanded_launcher_names[0] if expanded_launcher_names else (launcher_names[0] if launcher_names else None)
+    primary_launcher = (
+        expanded_launcher_names[0]
+        if expanded_launcher_names
+        else (launcher_names[0] if launcher_names else None)
+    )
 
     # 1. Match by launcher activity names
     for l_name in expanded_launcher_names:
@@ -248,12 +272,9 @@ def _find_launcher_smali(
                     or (("/" in l_frag) and l_frag in p_lower)
                 )
                 if (
-                    matches_frag
-                    or p_lower.endswith("/" + simple_name)
-                    or p_lower == simple_name
-                ):
-                    if p not in results:
-                        results.append(p)
+                    matches_frag or p_lower.endswith("/" + simple_name) or p_lower == simple_name
+                ) and p not in results:
+                    results.append(p)
         if analysis and analysis.smali_classes:
             for cls in analysis.smali_classes:
                 cls_lower = cls.file_path.lower()
@@ -273,30 +294,36 @@ def _find_launcher_smali(
     # 2. Match exact or path-ending MainActivity.smali
     for p in all_paths:
         p_lower = p.lower()
-        if p_lower.endswith("/mainactivity.smali") or p_lower == "mainactivity.smali":
-            if p not in results:
-                results.append(p)
+        if (
+            p_lower.endswith("/mainactivity.smali") or p_lower == "mainactivity.smali"
+        ) and p not in results:
+            results.append(p)
     if analysis and analysis.smali_classes:
         for cls in analysis.smali_classes:
             cls_lower = cls.file_path.lower()
-            if (cls_lower.endswith("/mainactivity.smali") or cls_lower == "mainactivity.smali") and cls.file_path not in results:
+            if (
+                cls_lower.endswith("/mainactivity.smali") or cls_lower == "mainactivity.smali"
+            ) and cls.file_path not in results:
                 results.append(cls.file_path)
 
     # 3. Known activity fallbacks
     for p in all_paths:
         p_lower = p.lower()
-        if p_lower.endswith(".smali") and any(
-            kw in p_lower
-            for kw in (
-                "mainactivity",
-                "baseactivity",
-                "homeactivity",
-                "splashactivity",
-                "launchactivity",
+        if (
+            p_lower.endswith(".smali")
+            and any(
+                kw in p_lower
+                for kw in (
+                    "mainactivity",
+                    "baseactivity",
+                    "homeactivity",
+                    "splashactivity",
+                    "launchactivity",
+                )
             )
+            and p not in results
         ):
-            if p not in results:
-                results.append(p)
+            results.append(p)
 
     # Sort results prioritizing primary outer classes over inner anonymous classes
     results.sort(key=lambda p: _smali_sort_key(primary_launcher, p))
@@ -329,9 +356,12 @@ def _find_network_smali(
 
     for p in all_paths:
         p_lower = p.lower()
-        if p_lower.endswith(".smali") and any(kw in p_lower for kw in keywords):
-            if p not in results:
-                results.append(p)
+        if (
+            p_lower.endswith(".smali")
+            and any(kw in p_lower for kw in keywords)
+            and p not in results
+        ):
+            results.append(p)
 
     if analysis and analysis.smali_classes:
         for cls in analysis.smali_classes:
@@ -340,11 +370,13 @@ def _find_network_smali(
                 results.append(cls.file_path)
 
     # Prioritize: 0. Application package smali, 1. Entry clients, 2. Other smali, 3. Inner classes
-    def _network_sort_key(p: str) -> tuple[int, int, str]:
+    def _network_sort_key(p: str) -> tuple[int, int, int, int, str]:
         p_lower = p.lower()
         is_inner = 1 if "$" in p else 0
         is_app = 0 if package_prefix and package_prefix in p_lower else 1
-        is_client = 0 if any(k in p_lower for k in ("client", "service", "retrofit", "httpurl")) else 1
+        is_client = (
+            0 if any(k in p_lower for k in ("client", "service", "retrofit", "httpurl")) else 1
+        )
         return (is_inner, is_app, is_client, len(p), p_lower)
 
     results.sort(key=_network_sort_key)
@@ -380,25 +412,34 @@ def _find_receiver_service_smali(
         simple = name.split(".")[-1].lower() + ".smali"
         for p in all_paths:
             p_lower = p.lower()
-            if p_lower.endswith(".smali") and (frag in p_lower or p_lower.endswith("/" + simple) or p_lower == simple):
+            if p_lower.endswith(".smali") and (
+                frag in p_lower or p_lower.endswith("/" + simple) or p_lower == simple
+            ):
                 manifest_matches.add(p)
                 if p not in results:
                     results.append(p)
         if analysis and analysis.smali_classes:
             for cls in analysis.smali_classes:
                 cls_lower = cls.file_path.lower()
-                if (frag in cls_lower or cls_lower.endswith("/" + simple) or cls_lower == simple) and cls.file_path not in results:
+                if (
+                    frag in cls_lower or cls_lower.endswith("/" + simple) or cls_lower == simple
+                ) and cls.file_path not in results:
                     manifest_matches.add(cls.file_path)
                     results.append(cls.file_path)
 
     for p in all_paths:
         p_lower = p.lower()
-        if p_lower.endswith(".smali") and ("receiver" in p_lower or "service" in p_lower):
-            if p not in results:
-                results.append(p)
+        if (
+            p_lower.endswith(".smali")
+            and ("receiver" in p_lower or "service" in p_lower)
+            and p not in results
+        ):
+            results.append(p)
 
     # Prioritize manifest-matched components over generic keyword matches, then outer classes over inner anonymous classes
-    results.sort(key=lambda p: (0 if p in manifest_matches else 1, 1 if "$" in p else 0, len(p), p.lower()))
+    results.sort(
+        key=lambda p: (0 if p in manifest_matches else 1, 1 if "$" in p else 0, len(p), p.lower())
+    )
     return results
 
 
@@ -415,13 +456,19 @@ def _select_app_name(context_tools: AiContextTools, analysis: AnalysisResult | N
     # Primary strings.xml
     if _path_exists(context_tools, all_set, "res/values/strings.xml"):
         candidates.append("res/values/strings.xml")
-    if _path_exists(context_tools, all_set, "resources/values/strings.xml") and "resources/values/strings.xml" not in candidates:
+    if (
+        _path_exists(context_tools, all_set, "resources/values/strings.xml")
+        and "resources/values/strings.xml" not in candidates
+    ):
         candidates.append("resources/values/strings.xml")
 
     # Additional res/values*/strings.xml and resources/values*/strings.xml
     other_strings: list[str] = []
     for p in all_paths:
-        if re.match(r"^(?:res|resources)/values[^/]*/strings\.xml$", p, re.IGNORECASE) and p not in candidates:
+        if (
+            re.match(r"^(?:res|resources)/values[^/]*/strings\.xml$", p, re.IGNORECASE)
+            and p not in candidates
+        ):
             other_strings.append(p)
 
     def _strings_sort_key(p: str) -> tuple[int, str]:
@@ -485,7 +532,11 @@ def _select_ui_layout(context_tools: AiContextTools, analysis: AnalysisResult | 
     all_set = set(all_paths)
     candidates: list[str] = []
 
-    layouts = [p for p in all_paths if re.match(r"^(?:res|resources)/layout[^/]*/.*\.xml$", p, re.IGNORECASE)]
+    layouts = [
+        p
+        for p in all_paths
+        if re.match(r"^(?:res|resources)/layout[^/]*/.*\.xml$", p, re.IGNORECASE)
+    ]
 
     def layout_sort_key(p: str) -> tuple[int, str]:
         p_lower = p.lower()
@@ -520,7 +571,10 @@ def _select_ui_layout(context_tools: AiContextTools, analysis: AnalysisResult | 
             candidates.append(p)
 
     for p in sorted(all_paths):
-        if re.match(r"^(?:res|resources)/values[^/]*/strings\.xml$", p, re.IGNORECASE) and p not in candidates:
+        if (
+            re.match(r"^(?:res|resources)/values[^/]*/strings\.xml$", p, re.IGNORECASE)
+            and p not in candidates
+        ):
             candidates.append(p)
 
     return candidates
@@ -562,13 +616,11 @@ def _select_react_native_js(
             or "index.android.bundle" in p_lower
             or p_lower.endswith("index.bundle")
             or p_lower.endswith("main.jsbundle")
-        ):
-            if p not in candidates:
-                candidates.append(p)
+        ) and p not in candidates:
+            candidates.append(p)
     for p in all_paths:
-        if "libhermes" in p.lower() and p.lower().endswith(".so"):
-            if p not in candidates:
-                candidates.append(p)
+        if "libhermes" in p.lower() and p.lower().endswith(".so") and p not in candidates:
+            candidates.append(p)
     if (
         _path_exists(context_tools, all_set, "AndroidManifest.xml")
         and "AndroidManifest.xml" not in candidates
@@ -583,17 +635,14 @@ def _select_flutter_dart(
     all_paths = _get_workspace_paths(context_tools)
     candidates: list[str] = []
     for p in all_paths:
-        if p.lower().endswith("libapp.so"):
-            if p not in candidates:
-                candidates.append(p)
+        if p.lower().endswith("libapp.so") and p not in candidates:
+            candidates.append(p)
     for p in all_paths:
-        if p.lower().endswith("libflutter.so"):
-            if p not in candidates:
-                candidates.append(p)
+        if p.lower().endswith("libflutter.so") and p not in candidates:
+            candidates.append(p)
     for p in all_paths:
-        if p.lower().startswith("assets/flutter_assets/"):
-            if p not in candidates:
-                candidates.append(p)
+        if p.lower().startswith("assets/flutter_assets/") and p not in candidates:
+            candidates.append(p)
     return candidates
 
 
@@ -601,28 +650,24 @@ def _select_unity_mono(context_tools: AiContextTools, analysis: AnalysisResult |
     all_paths = _get_workspace_paths(context_tools)
     candidates: list[str] = []
     for p in all_paths:
-        if p.lower().endswith("assembly-csharp.dll"):
-            if p not in candidates:
-                candidates.append(p)
+        if p.lower().endswith("assembly-csharp.dll") and p not in candidates:
+            candidates.append(p)
     if analysis and analysis.managed_assemblies:
         for p in analysis.managed_assemblies:
             if p not in candidates:
                 candidates.append(p)
     for p in all_paths:
-        if "assets/" in p.lower() and p.lower().endswith(".dll"):
-            if p not in candidates:
-                candidates.append(p)
+        if "assets/" in p.lower() and p.lower().endswith(".dll") and p not in candidates:
+            candidates.append(p)
     for p in all_paths:
         p_lower = p.lower()
         if (
             ("libmono" in p_lower or "libmonosgen" in p_lower)
             and "libmonodroid" not in p_lower
             and p_lower.endswith(".so")
-        ):
-            if p not in candidates:
-                candidates.append(p)
+        ) and p not in candidates:
+            candidates.append(p)
     return candidates
-
 
 
 def _select_unity_il2cpp(
@@ -631,13 +676,11 @@ def _select_unity_il2cpp(
     all_paths = _get_workspace_paths(context_tools)
     candidates: list[str] = []
     for p in all_paths:
-        if p.lower().endswith("libil2cpp.so"):
-            if p not in candidates:
-                candidates.append(p)
+        if p.lower().endswith("libil2cpp.so") and p not in candidates:
+            candidates.append(p)
     for p in all_paths:
-        if p.lower().endswith("global-metadata.dat"):
-            if p not in candidates:
-                candidates.append(p)
+        if p.lower().endswith("global-metadata.dat") and p not in candidates:
+            candidates.append(p)
     if analysis and analysis.il2cpp_metadata_files:
         for p in analysis.il2cpp_metadata_files:
             if p not in candidates:
@@ -655,9 +698,8 @@ def _select_native_elf(context_tools: AiContextTools, analysis: AnalysisResult |
                 if rel in all_paths and rel not in candidates:
                     candidates.append(rel)
     for p in all_paths:
-        if p.lower().startswith("lib/") and p.lower().endswith(".so"):
-            if p not in candidates:
-                candidates.append(p)
+        if p.lower().startswith("lib/") and p.lower().endswith(".so") and p not in candidates:
+            candidates.append(p)
     return candidates
 
 
@@ -670,17 +712,20 @@ def _select_xamarin_dotnet(
         p_lower = p.lower()
         if (
             (
-                "assemblies/" in p_lower
-                or p_lower.endswith("mono.android.dll")
-                or (analysis and analysis.managed_assemblies and p in analysis.managed_assemblies)
+                (
+                    "assemblies/" in p_lower
+                    or p_lower.endswith("mono.android.dll")
+                    or (
+                        analysis
+                        and analysis.managed_assemblies
+                        and p in analysis.managed_assemblies
+                    )
+                )
+                and p_lower.endswith(".dll")
             )
-            and p_lower.endswith(".dll")
-        ) or (
-            p_lower.endswith("libmonodroid.so")
-            or p_lower.endswith("libxamarin-app.so")
-        ):
-            if p not in candidates:
-                candidates.append(p)
+            or (p_lower.endswith("libmonodroid.so") or p_lower.endswith("libxamarin-app.so"))
+        ) and p not in candidates:
+            candidates.append(p)
     return candidates
 
 
@@ -748,7 +793,7 @@ def scan_directory_markers(context_tools: AiContextTools) -> set[str]:
             if (decoded / "lib").is_dir() and any((decoded / "lib").glob("*/*.so")):
                 detected.add("native")
     except Exception:
-        pass
+        logger.debug("Runtime directory marker scan failed", exc_info=True)
 
     return detected
 
@@ -948,7 +993,10 @@ INTENT_RULES: list[IntentRule] = [
                 r"\bxamarin\b.*?(?:\b(dll|assembly|mono|dotnet)\b|(?<!\w)\.net\b)",
                 re.IGNORECASE | re.DOTALL,
             ),
-            re.compile(r"\b(assemblies|assembly|mono\.android(?:\.dll)?|assemblies/\S+\.dll)\b", re.IGNORECASE),
+            re.compile(
+                r"\b(assemblies|assembly|mono\.android(?:\.dll)?|assemblies/\S+\.dll)\b",
+                re.IGNORECASE,
+            ),
         ],
         apk_types={"xamarin", "xamarin_dotnet", "dotnet"},
         file_selector=_select_xamarin_dotnet,
@@ -1063,15 +1111,12 @@ class IntentRouter:
             # Structured binary inspection if applicable
             try:
                 target = context_tools.workspace.safe_path(path)
-                if (
-                    target.suffix.lower() in {".dll", ".so"}
-                    or target.name == "global-metadata.dat"
-                ):
+                if target.suffix.lower() in {".dll", ".so"} or target.name == "global-metadata.dat":
                     inspection = context_tools._inspect_binary_path(path, user_request=user_request)
                     if inspection:
                         binary_inspections[path] = inspection
             except Exception:
-                pass
+                logger.debug("Structured inspection failed for %s", path, exc_info=True)
 
         return IntentRouteResult(
             matched_intents=matched_intents,
@@ -1079,4 +1124,3 @@ class IntentRouter:
             binary_inspections=binary_inspections,
             stop_reason="intent_matched",
         )
-

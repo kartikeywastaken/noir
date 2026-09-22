@@ -1,6 +1,5 @@
 """Adversarial unit tests for deterministic intent-based file routing subsystem."""
 
-import re
 import pytest
 
 from noir.domain.config import NoirConfig
@@ -8,7 +7,6 @@ from noir.domain.models import AnalysisResult, ComponentInfo
 from noir.infrastructure.ai.context import AiContextTools
 from noir.infrastructure.ai.intent_router import (
     IntentRouter,
-    detect_runtimes,
     scan_directory_markers,
 )
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace
@@ -16,9 +14,9 @@ from noir.infrastructure.filesystem.workspace import ProjectWorkspace
 
 @pytest.fixture
 def workspace(tmp_path):
+    from noir.domain.models import ProjectInfo
     from noir.infrastructure.database.engine import init_db
     from noir.infrastructure.database.repositories import ProjectRepository
-    from noir.domain.models import ProjectInfo
 
     config = NoirConfig(_env_file=None, data_dir=str(tmp_path), gemini_api_key="test-key")
     init_db(config.effective_database_url)
@@ -228,8 +226,12 @@ def test_ui_layout_preserves_strings_xml_when_many_layouts(workspace):
 
     values_dir = workspace.decoded_dir / "res/values"
     values_dir.mkdir(parents=True)
-    (values_dir / "strings.xml").write_text("<resources><string name='app_name'>App</string></resources>")
-    (values_dir / "colors.xml").write_text("<resources><color name='primary'>#fff</color></resources>")
+    (values_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>App</string></resources>"
+    )
+    (values_dir / "colors.xml").write_text(
+        "<resources><color name='primary'>#fff</color></resources>"
+    )
 
     analysis = AnalysisResult(project_id="test", runtimes={"dalvik"})
     tools = AiContextTools(workspace, analysis)
@@ -268,18 +270,24 @@ def test_composite_four_intents_fair_allocation(workspace):
     smali_dir.mkdir(parents=True, exist_ok=True)
     (smali_dir / "MainActivity.smali").write_text(".class public Lcom/example/MainActivity;")
     for i in range(1, 8):
-        (smali_dir / f"MainActivity${i}.smali").write_text(f".class public Lcom/example/MainActivity${i};")
+        (smali_dir / f"MainActivity${i}.smali").write_text(
+            f".class public Lcom/example/MainActivity${i};"
+        )
 
     # 4. network_ping files
     for i in range(8):
-        (smali_dir / f"NetworkClient{i}.smali").write_text(f".class public Lcom/example/NetworkClient{i};")
+        (smali_dir / f"NetworkClient{i}.smali").write_text(
+            f".class public Lcom/example/NetworkClient{i};"
+        )
 
     analysis = AnalysisResult(
         project_id="test",
         package_name="com.example",
         runtimes={"dalvik"},
         components=[
-            ComponentInfo(name="com.example.MainActivity", component_type="activity", is_launcher=True)
+            ComponentInfo(
+                name="com.example.MainActivity", component_type="activity", is_launcher=True
+            )
         ],
     )
     tools = AiContextTools(workspace, analysis)
@@ -324,15 +332,21 @@ def test_manifest_fallback_when_analysis_none_with_custom_namespace(workspace):
     # Create matching smali files
     ui_dir = workspace.decoded_dir / "smali/com/custom/app/ui"
     ui_dir.mkdir(parents=True, exist_ok=True)
-    (ui_dir / "RealEntryActivity.smali").write_text(".class public Lcom/custom/app/ui/RealEntryActivity;")
+    (ui_dir / "RealEntryActivity.smali").write_text(
+        ".class public Lcom/custom/app/ui/RealEntryActivity;"
+    )
 
     rec_dir = workspace.decoded_dir / "smali/com/custom/app/receivers"
     rec_dir.mkdir(parents=True, exist_ok=True)
-    (rec_dir / "AlarmTrigger.smali").write_text(".class public Lcom/custom/app/receivers/AlarmTrigger;")
+    (rec_dir / "AlarmTrigger.smali").write_text(
+        ".class public Lcom/custom/app/receivers/AlarmTrigger;"
+    )
 
     srv_dir = workspace.decoded_dir / "smali/com/custom/app/services"
     srv_dir.mkdir(parents=True, exist_ok=True)
-    (srv_dir / "BackgroundWorker.smali").write_text(".class public Lcom/custom/app/services/BackgroundWorker;")
+    (srv_dir / "BackgroundWorker.smali").write_text(
+        ".class public Lcom/custom/app/services/BackgroundWorker;"
+    )
 
     tools = AiContextTools(workspace)  # analysis is None
     router = IntentRouter()
@@ -371,7 +385,9 @@ def test_smali_full_package_prioritized_over_same_named_library(workspace):
         package_name="com.example.app",
         runtimes={"dalvik"},
         components=[
-            ComponentInfo(name="com.example.app.MainActivity", component_type="activity", is_launcher=True)
+            ComponentInfo(
+                name="com.example.app.MainActivity", component_type="activity", is_launcher=True
+            )
         ],
     )
     tools = AiContextTools(workspace, analysis)
@@ -467,15 +483,21 @@ def test_xml_namespaces_custom_prefixes_and_attributes(workspace):
 
     ui_dir = workspace.decoded_dir / "smali/com/custom/prefix/ui"
     ui_dir.mkdir(parents=True, exist_ok=True)
-    (ui_dir / "RealEntryActivity.smali").write_text(".class public Lcom/custom/prefix/ui/RealEntryActivity;")
+    (ui_dir / "RealEntryActivity.smali").write_text(
+        ".class public Lcom/custom/prefix/ui/RealEntryActivity;"
+    )
 
     rec_dir = workspace.decoded_dir / "smali/com/custom/prefix/receivers"
     rec_dir.mkdir(parents=True, exist_ok=True)
-    (rec_dir / "CustomReceiver.smali").write_text(".class public Lcom/custom/prefix/receivers/CustomReceiver;")
+    (rec_dir / "CustomReceiver.smali").write_text(
+        ".class public Lcom/custom/prefix/receivers/CustomReceiver;"
+    )
 
     srv_dir = workspace.decoded_dir / "smali/com/custom/prefix/services"
     srv_dir.mkdir(parents=True, exist_ok=True)
-    (srv_dir / "CustomService.smali").write_text(".class public Lcom/custom/prefix/services/CustomService;")
+    (srv_dir / "CustomService.smali").write_text(
+        ".class public Lcom/custom/prefix/services/CustomService;"
+    )
 
     tools = AiContextTools(workspace)
     router = IntentRouter()
@@ -508,7 +530,9 @@ def test_xml_default_namespace_handling_bug(workspace):
     (workspace.decoded_dir / "AndroidManifest.xml").write_text(manifest_default_ns)
     smali_dir = workspace.decoded_dir / "smali/com/defaultns/app"
     smali_dir.mkdir(parents=True, exist_ok=True)
-    (smali_dir / "EntryActivity.smali").write_text(".class public Lcom/defaultns/app/EntryActivity;")
+    (smali_dir / "EntryActivity.smali").write_text(
+        ".class public Lcom/defaultns/app/EntryActivity;"
+    )
     (smali_dir / "CustomAlarm.smali").write_text(".class public Lcom/defaultns/app/CustomAlarm;")
     (smali_dir / "SyncService.smali").write_text(".class public Lcom/defaultns/app/SyncService;")
 
@@ -531,11 +555,11 @@ def test_diverse_localized_resource_qualifiers(workspace):
 
     # Distinct complex qualifiers
     qualifiers = [
-        "b+sr+Latn",       # Serbian in Latin script
-        "zh-rCN",          # Chinese Simplified (China)
-        "b+es+419",        # Spanish (Latin America)
-        "night",           # Night mode
-        "night-v8",        # Night mode API 8
+        "b+sr+Latn",  # Serbian in Latin script
+        "zh-rCN",  # Chinese Simplified (China)
+        "b+es+419",  # Spanish (Latin America)
+        "night",  # Night mode
+        "night-v8",  # Night mode API 8
     ]
     for q in qualifiers:
         d = decoded / f"res/values-{q}"
@@ -564,7 +588,9 @@ def test_resources_values_strings_inverted_sort_bug(workspace):
     # Base strings in resources/values/
     res_base = decoded / "resources/values"
     res_base.mkdir(parents=True, exist_ok=True)
-    (res_base / "strings.xml").write_text("<resources><string name='app_name'>Base</string></resources>")
+    (res_base / "strings.xml").write_text(
+        "<resources><string name='app_name'>Base</string></resources>"
+    )
 
     # 8 localized qualifiers
     for lang in ("af", "ar", "bg", "ca", "cs", "da", "de", "el"):
@@ -587,15 +613,15 @@ def test_obfuscated_flattened_smali_classes_resolution(workspace):
     decoded = workspace.decoded_dir
     (decoded / "AndroidManifest.xml").write_text(
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.obf">\n'
-        '  <application>\n'
+        "  <application>\n"
         '    <activity android:name="a.b.c">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     smali_dir = decoded / "smali/a/b"
     smali_dir.mkdir(parents=True, exist_ok=True)
@@ -614,16 +640,16 @@ def test_multidex_smali_classes_directories_handling(workspace):
     decoded = workspace.decoded_dir
     (decoded / "AndroidManifest.xml").write_text(
         '<manifest package="com.multidex">\n'
-        '  <application>\n'
+        "  <application>\n"
         '    <activity android:name="com.multidex.ui.SplashActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
+        "      </intent-filter>\n"
+        "    </activity>\n"
         '    <service android:name="com.multidex.services.DataService" />\n'
-        '  </application>\n'
-        '</manifest>'
+        "  </application>\n"
+        "</manifest>"
     )
     # Launcher in smali_classes2
     dex2_dir = decoded / "smali_classes2/com/multidex/ui"
@@ -652,15 +678,17 @@ def test_receiver_service_priority_inversion_starvation_bug(workspace):
     decoded = workspace.decoded_dir
     (decoded / "AndroidManifest.xml").write_text(
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.mycompany.app">\n'
-        '  <application>\n'
+        "  <application>\n"
         '    <receiver android:name="com.mycompany.app.receivers.AppBroadcastReceiver" />\n'
-        '  </application>\n'
-        '</manifest>'
+        "  </application>\n"
+        "</manifest>"
     )
     # Real receiver with long package path
     app_dir = decoded / "smali/com/mycompany/app/receivers"
     app_dir.mkdir(parents=True, exist_ok=True)
-    (app_dir / "AppBroadcastReceiver.smali").write_text(".class public Lcom/mycompany/app/receivers/AppBroadcastReceiver;")
+    (app_dir / "AppBroadcastReceiver.smali").write_text(
+        ".class public Lcom/mycompany/app/receivers/AppBroadcastReceiver;"
+    )
 
     # 8 short SDK service classes
     sdk_dir = decoded / "smali/sdk"
@@ -701,15 +729,15 @@ def test_obfuscated_single_letter_relative_name_greedy_match_bug(workspace):
     decoded = workspace.decoded_dir
     (decoded / "AndroidManifest.xml").write_text(
         '<manifest package="com.mycompany.app">\n'
-        '  <application>\n'
+        "  <application>\n"
         '    <activity android:name=".a">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     # The real app class
     app_dir = decoded / "smali/com/mycompany/app"
@@ -780,20 +808,23 @@ def test_unity_mono_vs_il2cpp_metadata_discrimination(workspace):
 
 def test_unity_runtime_scoping_blocks_cross_runtime_intents(workspace):
     """Runtime scoping rejects Mono-specific intents on IL2CPP apps and IL2CPP intents on Mono apps."""
-    decoded = workspace.decoded_dir
     router = IntentRouter()
 
     # Mono app
     analysis_mono = AnalysisResult(project_id="test", runtimes={"mono"})
     tools_mono = AiContextTools(workspace, analysis_mono)
-    res_cross_il2cpp = router.route("patch libil2cpp.so binary and global-metadata.dat", tools_mono, analysis_mono)
+    res_cross_il2cpp = router.route(
+        "patch libil2cpp.so binary and global-metadata.dat", tools_mono, analysis_mono
+    )
     assert res_cross_il2cpp.matched_intents == []
     assert res_cross_il2cpp.stop_reason == "no_intent_matched"
 
     # IL2CPP app
     analysis_il2cpp = AnalysisResult(project_id="test", runtimes={"il2cpp"})
     tools_il2cpp = AiContextTools(workspace, analysis_il2cpp)
-    res_cross_mono = router.route("modify Assembly-CSharp.dll in assets", tools_il2cpp, analysis_il2cpp)
+    res_cross_mono = router.route(
+        "modify Assembly-CSharp.dll in assets", tools_il2cpp, analysis_il2cpp
+    )
     assert res_cross_mono.matched_intents == []
     assert res_cross_mono.stop_reason == "no_intent_matched"
 
@@ -930,11 +961,21 @@ def test_xamarin_dotnet_assemblies_resolution_and_scoping(workspace):
 
     # Scoping: Dalvik app rejects xamarin
     tools_dalvik = AiContextTools(workspace, AnalysisResult(project_id="test", runtimes={"dalvik"}))
-    assert router.route("modify xamarin .net assemblies", tools_dalvik, tools_dalvik.analysis).matched_intents == []
+    assert (
+        router.route(
+            "modify xamarin .net assemblies", tools_dalvik, tools_dalvik.analysis
+        ).matched_intents
+        == []
+    )
 
     # Scoping: Unity Mono app rejects xamarin
     tools_mono = AiContextTools(workspace, AnalysisResult(project_id="test", runtimes={"mono"}))
-    assert router.route("modify xamarin .net assemblies", tools_mono, tools_mono.analysis).matched_intents == []
+    assert (
+        router.route(
+            "modify xamarin .net assemblies", tools_mono, tools_mono.analysis
+        ).matched_intents
+        == []
+    )
 
 
 def test_xamarin_monodroid_marker_collision_with_unity_mono_defect(workspace):
@@ -1002,7 +1043,9 @@ def test_hybrid_flutter_and_native_cpp_plugin(workspace):
     (decoded / "assets/flutter_assets").mkdir(parents=True, exist_ok=True)
     (decoded / "assets/flutter_assets/kernel_blob.bin").write_bytes(b"DART")
     (decoded / "smali/com/example").mkdir(parents=True, exist_ok=True)
-    (decoded / "smali/com/example/MainActivity.smali").write_text(".class public Lcom/example/MainActivity;")
+    (decoded / "smali/com/example/MainActivity.smali").write_text(
+        ".class public Lcom/example/MainActivity;"
+    )
 
     analysis = AnalysisResult(project_id="test", runtimes={"flutter", "native", "dalvik"})
     tools = AiContextTools(workspace, analysis)
@@ -1030,18 +1073,22 @@ def test_hybrid_unity_with_java_wrappers(workspace):
         '<manifest package="com.unity.game">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.unity3d.player.UnityPlayerActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     (decoded / "res/values").mkdir(parents=True, exist_ok=True)
-    (decoded / "res/values/strings.xml").write_text("<resources><string name='app_name'>UnityGame</string></resources>")
+    (decoded / "res/values/strings.xml").write_text(
+        "<resources><string name='app_name'>UnityGame</string></resources>"
+    )
     (decoded / "smali/com/unity3d/player").mkdir(parents=True, exist_ok=True)
-    (decoded / "smali/com/unity3d/player/UnityPlayerActivity.smali").write_text(".class public Lcom/unity3d/player/UnityPlayerActivity;")
+    (decoded / "smali/com/unity3d/player/UnityPlayerActivity.smali").write_text(
+        ".class public Lcom/unity3d/player/UnityPlayerActivity;"
+    )
     (decoded / "lib/arm64-v8a").mkdir(parents=True, exist_ok=True)
     (decoded / "lib/arm64-v8a/libil2cpp.so").write_bytes(b"ELF_IL2CPP")
     (decoded / "assets/bin/Data/Managed/etc/metadata").mkdir(parents=True, exist_ok=True)
@@ -1052,7 +1099,11 @@ def test_hybrid_unity_with_java_wrappers(workspace):
         package_name="com.unity.game",
         runtimes={"il2cpp", "dalvik", "native"},
         components=[
-            ComponentInfo(name="com.unity3d.player.UnityPlayerActivity", component_type="activity", is_launcher=True)
+            ComponentInfo(
+                name="com.unity3d.player.UnityPlayerActivity",
+                component_type="activity",
+                is_launcher=True,
+            )
         ],
     )
     tools = AiContextTools(workspace, analysis)
@@ -1070,25 +1121,69 @@ def test_hybrid_unity_with_java_wrappers(workspace):
 
 def test_comprehensive_runtime_scoping_isolation_matrix(workspace):
     """Exhaustive check that each runtime-specific intent rejects non-matching runtimes."""
-    decoded = workspace.decoded_dir
     tools = AiContextTools(workspace)
     router = IntentRouter()
 
     # (intent_prompt, intent_id, allowed_runtime, disallowed_runtimes)
     matrix = [
-        ("show a toast on click", "toast_flash", "dalvik", ["native_only", "flutter", "react_native"]),
-        ("ping endpoint on launch", "network_ping", "dalvik", ["native_only", "flutter", "react_native"]),
-        ("change button text in layout", "ui_layout", "dalvik", ["native_only", "flutter", "react_native"]),
-        ("add broadcast receiver for boot", "receiver_service", "dalvik", ["native_only", "flutter", "react_native"]),
-        ("modify react native js bundle", "react_native_js", "react_native", ["dalvik", "flutter", "mono", "xamarin"]),
-        ("modify flutter dart code", "flutter_dart", "flutter", ["dalvik", "react_native", "mono", "xamarin"]),
-        ("modify unity c# script", "unity_mono", "mono", ["dalvik", "react_native", "flutter", "xamarin"]),
-        ("patch libil2cpp.so binary", "unity_il2cpp", "il2cpp", ["dalvik", "react_native", "flutter", "mono", "xamarin"]),
+        (
+            "show a toast on click",
+            "toast_flash",
+            "dalvik",
+            ["native_only", "flutter", "react_native"],
+        ),
+        (
+            "ping endpoint on launch",
+            "network_ping",
+            "dalvik",
+            ["native_only", "flutter", "react_native"],
+        ),
+        (
+            "change button text in layout",
+            "ui_layout",
+            "dalvik",
+            ["native_only", "flutter", "react_native"],
+        ),
+        (
+            "add broadcast receiver for boot",
+            "receiver_service",
+            "dalvik",
+            ["native_only", "flutter", "react_native"],
+        ),
+        (
+            "modify react native js bundle",
+            "react_native_js",
+            "react_native",
+            ["dalvik", "flutter", "mono", "xamarin"],
+        ),
+        (
+            "modify flutter dart code",
+            "flutter_dart",
+            "flutter",
+            ["dalvik", "react_native", "mono", "xamarin"],
+        ),
+        (
+            "modify unity c# script",
+            "unity_mono",
+            "mono",
+            ["dalvik", "react_native", "flutter", "xamarin"],
+        ),
+        (
+            "patch libil2cpp.so binary",
+            "unity_il2cpp",
+            "il2cpp",
+            ["dalvik", "react_native", "flutter", "mono", "xamarin"],
+        ),
         ("patch native .so library", "native_elf", "native", ["dalvik"]),
-        ("modify xamarin .net assemblies", "xamarin_dotnet", "xamarin", ["dalvik", "react_native", "flutter", "mono"]),
+        (
+            "modify xamarin .net assemblies",
+            "xamarin_dotnet",
+            "xamarin",
+            ["dalvik", "react_native", "flutter", "mono"],
+        ),
     ]
 
-    for prompt, intent_id, allowed, disallowed_list in matrix:
+    for prompt, intent_id, _allowed, disallowed_list in matrix:
         for disallowed in disallowed_list:
             analysis = AnalysisResult(project_id="test", runtimes={disallowed})
             res = router.route(prompt, tools, analysis)
@@ -1107,27 +1202,33 @@ def test_composite_three_concurrent_broad_intents(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.comp3">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.comp3.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>Comp3</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>Comp3</string></resources>"
+    )
     val_en = decoded / "res/values-en"
     val_en.mkdir(parents=True, exist_ok=True)
-    (val_en / "strings.xml").write_text("<resources><string name='app_name'>Comp3 EN</string></resources>")
+    (val_en / "strings.xml").write_text(
+        "<resources><string name='app_name'>Comp3 EN</string></resources>"
+    )
 
     smali_dir = decoded / "smali/com/comp3"
     smali_dir.mkdir(parents=True, exist_ok=True)
     (smali_dir / "MainActivity.smali").write_text(".class public Lcom/comp3/MainActivity;")
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_comp3", package_name="com.comp3", runtimes={"dalvik"})
+    analysis = AnalysisResult(
+        project_id="test_comp3", package_name="com.comp3", runtimes={"dalvik"}
+    )
     router = IntentRouter()
 
     req = "rename the app to NewComp, show toast on click, and grant camera permission"
@@ -1148,18 +1249,22 @@ def test_composite_four_concurrent_broad_intents(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.comp4">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.comp4.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>Comp4</string></resources>")
-    (val_dir / "colors.xml").write_text("<resources><color name='primary'>#ff0000</color></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>Comp4</string></resources>"
+    )
+    (val_dir / "colors.xml").write_text(
+        "<resources><color name='primary'>#ff0000</color></resources>"
+    )
 
     lay_dir = decoded / "res/layout"
     lay_dir.mkdir(parents=True, exist_ok=True)
@@ -1172,7 +1277,9 @@ def test_composite_four_concurrent_broad_intents(workspace):
     (smali_dir / "HttpClient.smali").write_text(".class public Lcom/comp4/HttpClient;")
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_comp4", package_name="com.comp4", runtimes={"dalvik"})
+    analysis = AnalysisResult(
+        project_id="test_comp4", package_name="com.comp4", runtimes={"dalvik"}
+    )
     router = IntentRouter()
 
     req = "rename application, show toast on button tap, send http request to server on startup, and modify screen layout"
@@ -1194,17 +1301,19 @@ def test_composite_five_concurrent_broad_intents(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.comp5">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.comp5.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>Comp5</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>Comp5</string></resources>"
+    )
     (val_dir / "colors.xml").write_text("<resources><color name='bg'>#00ff00</color></resources>")
 
     lay_dir = decoded / "res/layout"
@@ -1217,13 +1326,21 @@ def test_composite_five_concurrent_broad_intents(workspace):
     (smali_dir / "ApiService.smali").write_text(".class public Lcom/comp5/ApiService;")
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_comp5", package_name="com.comp5", runtimes={"dalvik"})
+    analysis = AnalysisResult(
+        project_id="test_comp5", package_name="com.comp5", runtimes={"dalvik"}
+    )
     router = IntentRouter()
 
     req = "rename app, show toast on button tap, send http post to server on start, change button text color, and grant camera permission"
     res = router.route(req, tools, analysis)
 
-    assert set(res.matched_intents) == {"app_name", "toast_flash", "network_ping", "ui_layout", "permission"}
+    assert set(res.matched_intents) == {
+        "app_name",
+        "toast_flash",
+        "network_ping",
+        "ui_layout",
+        "permission",
+    }
     assert len(res.seen_files) <= 20
     assert len(res.seen_files) == len(set(res.seen_files.keys()))
     assert "AndroidManifest.xml" in res.seen_files
@@ -1240,18 +1357,20 @@ def test_composite_six_concurrent_broad_intents_dalvik(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.comp6">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.comp6.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
+        "      </intent-filter>\n"
+        "    </activity>\n"
         '    <receiver android:name="com.comp6.BootReceiver"/>\n'
-        '  </application>\n'
-        '</manifest>'
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>Comp6</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>Comp6</string></resources>"
+    )
     (val_dir / "colors.xml").write_text("<resources><color name='c'>#123456</color></resources>")
 
     lay_dir = decoded / "res/layout"
@@ -1265,7 +1384,9 @@ def test_composite_six_concurrent_broad_intents_dalvik(workspace):
     (smali_dir / "BootReceiver.smali").write_text(".class public Lcom/comp6/BootReceiver;")
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_comp6", package_name="com.comp6", runtimes={"dalvik"})
+    analysis = AnalysisResult(
+        project_id="test_comp6", package_name="com.comp6", runtimes={"dalvik"}
+    )
     router = IntentRouter()
 
     req = (
@@ -1276,7 +1397,12 @@ def test_composite_six_concurrent_broad_intents_dalvik(workspace):
     res = router.route(req, tools, analysis)
 
     assert set(res.matched_intents) == {
-        "app_name", "toast_flash", "network_ping", "ui_layout", "permission", "receiver_service"
+        "app_name",
+        "toast_flash",
+        "network_ping",
+        "ui_layout",
+        "permission",
+        "receiver_service",
     }
     assert len(res.seen_files) <= 20
     assert len(res.seen_files) == len(set(res.seen_files.keys()))
@@ -1294,18 +1420,20 @@ def test_composite_seven_concurrent_broad_intents_multi_runtime(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.comp7">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.comp7.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
+        "      </intent-filter>\n"
+        "    </activity>\n"
         '    <service android:name="com.comp7.SyncService"/>\n'
-        '  </application>\n'
-        '</manifest>'
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>Comp7</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>Comp7</string></resources>"
+    )
     lay_dir = decoded / "res/layout"
     lay_dir.mkdir(parents=True, exist_ok=True)
     (lay_dir / "activity_main.xml").write_text("<LinearLayout/>")
@@ -1321,7 +1449,9 @@ def test_composite_seven_concurrent_broad_intents_multi_runtime(workspace):
     (lib_dir / "libcrypto_jni.so").write_bytes(b"ELF_CRYPTO")
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_comp7", package_name="com.comp7", runtimes={"dalvik", "native"})
+    analysis = AnalysisResult(
+        project_id="test_comp7", package_name="com.comp7", runtimes={"dalvik", "native"}
+    )
     router = IntentRouter()
 
     req = (
@@ -1331,7 +1461,13 @@ def test_composite_seven_concurrent_broad_intents_multi_runtime(workspace):
     res = router.route(req, tools, analysis)
 
     assert set(res.matched_intents) == {
-        "app_name", "toast_flash", "network_ping", "ui_layout", "permission", "receiver_service", "native_elf"
+        "app_name",
+        "toast_flash",
+        "network_ping",
+        "ui_layout",
+        "permission",
+        "receiver_service",
+        "native_elf",
     }
     assert len(res.seen_files) <= 20
     assert len(res.seen_files) == len(set(res.seen_files.keys()))
@@ -1346,17 +1482,19 @@ def test_deterministic_priority_ordering_across_permutations(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.det">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.det.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>Det</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>Det</string></resources>"
+    )
     smali_dir = decoded / "smali/com/det"
     smali_dir.mkdir(parents=True, exist_ok=True)
     (smali_dir / "MainActivity.smali").write_text(".class public Lcom/det/MainActivity;")
@@ -1380,8 +1518,12 @@ def test_deterministic_priority_ordering_across_permutations(workspace):
     base_file_order = list(results[0].seen_files.keys())
 
     for i, res in enumerate(results[1:], start=1):
-        assert res.matched_intents == base_intents, f"Permutation {i} matched intents order deviated: {res.matched_intents}"
-        assert list(res.seen_files.keys()) == base_file_order, f"Permutation {i} seen_files order deviated: {list(res.seen_files.keys())}"
+        assert res.matched_intents == base_intents, (
+            f"Permutation {i} matched intents order deviated: {res.matched_intents}"
+        )
+        assert list(res.seen_files.keys()) == base_file_order, (
+            f"Permutation {i} seen_files order deviated: {list(res.seen_files.keys())}"
+        )
 
 
 def test_boundary_cap_max_8_files_per_intent(workspace):
@@ -1408,17 +1550,19 @@ def test_boundary_cap_max_20_files_total(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.cap20">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.cap20.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>App</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>App</string></resources>"
+    )
     for i in range(10):
         d = decoded / f"res/values-l{i:02d}"
         d.mkdir(parents=True, exist_ok=True)
@@ -1433,16 +1577,24 @@ def test_boundary_cap_max_20_files_total(workspace):
     smali_dir.mkdir(parents=True, exist_ok=True)
     (smali_dir / "MainActivity.smali").write_text(".class public Lcom/cap20/MainActivity;")
     for i in range(1, 10):
-        (smali_dir / f"MainActivity${i}.smali").write_text(f".class public Lcom/cap20/MainActivity${i};")
+        (smali_dir / f"MainActivity${i}.smali").write_text(
+            f".class public Lcom/cap20/MainActivity${i};"
+        )
 
     for i in range(10):
-        (smali_dir / f"NetworkClient{i:02d}.smali").write_text(f".class public Lcom/cap20/NetworkClient{i:02d};")
+        (smali_dir / f"NetworkClient{i:02d}.smali").write_text(
+            f".class public Lcom/cap20/NetworkClient{i:02d};"
+        )
 
     for i in range(10):
-        (smali_dir / f"SyncService{i:02d}.smali").write_text(f".class public Lcom/cap20/SyncService{i:02d};")
+        (smali_dir / f"SyncService{i:02d}.smali").write_text(
+            f".class public Lcom/cap20/SyncService{i:02d};"
+        )
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_cap20", package_name="com.cap20", runtimes={"dalvik"})
+    analysis = AnalysisResult(
+        project_id="test_cap20", package_name="com.cap20", runtimes={"dalvik"}
+    )
     router = IntentRouter()
 
     req = (
@@ -1462,18 +1614,20 @@ def test_deduplication_zero_duplicates_across_overlapping_intents(workspace):
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.dedup">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.dedup.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
+        "      </intent-filter>\n"
+        "    </activity>\n"
         '    <receiver android:name="com.dedup.AlarmReceiver"/>\n'
-        '  </application>\n'
-        '</manifest>'
+        "  </application>\n"
+        "</manifest>"
     )
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>App</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>App</string></resources>"
+    )
 
     lay_dir = decoded / "res/layout"
     lay_dir.mkdir(parents=True, exist_ok=True)
@@ -1485,7 +1639,9 @@ def test_deduplication_zero_duplicates_across_overlapping_intents(workspace):
     (smali_dir / "AlarmReceiver.smali").write_text(".class public Lcom/dedup/AlarmReceiver;")
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_dedup", package_name="com.dedup", runtimes={"dalvik"})
+    analysis = AnalysisResult(
+        project_id="test_dedup", package_name="com.dedup", runtimes={"dalvik"}
+    )
     router = IntentRouter()
 
     req = "rename app, show toast on click, change layout button color, grant camera permission, and add receiver"
@@ -1523,19 +1679,20 @@ def test_empty_and_sparse_workspace_resilience(workspace):
 def test_massive_workspace_scaling_and_throughput(workspace):
     """Workspace with 600+ files executes under 0.5s for 7 concurrent intents."""
     import time
+
     decoded = workspace.decoded_dir
     (decoded / "AndroidManifest.xml").write_text(
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.massive">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.massive.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
+        "      </intent-filter>\n"
+        "    </activity>\n"
         '    <receiver android:name="com.massive.Receiver000"/>\n'
-        '  </application>\n'
-        '</manifest>'
+        "  </application>\n"
+        "</manifest>"
     )
     all_paths = ["AndroidManifest.xml"]
 
@@ -1556,7 +1713,9 @@ def test_massive_workspace_scaling_and_throughput(workspace):
     # 100 launcher smali inner classes
     (decoded / "smali/com/massive").mkdir(parents=True, exist_ok=True)
     all_paths.append("smali/com/massive/MainActivity.smali")
-    (decoded / "smali/com/massive/MainActivity.smali").write_text(".class public Lcom/massive/MainActivity;")
+    (decoded / "smali/com/massive/MainActivity.smali").write_text(
+        ".class public Lcom/massive/MainActivity;"
+    )
     for i in range(1, 101):
         p = f"smali/com/massive/MainActivity${i}.smali"
         all_paths.append(p)
@@ -1587,7 +1746,11 @@ def test_massive_workspace_scaling_and_throughput(workspace):
         project_id="massive",
         package_name="com.massive",
         runtimes={"dalvik", "native"},
-        components=[ComponentInfo(name="com.massive.MainActivity", component_type="activity", is_launcher=True)],
+        components=[
+            ComponentInfo(
+                name="com.massive.MainActivity", component_type="activity", is_launcher=True
+            )
+        ],
     )
     router = IntentRouter()
 
@@ -1614,18 +1777,20 @@ def test_round_robin_merge_does_not_starve_candidates_on_duplicate_rounds(worksp
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.starve">\n'
         '  <application android:label="@string/app_name">\n'
         '    <activity android:name="com.starve.MainActivity">\n'
-        '      <intent-filter>\n'
+        "      <intent-filter>\n"
         '        <action android:name="android.intent.action.MAIN"/>\n'
         '        <category android:name="android.intent.category.LAUNCHER"/>\n'
-        '      </intent-filter>\n'
-        '    </activity>\n'
-        '  </application>\n'
-        '</manifest>'
+        "      </intent-filter>\n"
+        "    </activity>\n"
+        "  </application>\n"
+        "</manifest>"
     )
     # strings: default + 2 translations (app_name candidates: manifest + strings + en + es = 4 files)
     val_dir = decoded / "res/values"
     val_dir.mkdir(parents=True, exist_ok=True)
-    (val_dir / "strings.xml").write_text("<resources><string name='app_name'>Starve</string></resources>")
+    (val_dir / "strings.xml").write_text(
+        "<resources><string name='app_name'>Starve</string></resources>"
+    )
     val_en = decoded / "res/values-en"
     val_en.mkdir(parents=True, exist_ok=True)
     (val_en / "strings.xml").write_text("<resources/>")
@@ -1640,7 +1805,9 @@ def test_round_robin_merge_does_not_starve_candidates_on_duplicate_rounds(worksp
         (lay_dir / f"layout_{i}.xml").write_text(f"<View id='{i}'/>")
 
     tools = AiContextTools(workspace)
-    analysis = AnalysisResult(project_id="test_starve", package_name="com.starve", runtimes={"dalvik"})
+    analysis = AnalysisResult(
+        project_id="test_starve", package_name="com.starve", runtimes={"dalvik"}
+    )
     router = IntentRouter()
 
     # Matches: app_name, ui_layout, permission
@@ -1651,6 +1818,12 @@ def test_round_robin_merge_does_not_starve_candidates_on_duplicate_rounds(worksp
 
     assert set(res.matched_intents) == {"app_name", "ui_layout", "permission"}
     # layout_5.xml, layout_6.xml, layout_7.xml MUST NOT be starved!
-    assert "res/layout/layout_5.xml" in res.seen_files, "layout_5.xml was starved by duplicate round termination bug"
-    assert "res/layout/layout_6.xml" in res.seen_files, "layout_6.xml was starved by duplicate round termination bug"
-    assert "res/layout/layout_7.xml" in res.seen_files, "layout_7.xml was starved by duplicate round termination bug"
+    assert "res/layout/layout_5.xml" in res.seen_files, (
+        "layout_5.xml was starved by duplicate round termination bug"
+    )
+    assert "res/layout/layout_6.xml" in res.seen_files, (
+        "layout_6.xml was starved by duplicate round termination bug"
+    )
+    assert "res/layout/layout_7.xml" in res.seen_files, (
+        "layout_7.xml was starved by duplicate round termination bug"
+    )

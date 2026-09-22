@@ -4,6 +4,8 @@ All slow work runs in persistent jobs. Preview generation grants no approval;
 the user's combined confirmation is bound to both exact hashes and the revision.
 """
 
+from typing import Any
+
 from noir.analysis.analyzer import AnalysisService
 from noir.application.access_service import AccessService
 from noir.application.ai_service import generate_patch, generate_plan
@@ -113,7 +115,157 @@ def prepare(config, job):
             model=payload.get("model"),
         )
         _checkpoint(job, "generating_patch", patch_id=patch.patch_id)
+
+        # Automated end-to-end execution (R5)
+        if payload.get("auto_build") or payload.get("auto_finish"):
+            return _execute_finish_steps(
+                config,
+                job,
+                project_id=project_id,
+                plan=plan,
+                patch=patch,
+                user_id=payload.get("user_id", "default"),
+            )
+
         return {"plan_id": plan.plan_id, "patch_id": patch.patch_id}
+
+
+def _execute_finish_steps(
+    config, job, *, project_id: str, plan, patch, user_id: str
+) -> dict[str, Any]:
+    """Execute patching, Apktool rebuild, signing, and verification."""
+    from pathlib import Path
+
+    from noir.infrastructure.android_tools.tools import verify_signature
+
+    AccessService().user(user_id)
+    _checkpoint(job, "applying_patch")
+    from noir.infrastructure.database.repositories import PatchRepository, PlanRepository
+
+    if not PlanRepository().get(plan.plan_id):
+        PlanService(config).create_plan(plan)
+    if not PatchRepository().get(patch.patch_id):
+        PatchService(config).store_patch(patch, preview=True)
+
+    PatchEngine(ProjectWorkspace(project_id, config)).generate_diff(patch)
+    actor = f"user:{user_id}:automated_flow"
+    PlanService(config).approve_plan(project_id, plan.plan_id, plan.compute_hash(), actor)
+    PatchService(config).approve_patch(project_id, patch.patch_id, patch.compute_hash(), actor)
+    result = PatchService(config).apply_patch(project_id, patch.patch_id)
+    if not result["validation"]["passed"]:
+        raise ValueError("Patched workspace failed validation. Inspect the audit; no APK signed")
+
+    _checkpoint(job, "rebuilding")
+    build = BuildService(config).build(project_id, job=job)
+    if not build.success:
+        raise ValueError(build.error_message or "APK rebuild failed")
+
+    _checkpoint(job, "signing", build_id=build.build_id)
+    if not build.signed_apk_hash:
+        profile = AccessService().ensure_personal_signer(config, user_id)
+        build = SigningService(config).sign(
+            project_id, build.build_id, profile.name, confirmed=True
+        )
+
+    _checkpoint(job, "verifying")
+    if not build or not build.signed_apk_path or not Path(build.signed_apk_path).is_file():
+        raise ValueError("Signed APK artifact not found; download blocked")
+    signed = Path(build.signed_apk_path)
+    if compute_file_hash(signed) != build.signed_apk_hash:
+        raise ValueError("Signed APK hash changed; download blocked")
+    verification = verify_signature(config, signed)
+    if not verification.get("verified"):
+        raise ValueError("Signed APK verification failed; download blocked")
+
+    _checkpoint(job, "reporting")
+    from noir.auditing.reporter import AuditReporter
+
+    AuditReporter(config).save_reports(project_id)
+    return {
+        "plan_id": plan.plan_id,
+        "patch_id": patch.patch_id,
+        "build_id": build.build_id,
+        "signed_apk_path": str(signed),
+        "signed_apk_hash": build.signed_apk_hash,
+    }
+
+
+def run_automated_workflow(
+    config,
+    project_id: str,
+    user_request: str,
+    *,
+    user_id: str = "default",
+    allow_ai_upload: bool = True,
+    model: str | None = None,
+    job=None,
+) -> dict[str, Any]:
+    """Execute end-to-end automated workflow from modification prompt to signed APK container."""
+    with project_lock(config, project_id):
+        project = ProjectRepository().get(project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+        require_clean_workspace(config, project_id)
+
+        # Prepare job representation if not provided
+        if job is None:
+            from noir.domain.models import JobInfo
+
+            job = JobRepository().create(
+                JobInfo(
+                    project_id=project_id,
+                    stage=WorkflowStage.ANALYZING,
+                    result_data={
+                        "operation": "workflow_automated",
+                        "payload": {
+                            "user_request": user_request,
+                            "allow_ai_upload": allow_ai_upload,
+                            "revision": project.workspace_revision,
+                            "user_id": user_id,
+                            "model": model,
+                            "auto_build": True,
+                        },
+                    },
+                )
+            )
+
+        _checkpoint(job, "analyzing")
+        analysis = AnalysisService(config).analyze(
+            project_id, ProjectWorkspace(project_id, config), persist=False
+        )
+
+        _checkpoint(job, "planning")
+        plan = generate_plan(
+            config,
+            project_id,
+            user_request,
+            allow_ai_upload,
+            analysis=analysis,
+            model=model,
+        )
+        if not plan.file_changes:
+            _checkpoint(job, "planning", plan_id=plan.plan_id, unsupported=True)
+            return {"plan_id": plan.plan_id, "unsupported": True}
+
+        _checkpoint(job, "generating_patch", plan_id=plan.plan_id)
+        patch = generate_patch(
+            config,
+            project_id,
+            plan.plan_id,
+            preview=True,
+            analysis=analysis,
+            model=model,
+        )
+        _checkpoint(job, "generating_patch", patch_id=patch.patch_id)
+
+        return _execute_finish_steps(
+            config,
+            job,
+            project_id=project_id,
+            plan=plan,
+            patch=patch,
+            user_id=user_id,
+        )
 
 
 def finish(config, job):
@@ -170,6 +322,8 @@ def finish(config, job):
 
         from noir.infrastructure.android_tools.tools import verify_signature
 
+        if not build or not build.signed_apk_path or not Path(build.signed_apk_path).is_file():
+            raise ValueError("Signed APK artifact not found; download blocked")
         signed = Path(build.signed_apk_path)
         if compute_file_hash(signed) != build.signed_apk_hash:
             raise ValueError("Signed APK hash changed; download blocked")

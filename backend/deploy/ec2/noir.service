@@ -15,6 +15,7 @@ Environment=HOME=/var/lib/noir
 Environment=PATH=/opt/noir/venv/bin:/opt/noir/android-sdk/build-tools/36.0.0:/usr/lib/jvm/java-21-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 LoadCredentialEncrypted=gemini-discovery-api-key:/etc/credstore.encrypted/noir-gemini-discovery-api-key
 LoadCredentialEncrypted=gemini-generation-api-key:/etc/credstore.encrypted/noir-gemini-generation-api-key
+LoadCredentialEncrypted=gemini-api-keys:/etc/credstore.encrypted/noir-gemini-api-keys
 LoadCredentialEncrypted=openrouter-api-key:/etc/credstore.encrypted/noir-openrouter-api-key
 LoadCredentialEncrypted=signing-password:/etc/credstore.encrypted/noir-signing-password
 LoadCredentialEncrypted=api-token:/etc/credstore.encrypted/noir-api-token

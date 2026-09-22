@@ -107,6 +107,31 @@ NOIR_DATA_DIR="$PWD/.local-test" noir demo --offline
 Do not mix data directories between commands: projects, tokens, and signing profiles are
 scoped to the selected directory.
 
+## Hybrid deterministic APK path
+
+App rename, launch redirect, startup message, and interaction-toast requests are parsed locally
+and use no AI quota. NOIR edits the decoded manifest, injects the verified runtime Dex from
+`runtime/dist/` into the next unused `classesN.dex`, and preserves every other original APK entry
+byte-for-byte except the old signature. The runtime uses a proxy launcher Activity and a private
+initialization provider; it does not replace the app's `Application` class.
+
+Rebuilds get at most two identical attempts from a pristine approved workspace. A failure does not
+rewrite the approved behavior, and the persisted error includes the compiler stage, file, line,
+column when available, and diagnostic. Apps with signature/integrity enforcement may still reject
+any third-party signature.
+
+Certify any future standalone APK locally before a demonstration:
+
+```bash
+.venv/bin/python scripts/certify_apk.py /absolute/path/to/app.apk
+.venv/bin/python scripts/certify_apk.py --matrix /absolute/path/to/app.apk
+```
+
+The matrix command builds, aligns, signs, and verifies all seven non-empty combinations of rename,
+redirect, and interaction toast. Set `ANDROID_SDK_ROOT` when the SDK is outside the default macOS
+location. Rebuild the reusable runtime after changing its Java sources with
+`bash runtime/build_runtime.sh`.
+
 ## AI workflow on an owned APK
 
 First add your key, run `noir ai check`, and create a persistent local signing profile:

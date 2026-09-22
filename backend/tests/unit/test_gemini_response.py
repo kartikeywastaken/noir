@@ -523,6 +523,19 @@ def test_manifest_update_still_requires_attributes(provider):
         )
 
 
+def test_manifest_add_requires_structured_attributes(provider):
+    with pytest.raises(GeminiProviderError, match="nonempty xml_attributes"):
+        provider._parse_patch_operation(
+            {
+                "relative_path": "AndroidManifest.xml",
+                "operation": "manifest_add",
+                "xml_element": "uses-permission",
+                "new_content": '<uses-permission android:name="android.permission.INTERNET"/>',
+            },
+            0,
+        )
+
+
 def test_repeatable_manifest_element_requires_unique_name(provider):
     with pytest.raises(GeminiProviderError, match="select one manifest element"):
         provider._parse_patch_operation(
@@ -600,6 +613,33 @@ def test_smali_insert_requires_complete_operation_metadata(provider, missing):
     operation.pop(missing)
     with pytest.raises(GeminiProviderError, match="requires|require"):
         provider._parse_patch_operation(operation, 0)
+
+
+def test_ai_cannot_create_a_standalone_smali_payload(provider):
+    with pytest.raises(GeminiProviderError, match="AI-generated Smali classes"):
+        provider._parse_patch_operation(
+            {
+                "relative_path": "smali/in/v0id/Generated.smali",
+                "operation": "create_file",
+                "new_content": ".class public Lin/v0id/Generated;",
+            },
+            0,
+        )
+
+
+def test_ai_smali_bridge_has_a_strict_size_limit(provider):
+    with pytest.raises(GeminiProviderError, match="4096-byte"):
+        provider._parse_patch_operation(
+            {
+                "relative_path": "smali/example/App.smali",
+                "operation": "smali_insert_at_anchor",
+                "class_descriptor": "Lexample/App;",
+                "method_signature": "onCreate()V",
+                "anchor": "invoke-super {p0}, Landroid/app/Activity;->onCreate()V",
+                "new_content": "#" * 4097,
+            },
+            0,
+        )
 
 
 def inject_sequence(monkeypatch, provider, responses):
@@ -838,9 +878,7 @@ def test_large_manifest_patch_retry_keeps_only_complete_operations(monkeypatch, 
         "match_content" in variant["required"] and "new_content" in variant["required"]
         for variant in item["oneOf"]
     )
-    assert all(
-        "expected_preimage_hash" not in variant["properties"] for variant in item["oneOf"]
-    )
+    assert all("expected_preimage_hash" not in variant["properties"] for variant in item["oneOf"])
     assert "shortest exact match_content" in calls[0]["contents"]
     assert len(complete.encode()) < 4000
     assert len(patch.operations) == 8

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ from noir.infrastructure.processes.runner import CANCEL_CHECK, OUTPUT_SINK
 TERMINAL = {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED, JobState.INTERRUPTED}
 _CANCEL_EVENTS: dict[str, threading.Event] = {}
 _CANCEL_EVENTS_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -109,8 +111,10 @@ class TaskQueue:
         stage = (
             WorkflowStage.VALIDATING_INPUT if operation == "import" else WorkflowStage.REBUILDING
         )
-        if operation == "workflow_prepare":
+        if operation in ("workflow_prepare", "workflow_automated"):
             stage = WorkflowStage.PLANNING
+        elif operation == "workflow_finish":
+            stage = WorkflowStage.APPLYING_PATCH
         job = JobInfo(
             project_id=project_id,
             stage=stage,
@@ -192,9 +196,7 @@ class TaskQueue:
                             raise ValueError(
                                 "Direct-upload object does not belong to this private project"
                             )
-                        scratch_root = (
-                            self.config.projects_dir.parent / "uploads" / "s3-imports"
-                        )
+                        scratch_root = self.config.projects_dir.parent / "uploads" / "s3-imports"
                         scratch_root.mkdir(mode=0o700, parents=True, exist_ok=True)
                         cleanup_path = scratch_root / f"{job.job_id}.apk"
                         cleanup_path.unlink(missing_ok=True)
@@ -218,9 +220,9 @@ class TaskQueue:
                         job=job,
                         input_sha256=payload.get("sha256"),
                         input_size=payload.get("size"),
-                        move_input=bool(durable_object_key)
-                        or payload.get("move_input", False),
+                        move_input=bool(durable_object_key) or payload.get("move_input", False),
                         durable_object_key=durable_object_key,
+                        user_request=payload.get("user_request"),
                     )
                 elif job.result_data["operation"] == "build":
                     from noir.application.build_service import BuildService
@@ -236,20 +238,54 @@ class TaskQueue:
                     )
                     if not result["success"]:
                         raise ValueError(result.get("error_message") or "APK rebuild failed")
-                elif job.result_data["operation"] in {"workflow_prepare", "workflow_finish"}:
-                    from noir.application.workflow_service import finish, prepare
-
-                    action = (
-                        prepare if job.result_data["operation"] == "workflow_prepare" else finish
+                elif job.result_data["operation"] in {
+                    "workflow_prepare",
+                    "workflow_finish",
+                    "workflow_automated",
+                }:
+                    from noir.application.workflow_service import (
+                        finish,
+                        prepare,
+                        run_automated_workflow,
                     )
-                    result = action(self.config, job)
+
+                    if job.result_data["operation"] == "workflow_prepare":
+                        result = prepare(self.config, job)
+                    elif job.result_data["operation"] == "workflow_automated":
+                        payload = job.result_data.get("payload", {})
+                        result = run_automated_workflow(
+                            self.config,
+                            job.project_id,
+                            payload.get("user_request", ""),
+                            user_id=payload.get("user_id", "default"),
+                            allow_ai_upload=payload.get("allow_ai_upload", True),
+                            model=payload.get("model"),
+                            job=job,
+                        )
+                    else:
+                        result = finish(self.config, job)
                 else:
                     raise ValueError("Unsupported queued operation")
             job.result_data["result"] = result
             job.state = JobState.SUCCEEDED
         except Exception as exc:
-            job.state = JobState.FAILED
+            if job.result_data.get("cancel_requested") or "cancelled" in str(exc).lower():
+                job.state = JobState.CANCELLED
+            else:
+                job.state = JobState.FAILED
             job.error_message = str(exc)
+            try:
+                EventRepository().create(
+                    AuditEvent(
+                        project_id=job.project_id,
+                        job_id=job.job_id,
+                        stage=job.stage,
+                        severity=EventSeverity.ERROR,
+                        message=f"Job failed in stage {job.stage.value}: {exc}",
+                    )
+                )
+            except Exception:
+                logger.exception("Could not persist the failure audit event for job %s", job.job_id)
         finally:
             job.finished_at = datetime.now(UTC)
             repo.update(job)

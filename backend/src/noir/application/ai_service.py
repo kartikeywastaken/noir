@@ -109,8 +109,9 @@ def _create_generation_provider(config, model: str | None = None):
     end-to-end flow is consistent with the user's selection.
     """
     if model and model.startswith("openrouter:"):
-        or_model = model[len("openrouter:"):]
+        or_model = model[len("openrouter:") :]
         from noir.infrastructure.ai.openrouter import OpenRouterGenerationProvider
+
         return OpenRouterGenerationProvider(model=or_model, config=config)
     if config.ai_provider == "adk":
         selected_config = config.model_copy(update={"ai_model": model}) if model else config
@@ -201,10 +202,7 @@ def _apply_strategy_metadata(plan, detected_intents: list[str]):
         strategies.append("existing_file")
     if plan.component_changes:
         strategies.append("manifest_component")
-    if any(
-        change.operation.value == "smali_insert_at_anchor"
-        for change in plan.file_changes
-    ):
+    if any(change.operation.value == "smali_insert_at_anchor" for change in plan.file_changes):
         strategies.append("minimal_smali_bridge")
     if len(strategies) > 1:
         strategies.append("hybrid")
@@ -233,6 +231,8 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         g3_result = gate_engine.evaluate_g3(request, analysis=analysis, workspace=workspace)
         g4_result = gate_engine.evaluate_g4(workspace=workspace)
 
+        if not g1_result.passed:
+            raise PlanServiceError(f"Preflight gate G1 failed: {g1_result.message}")
         # Gate 2 blocks toolchain defects before corrupting APK
         if not g2_result.passed:
             raise PlanServiceError(f"Preflight gate G2 failed: {g2_result.message}")
@@ -296,9 +296,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
                 context["detected_intents"] = route_result.matched_intents
                 detected_intents = route_result.matched_intents
             else:
-                logger.warning(
-                    "No intent matched for request; falling through to AI discovery"
-                )
+                logger.warning("No intent matched for request; falling through to AI discovery")
                 discovery_provider = _create_discovery_provider(config)
 
                 if discovery_provider is not None:

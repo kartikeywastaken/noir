@@ -527,9 +527,7 @@ class ResumableUploadService:
                     if not in_flight:
                         self._in_flight.pop(upload_id, None)
 
-    def complete(
-        self, *, upload_id: str, user_id: str, user_request: str | None = None
-    ):
+    def complete(self, *, upload_id: str, user_id: str, user_request: str | None = None):
         with _upload_lock(upload_id):
             session = self._load(upload_id, user_id)
             if session.job_id:
@@ -699,9 +697,9 @@ class S3MultipartUploadService:
                         # The S3 lifecycle rule is the final cleanup backstop.
                         continue
                 metadata.unlink(missing_ok=True)
-                self._idempotency_path(
-                    session.user_id, session.idempotency_key
-                ).unlink(missing_ok=True)
+                self._idempotency_path(session.user_id, session.idempotency_key).unlink(
+                    missing_ok=True
+                )
 
     @staticmethod
     def _valid_part_checksum(value: str) -> bool:
@@ -749,9 +747,7 @@ class S3MultipartUploadService:
 
         # Serialize only callers sharing this user-scoped idempotency key. This
         # prevents concurrent retries from creating orphaned multipart uploads.
-        idempotency_lock = hashlib.sha256(
-            f"{user_id}:{idempotency_key}".encode()
-        ).hexdigest()
+        idempotency_lock = hashlib.sha256(f"{user_id}:{idempotency_key}".encode()).hexdigest()
         with _upload_lock(f"s3-idem-{idempotency_lock}"):
             return self._begin_locked(
                 user_id=user_id,
@@ -926,9 +922,7 @@ class S3MultipartUploadService:
             self._save(session)
             return session
 
-    def complete(
-        self, *, upload_id: str, user_id: str, user_request: str | None = None
-    ):
+    def complete(self, *, upload_id: str, user_id: str, user_request: str | None = None):
         with _upload_lock(f"s3-{upload_id}"):
             session = self._load(upload_id, user_id)
             scoped_key = f"{user_id}:{session.idempotency_key}"

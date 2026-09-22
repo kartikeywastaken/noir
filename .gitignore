@@ -1,6 +1,7 @@
 backend/.venv/
 backend/.env
 backend/.local-test/
+backend/runtime/build/
 **/__pycache__/
 **/.pytest_cache/
 **/.ruff_cache/

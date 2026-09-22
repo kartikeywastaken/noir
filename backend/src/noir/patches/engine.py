@@ -7,6 +7,8 @@ Uses a transaction journal for crash-safe application.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import difflib
 import json
 import os
@@ -26,7 +28,7 @@ from noir.infrastructure.filesystem.workspace import (
     compute_file_hash,
     safe_resolve,
 )
-from noir.patches.smali_utils import sanitize_smali_content
+from noir.patches.smali_utils import SmaliBytecodeValidator, sanitize_smali_content
 from noir.security.xml import fromstring, parse
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
@@ -40,6 +42,8 @@ BINARY_OPERATIONS = {
     PatchOperationType.NATIVE_BYTE_PATCH,
     PatchOperationType.NATIVE_NOP_RANGE,
     PatchOperationType.NATIVE_BRANCH_REDIRECT,
+    PatchOperationType.DEX_STRING_PATCH,
+    PatchOperationType.DEX_BYTE_PATCH,
 }
 CIL_OPERATIONS = {
     PatchOperationType.CIL_REPLACE_METHOD_BODY,
@@ -55,6 +59,16 @@ NATIVE_OPERATIONS = {
     PatchOperationType.NATIVE_NOP_RANGE,
     PatchOperationType.NATIVE_BRANCH_REDIRECT,
 }
+DEX_OPERATIONS = {
+    PatchOperationType.DEX_STRING_PATCH,
+    PatchOperationType.DEX_BYTE_PATCH,
+}
+
+
+def _is_binary_operation(operation: PatchOperation) -> bool:
+    return operation.operation in BINARY_OPERATIONS or operation.new_content_base64 is not None
+
+
 XML_RESOURCE_OPERATIONS = {
     PatchOperationType.XML_RESOURCE_ADD,
     PatchOperationType.XML_RESOURCE_UPDATE,
@@ -105,6 +119,23 @@ class PatchEngine:
             if op.operation == PatchOperationType.CREATE_FILE:
                 if target.exists():
                     errors.append(f"{prefix}: File already exists")
+                elif op.new_content is not None and op.new_content_base64 is not None:
+                    errors.append(f"{prefix}: Text and binary content are mutually exclusive")
+                elif op.new_content_base64 is not None:
+                    try:
+                        payload = base64.b64decode(op.new_content_base64, validate=True)
+                        if not payload or len(payload) > 16 * 1024 * 1024:
+                            errors.append(f"{prefix}: Binary payload has an invalid size")
+                    except (binascii.Error, ValueError):
+                        errors.append(f"{prefix}: Binary payload is not valid base64")
+                elif op.relative_path.endswith(".smali") and op.new_content:
+                    validation = SmaliBytecodeValidator.validate(op.new_content)
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
+                            )
 
             elif op.operation == PatchOperationType.REPLACE_FILE:
                 if not target.exists():
@@ -117,6 +148,28 @@ class PatchEngine:
                             f"(expected {op.expected_preimage_hash[:16]}..., "
                             f"got {actual[:16]}...)"
                         )
+                if op.new_content is not None and op.new_content_base64 is not None:
+                    errors.append(f"{prefix}: Text and binary content are mutually exclusive")
+                elif op.new_content_base64 is not None:
+                    try:
+                        payload = base64.b64decode(op.new_content_base64, validate=True)
+                        if not payload or len(payload) > 16 * 1024 * 1024:
+                            errors.append(f"{prefix}: Binary payload has an invalid size")
+                    except (binascii.Error, ValueError):
+                        errors.append(f"{prefix}: Binary payload is not valid base64")
+                if op.relative_path.endswith(".smali") and op.new_content:
+                    validation = SmaliBytecodeValidator.validate(op.new_content)
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
+                            )
+                if op.relative_path == "AndroidManifest.xml" and op.new_content is not None:
+                    try:
+                        fromstring(op.new_content)
+                    except Exception as exc:
+                        errors.append(f"{prefix}: Invalid AndroidManifest.xml: {exc}")
 
             elif op.operation == PatchOperationType.REPLACE_BLOCK:
                 if not target.exists():
@@ -132,6 +185,27 @@ class PatchEngine:
                                 f"{prefix}: Match content is ambiguous "
                                 f"({count} occurrences found, expected exactly 1)"
                             )
+                        elif op.relative_path.endswith(".smali") and op.new_content:
+                            new_content_simulated = content.replace(
+                                op.match_content, op.new_content, 1
+                            )
+                            validation = SmaliBytecodeValidator.validate(new_content_simulated)
+                            if not validation.is_valid:
+                                for diag in validation.diagnostics:
+                                    errors.append(
+                                        f"{prefix}: Line {diag.line_number}: "
+                                        f"[{diag.error_code}] {diag.message}"
+                                    )
+                        elif op.relative_path == "AndroidManifest.xml":
+                            try:
+                                fromstring(
+                                    content.replace(op.match_content, op.new_content or "", 1)
+                                )
+                            except Exception as exc:
+                                errors.append(
+                                    f"{prefix}: Invalid AndroidManifest.xml after replacement: "
+                                    f"{exc}"
+                                )
                     except OSError as e:
                         errors.append(f"{prefix}: Cannot read file: {e}")
 
@@ -151,6 +225,11 @@ class PatchEngine:
                 manifest = self.decoded_dir / "AndroidManifest.xml"
                 if not manifest.exists():
                     errors.append(f"{prefix}: AndroidManifest.xml not found")
+                else:
+                    try:
+                        self._validate_manifest_operation(op, manifest)
+                    except PatchError as exc:
+                        errors.append(f"{prefix}: {exc}")
 
             elif op.operation in XML_RESOURCE_OPERATIONS:
                 try:
@@ -175,22 +254,48 @@ class PatchEngine:
                             errors.append(f"{prefix}: Method signature not found in file")
                     except OSError as e:
                         errors.append(f"{prefix}: Cannot read file: {e}")
+                if op.new_content:
+                    validation = SmaliBytecodeValidator.validate(
+                        op.new_content,
+                        context_method=op.method_signature,
+                        context_class=op.class_descriptor,
+                    )
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
+                            )
 
             elif op.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR:
+                target_content = None
                 if not op.anchor:
                     errors.append(f"{prefix}: Missing anchor for insertion")
                 elif not target.exists():
                     errors.append(f"{prefix}: Smali file does not exist")
                 else:
                     try:
-                        content = target.read_text(errors="replace")
-                        if op.anchor not in content:
+                        target_content = target.read_text(errors="replace")
+                        if op.anchor not in target_content:
                             errors.append(f"{prefix}: Anchor not found in file")
-                        count = content.count(op.anchor)
+                        count = target_content.count(op.anchor)
                         if count > 1:
                             errors.append(f"{prefix}: Anchor is ambiguous ({count} occurrences)")
                     except OSError as e:
                         errors.append(f"{prefix}: Cannot read file: {e}")
+                if op.new_content:
+                    validation = SmaliBytecodeValidator.validate(
+                        op.new_content,
+                        context_method=op.method_signature,
+                        context_class=op.class_descriptor,
+                        enclosing_file_content=target_content,
+                    )
+                    if not validation.is_valid:
+                        for diag in validation.diagnostics:
+                            errors.append(
+                                f"{prefix}: Line {diag.line_number}: "
+                                f"[{diag.error_code}] {diag.message}"
+                            )
 
             elif op.operation in CIL_OPERATIONS:
                 errors.extend(self._validate_cil_operation(op, target, prefix))
@@ -200,6 +305,9 @@ class PatchEngine:
 
             elif op.operation in NATIVE_OPERATIONS:
                 errors.extend(self._validate_native_operation(op, target, prefix))
+
+            elif op.operation in DEX_OPERATIONS:
+                errors.extend(self._validate_dex_operation(op, target, prefix))
 
         if check_multi_abi:
             errors.extend(self._validate_multi_abi(patch))
@@ -442,6 +550,88 @@ class PatchEngine:
             errors.append(f"{prefix}: {exc}")
         return errors
 
+    def _validate_dex_operation(self, op: PatchOperation, target: Path, prefix: str) -> list[str]:
+        from noir.infrastructure.dex.integrity import verify_dex_header
+        from noir.infrastructure.dex.patcher import validate_string_ordering
+        from noir.infrastructure.dex.reader import Dex
+
+        errors: list[str] = []
+        if not target.is_file():
+            errors.append(f"{prefix}: DEX target does not exist: {target}")
+            return errors
+        if target.is_symlink():
+            errors.append(f"{prefix}: DEX target cannot be a symlink")
+            return errors
+        if target.stat().st_size < 0x70:
+            errors.append(f"{prefix}: DEX target smaller than minimum header size (112 bytes)")
+            return errors
+
+        data = target.read_bytes()
+        valid_hdr, hdr_msg = verify_dex_header(data)
+        if not valid_hdr:
+            errors.append(f"{prefix}: Pre-flight DEX header verification failed: {hdr_msg}")
+
+        if op.expected_preimage_hash:
+            actual_hash = compute_content_hash(data)
+            if actual_hash != op.expected_preimage_hash:
+                errors.append(f"{prefix}: Preimage hash mismatch")
+
+        if op.operation == PatchOperationType.DEX_STRING_PATCH:
+            if not op.match_content or not op.new_content:
+                errors.append(
+                    f"{prefix}: DEX_STRING_PATCH requires both match_content and new_content"
+                )
+                return errors
+            ob = op.match_content.encode("utf-8")
+            nb = op.new_content.encode("utf-8")
+            if len(ob) != len(nb):
+                errors.append(
+                    f"{prefix}: DEX string patch byte length mismatch: "
+                    f"old={len(ob)} bytes, new={len(nb)} bytes (must be equal)"
+                )
+                return errors
+            dex = Dex(data)
+            entries = dex.read_all_strings()
+            target_idx = None
+            for i, (_off, raw) in enumerate(entries):
+                if raw == ob:
+                    target_idx = i
+                    break
+            if target_idx is None:
+                errors.append(
+                    f"{prefix}: Target string {op.match_content!r} not found in DEX string_ids table"
+                )
+                return errors
+            if data.count(ob) != 1:
+                errors.append(
+                    f"{prefix}: Target string {op.match_content!r} has {data.count(ob)} occurrences in DEX data (expected 1)"
+                )
+            ok, ord_err = validate_string_ordering(entries, target_idx, nb)
+            if not ok:
+                errors.append(f"{prefix}: {ord_err}")
+
+        elif op.operation == PatchOperationType.DEX_BYTE_PATCH:
+            if op.native_offset is None:
+                errors.append(f"{prefix}: DEX_BYTE_PATCH requires native_offset")
+                return errors
+            if not op.native_new_bytes_hex:
+                errors.append(f"{prefix}: DEX_BYTE_PATCH requires native_new_bytes_hex")
+                return errors
+            try:
+                new_bytes = bytes.fromhex(op.native_new_bytes_hex)
+            except ValueError:
+                errors.append(f"{prefix}: Invalid hex string for native_new_bytes_hex")
+                return errors
+            length = op.native_length or len(new_bytes)
+            if len(new_bytes) != length:
+                errors.append(
+                    f"{prefix}: native_new_bytes_hex length ({len(new_bytes)}) != native_length ({length})"
+                )
+            if op.native_offset + length > len(data):
+                errors.append(f"{prefix}: Patch range extends beyond DEX file size")
+
+        return errors
+
     def _validate_multi_abi(self, patch: PatchSet) -> list[str]:
         errors = []
         by_library: dict[str, list[PatchOperation]] = {}
@@ -515,12 +705,12 @@ class PatchEngine:
                         raise PatchValidationError("Only regular files can be patched")
                     if (
                         target.exists()
-                        and op.operation not in BINARY_OPERATIONS
+                        and not _is_binary_operation(op)
                         and target.stat().st_size > 1_000_000
                     ):
                         raise PatchValidationError("Only bounded text files can be patched")
                     original = target.read_bytes() if target.exists() else None
-                    if original is not None and op.operation not in BINARY_OPERATIONS:
+                    if original is not None and not _is_binary_operation(op):
                         original.decode("utf-8")
                     before[op.relative_path] = original
                     if original is not None:
@@ -544,7 +734,7 @@ class PatchEngine:
                     update={
                         "expected_preimage_hash": (
                             compute_file_hash(staged_target)
-                            if op.operation in BINARY_OPERATIONS and staged_target.exists()
+                            if _is_binary_operation(op) and staged_target.exists()
                             else None
                         ),
                         "expected_absent": False,
@@ -674,7 +864,7 @@ class PatchEngine:
             binary_paths = {
                 operation.relative_path
                 for operation in patch.operations
-                if operation.operation in BINARY_OPERATIONS
+                if _is_binary_operation(operation)
             }
             entries = []
             for index, (relative, original) in enumerate(before.items()):
@@ -734,10 +924,22 @@ class PatchEngine:
 
         if op.operation == PatchOperationType.CREATE_FILE:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(op.new_content or "")
+            if op.new_content_base64 is not None:
+                target.write_bytes(base64.b64decode(op.new_content_base64, validate=True))
+            else:
+                target.write_text(op.new_content or "")
             diff["action"] = "created"
+            if op.new_content_base64 is not None:
+                diff["after_hash"] = compute_file_hash(target)
 
         elif op.operation == PatchOperationType.REPLACE_FILE:
+            if op.new_content_base64 is not None:
+                old_hash = compute_file_hash(target) if target.exists() else ""
+                target.write_bytes(base64.b64decode(op.new_content_base64, validate=True))
+                diff["before_hash"] = old_hash
+                diff["after_hash"] = compute_file_hash(target)
+                diff["action"] = "replaced"
+                return diff
             old_content = target.read_text(errors="replace") if target.exists() else ""
             target.write_text(op.new_content or "")
             diff["action"] = "replaced"
@@ -786,6 +988,13 @@ class PatchEngine:
         elif op.operation in NATIVE_OPERATIONS:
             self._apply_native_operation(op, target)
             diff["action"] = op.operation.value
+
+        elif op.operation in DEX_OPERATIONS:
+            old_hash = compute_file_hash(target) if target.exists() else ""
+            self._apply_dex_operation(op, target)
+            diff["action"] = op.operation.value
+            diff["before_hash"] = old_hash
+            diff["after_hash"] = compute_file_hash(target)
 
         return diff
 
@@ -860,6 +1069,26 @@ class PatchEngine:
             apply_nop_range(target, offset, length, current, reference.abi)
         disassemble_range(target, offset, length, abi=reference.abi)
 
+    def _apply_dex_operation(self, op: PatchOperation, target: Path) -> None:
+        from noir.infrastructure.dex.patcher import patch_dex_bytes, patch_dex_string_in_place
+
+        data = target.read_bytes()
+        if op.operation == PatchOperationType.DEX_STRING_PATCH:
+            if not op.match_content or not op.new_content:
+                raise PatchError("DEX_STRING_PATCH requires match_content and new_content")
+            patched = patch_dex_string_in_place(data, op.match_content, op.new_content)
+        elif op.operation == PatchOperationType.DEX_BYTE_PATCH:
+            if op.native_offset is None or not op.native_new_bytes_hex:
+                raise PatchError("DEX_BYTE_PATCH requires native_offset and native_new_bytes_hex")
+            new_bytes = bytes.fromhex(op.native_new_bytes_hex)
+            length = op.native_length or len(new_bytes)
+            old_bytes = data[op.native_offset : op.native_offset + length]
+            patched = patch_dex_bytes(data, op.native_offset, old_bytes, new_bytes)
+        else:
+            raise PatchError(f"Unsupported DEX operation: {op.operation}")
+
+        self._atomic_write(target, patched)
+
     def _apply_manifest_operation(self, op: PatchOperation) -> None:
         """Apply a manifest XML operation."""
         manifest_path = self.decoded_dir / "AndroidManifest.xml"
@@ -868,32 +1097,10 @@ class PatchEngine:
         root = tree.getroot()
 
         if op.operation == PatchOperationType.MANIFEST_ADD:
-            if op.xml_element and op.new_content:
-                # Parse the new element
-                new_elem = fromstring(op.new_content)
-                # Find the parent
-                parent = (
-                    root.find("application")
-                    if "activity" in op.xml_element
-                    or "service" in op.xml_element
-                    or "receiver" in op.xml_element
-                    or "provider" in op.xml_element
-                    else root
-                )
-                if parent is not None:
-                    # Check for duplicate
-                    name_attr = f"{{{ANDROID_NS}}}name"
-                    existing = [
-                        e
-                        for e in parent
-                        if e.tag == new_elem.tag and e.get(name_attr) == new_elem.get(name_attr)
-                    ]
-                    if existing:
-                        raise PatchError(
-                            f"Duplicate element: {op.xml_element} with name "
-                            f"'{new_elem.get(name_attr)}'"
-                        )
-                    parent.append(new_elem)
+            new_elem = self._manifest_add_element(op)
+            parent = self._manifest_add_parent(root, op.xml_element or "")
+            self._reject_duplicate_manifest_element(parent, new_elem, op.xml_element or "")
+            parent.append(new_elem)
 
         elif op.operation == PatchOperationType.MANIFEST_UPDATE:
             if op.xml_element and op.xml_attributes:
@@ -912,25 +1119,103 @@ class PatchEngine:
         elif op.operation == PatchOperationType.MANIFEST_REMOVE and op.xml_element:
             target_elem = self._find_manifest_element(root, op)
             if target_elem is not None:
-                parent = next((p for p in root.iter() if target_elem in list(p)), None)
-                if parent is None:
+                removal_parent: ET.Element | None = next(
+                    (p for p in root.iter() if target_elem in list(p)), None
+                )
+                if removal_parent is None:
                     raise PatchError("Cannot remove manifest root")
-                parent.remove(target_elem)
+                removal_parent.remove(target_elem)
 
         tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
+
+    @staticmethod
+    def _expanded_manifest_attribute(name: str) -> str:
+        if name.startswith("android:"):
+            return f"{{{ANDROID_NS}}}{name.split(':', 1)[1]}"
+        return name
+
+    def _manifest_add_element(self, op: PatchOperation) -> ET.Element:
+        if not op.xml_element or not re.fullmatch(r"[A-Za-z0-9_.-]+", op.xml_element):
+            raise PatchValidationError("manifest_add requires a simple xml_element")
+        if op.new_content and op.xml_attributes:
+            raise PatchValidationError(
+                "manifest_add accepts either new_content or xml_attributes, not both"
+            )
+        if op.xml_attributes:
+            element = ET.Element(op.xml_element)
+            for name, value in op.xml_attributes.items():
+                element.set(self._expanded_manifest_attribute(name), value)
+            return element
+        if not op.new_content:
+            raise PatchValidationError(
+                "manifest_add requires new_content or nonempty xml_attributes"
+            )
+        try:
+            wrapper = fromstring(
+                f'<noir-fragment xmlns:android="{ANDROID_NS}">{op.new_content}</noir-fragment>'
+            )
+        except Exception as exc:
+            raise PatchValidationError(f"Invalid manifest element: {exc}") from exc
+        children = list(wrapper)
+        if len(children) != 1 or wrapper.text and wrapper.text.strip():
+            raise PatchValidationError("manifest_add requires exactly one XML element")
+        parsed_element: ET.Element = children[0]
+        if parsed_element.tail and parsed_element.tail.strip():
+            raise PatchValidationError("manifest_add contains unexpected trailing content")
+        parsed_element.tail = None
+        if parsed_element.tag != op.xml_element:
+            raise PatchValidationError(
+                f"manifest_add xml_element {op.xml_element!r} does not match fragment tag "
+                f"{parsed_element.tag!r}"
+            )
+        return parsed_element
+
+    @staticmethod
+    def _manifest_add_parent(root: ET.Element, element: str) -> ET.Element:
+        component_tags = {"activity", "activity-alias", "service", "receiver", "provider"}
+        if element not in component_tags:
+            return root
+        parent = root.find("application")
+        if parent is None:
+            raise PatchValidationError("Android manifest has no application element")
+        return parent
+
+    @staticmethod
+    def _reject_duplicate_manifest_element(
+        parent: ET.Element, element: ET.Element, element_name: str
+    ) -> None:
+        name_attr = f"{{{ANDROID_NS}}}name"
+        target_name = element.get(name_attr)
+        existing = [
+            item
+            for item in parent
+            if item.tag == element.tag
+            and (target_name is None or item.get(name_attr) == target_name)
+        ]
+        if existing:
+            raise PatchValidationError(
+                f"Duplicate element: {element_name} with name {target_name!r}"
+            )
+
+    def _validate_manifest_operation(self, op: PatchOperation, manifest: Path) -> None:
+        root = parse(manifest).getroot()
+        if op.operation == PatchOperationType.MANIFEST_ADD:
+            element = self._manifest_add_element(op)
+            parent = self._manifest_add_parent(root, op.xml_element or "")
+            self._reject_duplicate_manifest_element(parent, element, op.xml_element or "")
+        elif op.operation in (
+            PatchOperationType.MANIFEST_UPDATE,
+            PatchOperationType.MANIFEST_REMOVE,
+        ):
+            self._find_manifest_element(root, op)
 
     def _find_manifest_element(self, root: ET.Element, op: PatchOperation) -> ET.Element | None:
         """Find a manifest element by type and name."""
         name_attr = f"{{{ANDROID_NS}}}name"
         target_name = op.xml_attributes.get("android:name", "") or op.xml_attributes.get("name", "")
 
-        def expanded_attribute(name: str) -> str:
-            if name.startswith("android:"):
-                return f"{{{ANDROID_NS}}}{name.split(':', 1)[1]}"
-            return name
-
         selectors = {
-            expanded_attribute(name): value
+            self._expanded_manifest_attribute(name): value
             for name, value in op.xml_match_attributes.items()
         }
         if target_name and name_attr not in selectors and "name" not in selectors:
@@ -1126,9 +1411,7 @@ class PatchEngine:
             raise PatchValidationError("Resource selector could not be bound to exact source text")
         if op.operation == PatchOperationType.XML_RESOURCE_ADD:
             if candidates:
-                raise PatchValidationError(
-                    f"Resource selector {tag}[name={name!r}] already exists"
-                )
+                raise PatchValidationError(f"Resource selector {tag}[name={name!r}] already exists")
         elif len(candidates) != 1:
             raise PatchValidationError(
                 f"Resource selector {tag}[name={name!r}] matched {len(candidates)} elements; "
@@ -1186,7 +1469,7 @@ class PatchEngine:
             for relative, original in before.items():
                 target = safe_resolve(stage, relative)
                 related = [op for op in patch.operations if op.relative_path == relative]
-                if any(op.operation in BINARY_OPERATIONS for op in related):
+                if any(_is_binary_operation(op) for op in related):
                     updated_bytes = target.read_bytes() if target.exists() else b""
                     result.append(
                         {

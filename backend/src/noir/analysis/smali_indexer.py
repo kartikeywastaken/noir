@@ -13,14 +13,27 @@ METHOD_PATTERN = re.compile(r"^\.method\s+.*\s+(\S+\(.*\)\S+)")
 END_METHOD_PATTERN = re.compile(r"^\.end method")
 
 
+def _smali_dir_key(name: str) -> tuple[int, int]:
+    """Sort key for smali directories: smali (1), smali_classes2 (2), ..., smali_classes10 (10)."""
+    if name == "smali":
+        return (1, 0)
+    m = re.match(r"^smali_classes(\d+)$", name)
+    if m:
+        return (int(m.group(1)), 0)
+    return (999999, hash(name))
+
+
 def scan_smali_directories(decoded_dir: Path) -> list[str]:
-    """Find all smali directories (smali, smali_classes2, etc.)."""
+    """Find all smali directories (smali, smali_classes2, etc.) in natural DEX order."""
     dirs: list[str] = []
     if not decoded_dir.exists():
         return dirs
-    for child in sorted(decoded_dir.iterdir()):
-        if child.is_dir() and child.name.startswith("smali"):
+    for child in decoded_dir.iterdir():
+        if child.is_dir() and (
+            child.name == "smali" or re.match(r"^smali_classes\d+$", child.name)
+        ):
             dirs.append(child.name)
+    dirs.sort(key=_smali_dir_key)
     return dirs
 
 

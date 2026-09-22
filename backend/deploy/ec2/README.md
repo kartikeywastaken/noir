@@ -126,6 +126,8 @@ deployment preserves the laptop's effective Gemini model and context limits.
 The discovery and generation keys are encrypted separately in
 `/etc/credstore.encrypted/noir-gemini-discovery-api-key` and
 `/etc/credstore.encrypted/noir-gemini-generation-api-key`.
+The round-robin generation pool is encrypted as
+`/etc/credstore.encrypted/noir-gemini-api-keys`; the value is a comma-separated list.
 The OpenRouter discovery key is encrypted at
 `/etc/credstore.encrypted/noir-openrouter-api-key`; it must never be placed in
 `backend.env` or committed to Git.
@@ -158,6 +160,11 @@ if [ -n "$NOIR_NEW_GEMINI_DISCOVERY_KEY" ] && [ -n "$NOIR_NEW_GEMINI_GENERATION_
 fi
 unset NOIR_NEW_GEMINI_DISCOVERY_KEY NOIR_NEW_GEMINI_GENERATION_KEY
 ```
+
+When changing the round-robin pool, encrypt the full comma-separated value under the
+credential name `gemini-api-keys`, atomically replace
+`/etc/credstore.encrypted/noir-gemini-api-keys`, and restart NOIR only after the new file exists.
+The upgrade script checks this credential before stopping the running service.
 
 To replace the OpenRouter key, use this in the Ubuntu SSH shell while no AI request is
 active. The prompt does not echo the key or place it in shell history:

@@ -600,6 +600,7 @@ def build_discovered_context(
         files_added += 1
     except (FileNotFoundError, OSError, ValueError, WorkspaceError):
         import logging as _logging
+
         _logging.getLogger(__name__).warning(
             "build_discovered_context: AndroidManifest.xml could not be loaded"
         )

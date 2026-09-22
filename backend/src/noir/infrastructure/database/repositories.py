@@ -63,6 +63,13 @@ class ProjectRepository:
                 authorization_timestamp=project.authorization_timestamp,
                 workspace_revision=project.workspace_revision,
                 dirty=project.dirty,
+                capability_info={
+                    "execution_profile": project.execution_profile,
+                    "supported_operations": project.supported_operations,
+                    "compatibility_status": project.compatibility_status,
+                    "compatibility_reasons": project.compatibility_reasons,
+                    "payload_version": project.payload_version,
+                },
                 created_at=project.created_at,
                 updated_at=project.updated_at,
             )
@@ -95,6 +102,13 @@ class ProjectRepository:
             row.authorization_timestamp = project.authorization_timestamp
             row.workspace_revision = project.workspace_revision
             row.dirty = project.dirty
+            row.capability_info = {
+                "execution_profile": project.execution_profile,
+                "supported_operations": project.supported_operations,
+                "compatibility_status": project.compatibility_status,
+                "compatibility_reasons": project.compatibility_reasons,
+                "payload_version": project.payload_version,
+            }
             row.updated_at = datetime.now(UTC)
             session.commit()
 
@@ -111,6 +125,7 @@ class ProjectRepository:
     def _to_model(self, row: ProjectRow) -> ProjectInfo:
         from noir.domain.enums import ProjectStatus
 
+        capabilities = row.capability_info or {}
         return ProjectInfo(
             id=row.id,
             status=ProjectStatus(row.status),
@@ -124,6 +139,11 @@ class ProjectRepository:
             authorization_timestamp=row.authorization_timestamp,
             workspace_revision=row.workspace_revision or 0,
             dirty=row.dirty or False,
+            execution_profile=capabilities.get("execution_profile", "full_decode"),
+            supported_operations=capabilities.get("supported_operations", []),
+            compatibility_status=capabilities.get("compatibility_status", "unknown"),
+            compatibility_reasons=capabilities.get("compatibility_reasons", []),
+            payload_version=capabilities.get("payload_version"),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -589,6 +609,9 @@ class BuildRepository:
                 signed_apk_path=build.signed_apk_path,
                 signed_apk_hash=build.signed_apk_hash,
                 success=build.success,
+                attempt_number=build.attempt_number,
+                retryable=build.retryable,
+                failure_info=build.failure_info,
                 error_message=build.error_message,
                 apktool_version=build.apktool_version,
                 build_tools_version=build.build_tools_version,
@@ -620,6 +643,9 @@ class BuildRepository:
             row.success = build.success
             row.error_message = build.error_message
             row.tool_logs = build.tool_logs
+            row.attempt_number = build.attempt_number
+            row.retryable = build.retryable
+            row.failure_info = build.failure_info
             session.commit()
 
     def list_by_project(self, project_id: str) -> list[BuildResult]:
@@ -648,6 +674,9 @@ class BuildRepository:
             apktool_version=row.apktool_version,
             build_tools_version=row.build_tools_version,
             tool_logs=row.tool_logs or "",
+            attempt_number=row.attempt_number or 1,
+            retryable=bool(row.retryable),
+            failure_info=row.failure_info or {},
             created_at=row.created_at,
         )
 

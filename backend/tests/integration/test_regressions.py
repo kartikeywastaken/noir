@@ -27,7 +27,7 @@ from noir.infrastructure.filesystem.workspace import (
     compute_file_hash,
     safe_resolve,
 )
-from noir.patches.engine import PatchEngine, PatchError
+from noir.patches.engine import PatchEngine, PatchError, PatchValidationError
 
 
 @pytest.fixture
@@ -276,6 +276,55 @@ def test_manifest_preview_and_undo_are_real_xml_changes(workspace):
     engine.apply_patch(patch)
     assert "NOIR" in path.read_text()
     engine.undo_patch(patch)
+    assert path.read_text() == original
+
+
+def test_manifest_add_fragment_resolves_android_namespace(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "AndroidManifest.xml"
+    path.write_text(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+        "<application /></manifest>"
+    )
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="AndroidManifest.xml",
+            operation=PatchOperationType.MANIFEST_ADD,
+            xml_element="uses-permission",
+            new_content='<uses-permission android:name="android.permission.INTERNET"/>',
+        ),
+    )
+
+    PatchEngine(ws).apply_patch(patch)
+
+    changed = path.read_text()
+    assert "android.permission.INTERNET" in changed
+    assert "xmlns:android" in changed
+
+
+def test_malformed_manifest_replace_block_is_rejected_before_application(workspace):
+    _, ws = workspace
+    path = ws.decoded_dir / "AndroidManifest.xml"
+    original = (
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+        '<uses-permission android:name="android.permission.INTERNET"/>'
+        "<application /></manifest>"
+    )
+    path.write_text(original)
+    patch = patch_for(
+        ws,
+        PatchOperation(
+            relative_path="AndroidManifest.xml",
+            operation=PatchOperationType.REPLACE_BLOCK,
+            match_content='<uses-permission android:name="android.permission.INTERNET"/>',
+            new_content='<uses-permission android:name="android.permission.INTERNET>"',
+        ),
+    )
+
+    with pytest.raises(PatchValidationError, match="Invalid AndroidManifest.xml"):
+        PatchEngine(ws).apply_patch(patch)
+
     assert path.read_text() == original
 
 
@@ -584,9 +633,7 @@ def test_queue_streams_direct_s3_import_once_then_removes_scratch(workspace, mon
     downloads = []
     imports = []
 
-    def fake_download(
-        _store, *, key, destination, expected_size, expected_sha256
-    ):
+    def fake_download(_store, *, key, destination, expected_size, expected_sha256):
         downloads.append((key, destination, expected_size, expected_sha256))
         destination.write_bytes(payload_bytes)
         return digest, len(payload_bytes)

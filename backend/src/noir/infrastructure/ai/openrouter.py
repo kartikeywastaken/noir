@@ -282,11 +282,7 @@ class OpenRouterDiscoveryProvider(DiscoveryProvider):
         summary = _build_analysis_summary(analysis)
         components = summary.get("manifest_components", [])
         launcher = next(
-            (
-                item
-                for item in components
-                if item.get("is_launcher") and item.get("smali_file")
-            ),
+            (item for item in components if item.get("is_launcher") and item.get("smali_file")),
             None,
         )
         if launcher is None:
@@ -519,7 +515,7 @@ class OpenRouterGenerationProvider(GeminiProvider):
 
     provider_name = "openrouter"
 
-    def __init__(self, model: str, config: "NoirConfig") -> None:
+    def __init__(self, model: str, config: NoirConfig) -> None:
         # Bypass GeminiProvider.__init__ (which requires a Gemini API key) and
         # initialise only the attributes _call_model and the inherited methods need.
         self.config = config
@@ -528,7 +524,9 @@ class OpenRouterGenerationProvider(GeminiProvider):
         self.fallback_model_names: list[str] = []
         self.last_model_name = model
         self.purpose = "generation"
-        self.api_key = config.openrouter_api_key.get_secret_value() if config.openrouter_api_key else ""
+        self.api_key = (
+            config.openrouter_api_key.get_secret_value() if config.openrouter_api_key else ""
+        )
         self.timeout = config.ai_timeout
         self.max_output_tokens = config.ai_max_output_tokens
         self._client = None  # Never used; we talk to OpenRouter via httpx directly.
@@ -604,9 +602,7 @@ class OpenRouterGenerationProvider(GeminiProvider):
                     )
 
                 data = resp.json()
-                finish_reason = (
-                    data.get("choices", [{}])[0].get("finish_reason", "")
-                )
+                finish_reason = data.get("choices", [{}])[0].get("finish_reason", "")
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
                 if finish_reason == "length":
@@ -615,11 +611,10 @@ class OpenRouterGenerationProvider(GeminiProvider):
                         "response may be truncated"
                     )
 
-                if not content:
+                if not isinstance(content, str) or not content:
                     raise OpenRouterDiscoveryError("OpenRouter returned empty generation response")
 
                 self.last_model_name = self.model_name
                 return content
 
         raise OpenRouterDiscoveryError("OpenRouter generation failed after all retries")
-

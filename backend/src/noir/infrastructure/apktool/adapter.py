@@ -40,7 +40,9 @@ class ApkToolAdapter:
             return {}
         output = f"{result.stderr}\n{result.stdout}"
         patterns = (
-            re.compile(r"(?P<file>[^\s\[]+\.smali)\[(?P<line>\d+),(?P<column>\d+)\]\s*(?P<message>.+)"),
+            re.compile(
+                r"(?P<file>[^\s\[]+\.smali)\[(?P<line>\d+),(?P<column>\d+)\]\s*(?P<message>.+)"
+            ),
             re.compile(r"(?P<file>[^:\n]+\.xml):(?P<line>\d+):(?P<column>\d+):?\s*(?P<message>.+)"),
             re.compile(r"(?P<file>[^:\n]+\.xml):(?P<line>\d+):\s*(?P<message>.+)"),
         )
@@ -51,9 +53,7 @@ class ApkToolAdapter:
                     details = match.groupdict()
                     failure = {
                         "stage": (
-                            "manifest_compile"
-                            if result.tool_name == "aapt2"
-                            else "apktool_build"
+                            "manifest_compile" if result.tool_name == "aapt2" else "apktool_build"
                         ),
                         "file": details["file"],
                         "line": int(details["line"]),
@@ -182,7 +182,7 @@ class ApkToolAdapter:
         # APKTool 3.x known bug: certain APKs with short hex resource names (e.g. res/9E.xml)
         # trigger a DirectoryException during resource copy. Retry with --keep-broken-res.
         _res_copy_error = re.search(
-            r"DirectoryException.*Error copying file|Error copying file.*\.xml",
+            r"DirectoryException[\s\S]*?Error copying file|Error copying file[^\r\n]*\.xml",
             output,
             re.IGNORECASE,
         )
@@ -247,7 +247,6 @@ class ApkToolAdapter:
         the <uses-sdk> element is omitted, causing targetSdkVersion=0 in the
         rebuilt APK, which Android refuses to install.
         """
-        import xml.etree.ElementTree as ET
 
         manifest_path = decoded_dir / "AndroidManifest.xml"
         apktool_yml = decoded_dir / "apktool.yml"
@@ -319,9 +318,7 @@ class ApkToolAdapter:
                     raise ValueError("Manifest element mismatch during reference recovery")
                 for attribute, current in apktool_node.attrib.items():
                     alternate = binary_node.get(attribute, "")
-                    framework_reference = re.fullmatch(
-                        r"([@?])android:([0-9A-Fa-f]{8})", alternate
-                    )
+                    framework_reference = re.fullmatch(r"([@?])android:([0-9A-Fa-f]{8})", alternate)
                     reference = re.fullmatch(r"([@?])([0-9A-Fa-f]{8})", alternate)
                     if framework_reference and current.startswith(framework_reference.group(1)):
                         prefix = framework_reference.group(1)
@@ -364,9 +361,7 @@ class ApkToolAdapter:
                         [
                             candidate
                             for candidate in candidates
-                            if candidate.get(
-                                "{http://schemas.android.com/apk/res/android}name"
-                            )
+                            if candidate.get("{http://schemas.android.com/apk/res/android}name")
                             == android_name
                         ]
                         if android_name
@@ -377,9 +372,7 @@ class ApkToolAdapter:
                     elif index < len(candidates):
                         selected = candidates[index]
                     else:
-                        raise ValueError(
-                            "Manifest structure mismatch during reference recovery"
-                        )
+                        raise ValueError("Manifest structure mismatch during reference recovery")
                     seen[apktool_child.tag] = index + 1
                     merge_references(apktool_child, selected)
 
@@ -408,9 +401,11 @@ class ApkToolAdapter:
         sdk = Path(self.config.android_sdk_dir) if self.config.android_sdk_dir else None
         platform_jars = list((sdk / "platforms").glob("android-*/android.jar")) if sdk else []
         platform_jars.sort(
-            key=lambda path: int(path.parent.name.removeprefix("android-"))
-            if path.parent.name.removeprefix("android-").isdigit()
-            else -1
+            key=lambda path: (
+                int(path.parent.name.removeprefix("android-"))
+                if path.parent.name.removeprefix("android-").isdigit()
+                else -1
+            )
         )
         if not platform_jars:
             raise ApkToolError("Android platform android.jar is required to compile the manifest")
@@ -496,8 +491,7 @@ class ApkToolAdapter:
             location = ""
             if failure.get("file"):
                 location = (
-                    f" at {failure['file']}:{failure.get('line', '?')}:"
-                    f"{failure.get('column', '?')}"
+                    f" at {failure['file']}:{failure.get('line', '?')}:{failure.get('column', '?')}"
                 )
             diagnostic = failure.get("diagnostic")
             suffix = f": {diagnostic}" if diagnostic else ""

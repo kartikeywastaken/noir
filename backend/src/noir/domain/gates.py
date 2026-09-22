@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class DeliverableForm(str, Enum):
+class DeliverableForm(StrEnum):
     """Deliverable form classification (Gate 1)."""
 
     REBUILT_APK = "rebuilt_apk"
@@ -17,7 +17,7 @@ class DeliverableForm(str, Enum):
     REPORT = "report"
 
 
-class ExecutionLayer(str, Enum):
+class ExecutionLayer(StrEnum):
     """Code location and execution layer (Gate 3)."""
 
     MANIFEST_RESOURCE = "manifest_resource"
@@ -30,7 +30,7 @@ class ExecutionLayer(str, Enum):
     XAMARIN_DOTNET = "xamarin_dotnet"
 
 
-class GateStatus(str, Enum):
+class GateStatus(StrEnum):
     """Evaluation status of a gate."""
 
     PASSED = "PASSED"

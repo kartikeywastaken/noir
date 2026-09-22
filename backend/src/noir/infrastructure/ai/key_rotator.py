@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from noir.domain.config import NoirConfig
@@ -59,7 +60,9 @@ class ApiKeyRotator:
             expiry = self._cooldowns.get(key, 0.0)
             return time.monotonic() < expiry
 
-    def mark_rate_limited(self, key: str, cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS) -> None:
+    def mark_rate_limited(
+        self, key: str, cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS
+    ) -> None:
         """Mark a key as rate-limited, placing it into cooldown for the specified duration."""
         if not key:
             return
@@ -79,24 +82,20 @@ class ApiKeyRotator:
         excluded = exclude or set()
         with self._lock:
             return [
-                k
-                for k in self._keys
-                if k not in excluded and self._cooldowns.get(k, 0.0) <= now
+                k for k in self._keys if k not in excluded and self._cooldowns.get(k, 0.0) <= now
             ]
 
     def get_next_key(self) -> str:
         """Get the next available key in round-robin order.
 
-        Skips any key currently in cooldown. If all keys are currently in cooldown,
-        picks the key whose cooldown expires earliest.
+        Skips any key currently in cooldown. If all keys are cooling down,
+        returns an empty string so callers can honor the provider retry delay
+        instead of immediately burning the same quota-limited project again.
         Returns an empty string if no keys are configured.
         """
         with self._lock:
             if not self._keys:
                 return ""
-            if len(self._keys) == 1:
-                return self._keys[0]
-
             now = time.monotonic()
             n = len(self._keys)
 
@@ -107,15 +106,21 @@ class ApiKeyRotator:
                 if self._cooldowns.get(candidate, 0.0) <= now:
                     return candidate
 
-            # All keys are in cooldown; pick the one that expires soonest
-            best_key = min(self._keys, key=lambda k: self._cooldowns.get(k, 0.0))
-            redacted = best_key[:4] + "..." + best_key[-4:] if len(best_key) > 8 else "***"
+            retry_after = min(self._cooldowns.get(k, now) for k in self._keys) - now
             logger.warning(
-                "All %d API keys are in cooldown; selecting earliest-expiring key [%s]",
+                "All %d API keys are in cooldown; next key is available in %.1fs",
                 n,
-                redacted,
+                max(retry_after, 0.0),
             )
-            return best_key
+            return ""
+
+    def retry_after_seconds(self) -> float:
+        """Seconds until any configured key becomes healthy, or zero now."""
+        with self._lock:
+            if not self._keys:
+                return 0.0
+            now = time.monotonic()
+            return max(0.0, min(self._cooldowns.get(k, 0.0) for k in self._keys) - now)
 
     def reset_cooldowns(self) -> None:
         """Clear all cooldowns."""

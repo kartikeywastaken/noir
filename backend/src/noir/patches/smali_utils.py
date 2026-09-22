@@ -12,9 +12,7 @@ _INVOKE_MISSING_RETURN_RE = re.compile(
 )
 
 # Known common void API calls that LLMs frequently emit without 'V'
-_KNOWN_VOID_CALLS_RE = re.compile(
-    r"(Landroid/widget/Toast;->(?:show|cancel)\(\))(?!\w)"
-)
+_KNOWN_VOID_CALLS_RE = re.compile(r"(Landroid/widget/Toast;->(?:show|cancel)\(\))(?!\w)")
 
 
 def sanitize_smali_content(smali_text: str) -> str:
@@ -35,3 +33,11 @@ def sanitize_smali_content(smali_text: str) -> str:
     smali_text = _INVOKE_MISSING_RETURN_RE.sub(r"\g<1>V", smali_text)
 
     return smali_text
+
+
+# Pre-flight validator re-exports
+from noir.patches.smali_validator import (  # noqa: E402
+    SmaliBytecodeValidator,
+)
+
+validate_smali = SmaliBytecodeValidator.validate

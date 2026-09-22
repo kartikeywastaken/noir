@@ -28,8 +28,8 @@ from noir.domain.models import (
     PlanFileChange,
 )
 from noir.infrastructure.ai.budget import bounded_prompt
-from noir.patches.smali_utils import sanitize_smali_content
 from noir.infrastructure.ai.provider import AiProvider
+from noir.patches.smali_utils import sanitize_smali_content
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ def _patch_response_schema(plan: ChangePlan) -> dict[str, Any]:
         PatchOperationType.REPLACE_FILE: ("new_content",),
         PatchOperationType.REPLACE_BLOCK: ("match_content", "new_content"),
         PatchOperationType.DELETE_FILE: (),
-        PatchOperationType.MANIFEST_ADD: ("xml_element", "new_content"),
+        PatchOperationType.MANIFEST_ADD: ("xml_element", "xml_attributes"),
         PatchOperationType.MANIFEST_UPDATE: ("xml_element", "xml_attributes"),
         PatchOperationType.MANIFEST_REMOVE: ("xml_element", "xml_attributes"),
         PatchOperationType.XML_RESOURCE_ADD: ("new_content",),
@@ -491,17 +491,33 @@ class GeminiProvider(AiProvider):
                 )
                 tried_keys_for_model: set[str] = set()
                 current_key = self.api_key
-                if self.key_rotator and (not current_key or self.key_rotator.is_in_cooldown(current_key)):
+                if self.key_rotator and (
+                    not current_key or self.key_rotator.is_in_cooldown(current_key)
+                ):
                     current_key = self.key_rotator.get_next_key()
+                    if not current_key:
+                        raise GeminiProviderError(
+                            "All Gemini credentials are cooling down; retry after "
+                            f"{self.key_rotator.retry_after_seconds():.1f}s"
+                        )
                 while True:
                     if self.key_rotator and current_key in tried_keys_for_model:
                         all_pool = self.key_rotator.get_all_keys()
                         untried = [k for k in all_pool if k not in tried_keys_for_model]
                         if untried:
-                            not_in_cooldown = [k for k in untried if not self.key_rotator.is_in_cooldown(k)]
-                            current_key = not_in_cooldown[0] if not_in_cooldown else untried[0]
+                            not_in_cooldown = [
+                                k for k in untried if not self.key_rotator.is_in_cooldown(k)
+                            ]
+                            if not not_in_cooldown:
+                                raise GeminiProviderError(
+                                    "All Gemini credentials are cooling down; retry after "
+                                    f"{self.key_rotator.retry_after_seconds():.1f}s"
+                                )
+                            current_key = not_in_cooldown[0]
 
-                    client = self._client_for_key(current_key) if current_key else self._get_client()
+                    client = (
+                        self._client_for_key(current_key) if current_key else self._get_client()
+                    )
                     config = types.GenerateContentConfig(
                         max_output_tokens=token_budget,
                         system_instruction=system_instruction or None,
@@ -539,9 +555,15 @@ class GeminiProvider(AiProvider):
                             all_keys = self.key_rotator.get_all_keys()
                             remaining_keys = [k for k in all_keys if k not in tried_keys_for_model]
                             if remaining_keys:
-                                redacted = current_key[:4] + "..." + current_key[-4:] if len(current_key) > 8 else "***"
+                                redacted = (
+                                    current_key[:4] + "..." + current_key[-4:]
+                                    if len(current_key) > 8
+                                    else "***"
+                                )
                                 logger.warning(
-                                    "Gemini key [%s] hit rate limit (429/quota); rotating to next API key in pool for model %s (%d untried key(s) remaining)",
+                                    "Gemini key [%s] hit rate limit (429/quota); rotating to "
+                                    "next API key in pool for model %s "
+                                    "(%d untried key(s) remaining)",
                                     redacted,
                                     model_name,
                                     len(remaining_keys),
@@ -550,27 +572,32 @@ class GeminiProvider(AiProvider):
 
                         can_fallback = model_index < len(models) - 1
                         if can_fallback and (
-                            _is_retryable_availability_error(exc, has_fallback=True)
-                            or is_quota
+                            _is_retryable_availability_error(exc, has_fallback=True) or is_quota
                         ):
                             next_model = models[model_index + 1]
                             logger.warning(
-                                "Gemini model %s is temporarily unavailable or quota exhausted across keys; retrying with %s",
+                                "Gemini model %s is temporarily unavailable or quota "
+                                "exhausted across keys; retrying with %s",
                                 model_name,
                                 next_model,
                             )
                             break
                         # Fail fast with a clear message on quota exhaustion.
                         if is_quota and not can_fallback:
-                            num_keys = len(self.key_rotator.get_all_keys()) if self.key_rotator else 1
+                            num_keys = (
+                                len(self.key_rotator.get_all_keys()) if self.key_rotator else 1
+                            )
                             raise GeminiProviderError(
-                                f"Gemini daily quota exhausted across all {num_keys} configured API key(s). "
+                                "Gemini daily quota exhausted across all "
+                                f"{num_keys} configured API key(s). "
                                 "No fallback model is configured. "
                                 "Wait for the quota to reset, configure NOIR_AI_FALLBACK_MODEL "
                                 "in your environment, or reduce usage."
                             ) from None
                         detail = str(exc)
-                        redact_keys = self.key_rotator.get_all_keys() if self.key_rotator else [self.api_key]
+                        redact_keys = (
+                            self.key_rotator.get_all_keys() if self.key_rotator else [self.api_key]
+                        )
                         for k in redact_keys:
                             if k:
                                 detail = detail.replace(k, "[REDACTED]")
@@ -705,6 +732,7 @@ class GeminiProvider(AiProvider):
             "You must output valid JSON matching the schema provided. "
             "Be precise about file paths, class descriptors, and method signatures. "
             "Always disclose permission changes, network behavior, and risks."
+            " Never create Smali classes; Smali inserts must be small bridges to evidenced code."
             "Completing the User's request takes priority "
         )
 
@@ -864,8 +892,7 @@ flutter, react_native, hermes, native_only, hybrid_web, or empty."""
             raise GeminiProviderError("The approved plan has no file changes")
         response_schema = _patch_response_schema(plan)
         approved_bindings = "\n".join(
-            f"- {change.relative_path} -> {change.operation.value}"
-            for change in plan.file_changes
+            f"- {change.relative_path} -> {change.operation.value}" for change in plan.file_changes
         )
         approved_operations = {
             (change.relative_path, change.operation) for change in plan.file_changes
@@ -899,9 +926,10 @@ file_coverage identifies full files versus exact XML excerpts. For excerpt-only 
 replace_block with match_content copied exactly from the excerpt. Never replace the whole file.
 For non-XML operations, omit xml_attributes or use an empty object, not null.
 affected_scope is an optional description: omit it or use an empty string when not applicable.
-manifest_update requires a nonempty xml_attributes object. xml_attributes contains only values
-to write. For a repeated or nested manifest element, use xml_match_attributes with exact existing
-pre-change attributes to identify one element; never target an unnamed element by tag alone.
+manifest_add and manifest_update require a nonempty xml_attributes object. xml_attributes contains
+only values to write. For a repeated or nested manifest element, use xml_match_attributes with
+exact existing pre-change attributes to identify one element; never target an unnamed element by
+tag alone.
 replace_block requires exact
 match_content and new_content (an empty new_content string is valid when deleting a block).
 For manifest_update or manifest_remove on a repeatable element such as activity, activity-alias,
@@ -919,7 +947,7 @@ Do not change operation types or omit any requested changes to make the response
 Return compact JSON with a top-level operations array, following the supplied response schema.
 Each operation needs relative_path and operation. Include only fields needed by that operation:
 match_content/new_content for replace_block; new_content for create_file/replace_file;
-xml_element/new_content for manifest_add; xml_element/xml_attributes for manifest_update/remove.
+xml_element/xml_attributes for manifest_add/update/remove.
 For manifest_update/remove, xml_match_attributes optionally identifies the existing element and
 is never written to the file;
 For xml_resource_add/update, new_content must be exactly one complete resource element.
@@ -927,7 +955,7 @@ xml_resource_update changes only the existing element with the same tag and name
 replaces the resource file. xml_resource_remove requires xml_element and xml_attributes.name;
 Both smali_replace_method and smali_insert_at_anchor require class_descriptor, method_signature
 and new_content. smali_insert_at_anchor also requires a unique exact anchor; insertion is AFTER it.
-CRITICAL Smali syntax: every invoke instruction method call MUST include the return type descriptor, including 'V' for void. For example: invoke-virtual {v0}, Landroid/widget/Toast;->show()V (never omit the trailing V: show() is a syntax error that breaks APK compilation).
+Smali invoke instructions must include the return descriptor, e.g. show()V (never omit trailing V).
 For an existing method, use an anchor inside that exact method and insert instructions only.
 To add a method that is absent from the class, use its exact signature, a unique class-level
 comment anchor (for example # virtual methods), and exactly one complete .method ... .end method
@@ -1011,13 +1039,20 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
             operation.expected_preimage_hash = context.get("file_hashes", {}).get(path)
             operations.append(operation)
 
-        return PatchSet(
+        patch_set = PatchSet(
             plan_id=plan.plan_id,
             project_id=plan.project_id,
             workspace_revision=plan.workspace_revision,
             provenance=Provenance.AI_GENERATED,
             operations=operations,
         )
+
+        from noir.infrastructure.ai.repair import repair_patch_set
+
+        try:
+            return repair_patch_set(patch_set, call_model=self._call_model, context=context)
+        except Exception as exc:
+            raise GeminiProviderError(str(exc)) from exc
 
     @staticmethod
     def _parse_patch_operation(data: Any, index: int) -> PatchOperation:
@@ -1081,11 +1116,25 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
             raise GeminiProviderError(f"{prefix} has invalid fields: {fields}") from None
         if not operation.relative_path.strip():
             raise GeminiProviderError(f"{prefix} requires relative_path")
+        if (
+            operation.operation == PatchOperationType.CREATE_FILE
+            and operation.relative_path.endswith(".smali")
+        ):
+            raise GeminiProviderError(
+                f"{prefix}: AI-generated Smali classes are not supported; use the verified "
+                "runtime or a minimal bridge into existing code"
+            )
         if operation.operation == PatchOperationType.MANIFEST_UPDATE and (
             not operation.xml_element or not operation.xml_attributes
         ):
             raise GeminiProviderError(
                 f"{prefix}: manifest_update requires xml_element and nonempty xml_attributes"
+            )
+        if operation.operation == PatchOperationType.MANIFEST_ADD and (
+            not operation.xml_element or not operation.xml_attributes
+        ):
+            raise GeminiProviderError(
+                f"{prefix}: manifest_add requires xml_element and nonempty xml_attributes"
             )
         if operation.operation in (
             PatchOperationType.MANIFEST_UPDATE,
@@ -1121,18 +1170,21 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
             raise GeminiProviderError(
                 f"{prefix}: replace_block requires match_content and new_content"
             )
-        if operation.operation in {
-            PatchOperationType.XML_RESOURCE_ADD,
-            PatchOperationType.XML_RESOURCE_UPDATE,
-        } and not operation.new_content:
+        if (
+            operation.operation
+            in {
+                PatchOperationType.XML_RESOURCE_ADD,
+                PatchOperationType.XML_RESOURCE_UPDATE,
+            }
+            and not operation.new_content
+        ):
             raise GeminiProviderError(
                 f"{prefix}: {operation.operation.value} requires one resource element"
             )
         if operation.operation == PatchOperationType.XML_RESOURCE_REMOVE and (
             not operation.xml_element
             or not (
-                operation.xml_attributes.get("name")
-                or operation.xml_attributes.get("android:name")
+                operation.xml_attributes.get("name") or operation.xml_attributes.get("android:name")
             )
         ):
             raise GeminiProviderError(
@@ -1158,7 +1210,17 @@ Escape quotes, backslashes and newlines inside JSON strings correctly."""
                 not operation.anchor or not operation.anchor.strip()
             ):
                 raise GeminiProviderError(f"{prefix}: smali_insert_at_anchor requires anchor")
-            operation.new_content = sanitize_smali_content(operation.new_content)
+            new_content = operation.new_content
+            if new_content is None:
+                raise GeminiProviderError(f"{prefix}: Smali operation requires new_content")
+            if (
+                operation.operation == PatchOperationType.SMALI_INSERT_AT_ANCHOR
+                and len(new_content.encode("utf-8")) > 4096
+            ):
+                raise GeminiProviderError(
+                    f"{prefix}: Smali bridge exceeds the 4096-byte deterministic bridge limit"
+                )
+            operation.new_content = sanitize_smali_content(new_content)
         if operation.operation in {
             PatchOperationType.CIL_REPLACE_METHOD_BODY,
             PatchOperationType.CIL_INSERT_METHOD,

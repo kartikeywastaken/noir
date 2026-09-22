@@ -449,9 +449,7 @@ def test_auto_upload_uses_private_s3_multipart_and_legacy_remains_available(isol
             key = f"noir/users/{user_id}/projects/{project_id}/original/input.apk"
             return key, "remote-upload-id"
 
-        def presign_multipart_part(
-            self, *, key, upload_id, part_number, checksum_sha256
-        ):
+        def presign_multipart_part(self, *, key, upload_id, part_number, checksum_sha256):
             return f"https://s3.example/{upload_id}/{part_number}"
 
         def complete_multipart_original(self, *, key, upload_id, parts):
@@ -488,9 +486,7 @@ def test_auto_upload_uses_private_s3_multipart_and_legacy_remains_available(isol
         json={"parts": [{"part_number": 1, "checksum_sha256": checksum}]},
     )
     assert presigned.status_code == 200, presigned.text
-    assert presigned.json()["parts"][0]["headers"] == {
-        "x-amz-checksum-sha256": checksum
-    }
+    assert presigned.json()["parts"][0]["headers"] == {"x-amz-checksum-sha256": checksum}
     completed = alice.post(
         f"/v1/uploads/{upload['upload_id']}/complete?authorized=true",
         json={

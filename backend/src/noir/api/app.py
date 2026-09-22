@@ -112,6 +112,10 @@ class S3UploadPartCompletionRequest(BaseModel):
     parts: list[S3UploadPartCompletion] = Field(default_factory=list, max_length=100)
 
 
+class UploadCompleteRequest(S3UploadPartCompletionRequest):
+    user_request: str | None = Field(default=None, max_length=16000)
+
+
 class InviteRedeemRequest(BaseModel):
     code: str = Field(min_length=1, max_length=4096)
 
@@ -132,7 +136,7 @@ class WorkflowPrepareRequest(BaseModel):
         "gemini-2.5-flash",
         "openrouter:nvidia/nemotron-3.5-lightning:free",
     ] = "gemini-3.6-flash"
-
+    auto_build: bool = False
 
 
 class WorkflowFinishRequest(BaseModel):
@@ -372,9 +376,7 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
 
         try:
             try:
-                return s3_uploads.status(
-                    upload_id=upload_id, user_id=principal.user_id
-                ).public()
+                return s3_uploads.status(upload_id=upload_id, user_id=principal.user_id).public()
             except UploadError as exc:
                 if exc.status_code != 404:
                     raise
@@ -469,7 +471,7 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
     def complete_upload(
         upload_id: str,
         principal: Principal,
-        req: S3UploadPartCompletionRequest | None = None,
+        req: UploadCompleteRequest | None = None,
         authorized: bool = Query(False),
     ):
         from noir.application.upload_service import UploadError
@@ -490,11 +492,15 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
                         parts=[part.model_dump() for part in req.parts],
                     )
                 return s3_uploads.complete(
-                    upload_id=upload_id, user_id=principal.user_id
+                    upload_id=upload_id,
+                    user_id=principal.user_id,
+                    user_request=req.user_request if req else None,
                 ).model_dump(mode="json")
-            return uploads.complete(upload_id=upload_id, user_id=principal.user_id).model_dump(
-                mode="json"
-            )
+            return uploads.complete(
+                upload_id=upload_id,
+                user_id=principal.user_id,
+                user_request=req.user_request if req else None,
+            ).model_dump(mode="json")
         except Exception as exc:
             upload_failure(exc)
 
@@ -577,8 +583,28 @@ def create_app(config: NoirConfig | None = None) -> FastAPI:
             job = queue.submit(
                 "workflow_prepare",
                 project_id,
-                req.model_dump(),
+                {**req.model_dump(), "user_id": principal.user_id},
                 f"{principal.user_id}:prepare:{idempotency_key}",
+            )
+            return job.model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.post("/v1/projects/{project_id}/workflow/automated", status_code=202)
+    def automated_workflow(
+        project_id: str,
+        req: WorkflowPrepareRequest,
+        principal: Principal,
+        idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+    ):
+        if not req.allow_ai_upload:
+            raise HTTPException(400, "Consent is required to send APK context to Gemini")
+        try:
+            job = queue.submit(
+                "workflow_automated",
+                project_id,
+                {**req.model_dump(), "user_id": principal.user_id, "auto_build": True},
+                f"{principal.user_id}:auto:{idempotency_key}",
             )
             return job.model_dump(mode="json")
         except ValueError as exc:

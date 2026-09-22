@@ -1,13 +1,11 @@
 import concurrent.futures
-import time
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic import SecretStr
 
 from noir.domain.config import NoirConfig
-from noir.infrastructure.ai.gemini import GeminiProvider, GeminiProviderError
-from noir.infrastructure.ai.key_rotator import ApiKeyRotator, get_gemini_rotator
+from noir.infrastructure.ai.gemini import GeminiProvider
+from noir.infrastructure.ai.key_rotator import ApiKeyRotator
 
 
 def test_key_rotator_empty():
@@ -58,8 +56,9 @@ def test_key_rotator_all_in_cooldown():
     rotator.mark_rate_limited("key1", cooldown_seconds=10.0)
     rotator.mark_rate_limited("key2", cooldown_seconds=50.0)
 
-    # When all are in cooldown, it picks the earliest expiring one (key1)
-    assert rotator.get_next_key() == "key1"
+    # The caller must wait instead of immediately reusing a cooling key.
+    assert rotator.get_next_key() == ""
+    assert 0 < rotator.retry_after_seconds() <= 10
 
 
 def test_key_rotator_concurrency():
@@ -135,7 +134,9 @@ def test_gemini_provider_429_failover_to_next_key(monkeypatch):
 
     def mock_client_for_key(key):
         from google.genai import types
+
         client = MagicMock()
+
         def generate_content(model, contents, config):
             call_keys.append(key)
             if key == "rate_limited_key":
@@ -149,6 +150,7 @@ def test_gemini_provider_429_failover_to_next_key(monkeypatch):
             mock_candidate.finish_reason = types.FinishReason.STOP
             mock_response.candidates = [mock_candidate]
             return mock_response
+
         client.models.generate_content = generate_content
         return client
 

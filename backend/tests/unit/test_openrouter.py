@@ -218,9 +218,7 @@ def test_tool_call_response_reads_file(config, ws):
                             "type": "function",
                             "function": {
                                 "name": "read_file_excerpt",
-                                "arguments": json.dumps(
-                                    {"path": "smali/com/game/Score.smali"}
-                                ),
+                                "arguments": json.dumps({"path": "smali/com/game/Score.smali"}),
                             },
                         }
                     ],
@@ -333,9 +331,7 @@ def test_analysis_summary_structure():
     assert summary["package_name"] == "com.example.app"
     assert "dalvik" in summary["runtimes"]
     assert "native" in summary["runtimes"]
-    assert summary["runtime_evidence"]["hermes_bytecode"] == [
-        "assets/index.android.bundle"
-    ]
+    assert summary["runtime_evidence"]["hermes_bytecode"] == ["assets/index.android.bundle"]
     assert "smali_class_count" in summary
     assert "binary_candidates" in summary
 

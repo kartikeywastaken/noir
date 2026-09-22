@@ -25,7 +25,6 @@ from noir.infrastructure.ai.gemini import (
     GeminiProvider,
     GeminiProviderError,
     _is_retryable_availability_error,
-    _requires_textual_schema,
     _schema_prompt_suffix,
     _schema_size,
 )
@@ -98,7 +97,6 @@ class AdkGeminiProvider(GeminiProvider):
     ) -> str:
         from google import genai
         from google.adk.agents import LlmAgent
-        from google.adk.agents.run_config import RunConfig
         from google.adk.models import Gemini
         from google.adk.runners import Runner
         from google.adk.sessions import InMemorySessionService
@@ -191,8 +189,15 @@ class AdkGeminiProvider(GeminiProvider):
             for model_index, model_name in enumerate(models):
                 tried_keys_for_model: set[str] = set()
                 current_key = self.api_key
-                if self.key_rotator and (not current_key or self.key_rotator.is_in_cooldown(current_key)):
+                if self.key_rotator and (
+                    not current_key or self.key_rotator.is_in_cooldown(current_key)
+                ):
                     current_key = self.key_rotator.get_next_key()
+                    if not current_key:
+                        raise GeminiProviderError(
+                            "All Gemini credentials are cooling down; retry after "
+                            f"{self.key_rotator.retry_after_seconds():.1f}s"
+                        )
                 text = None
                 while True:
                     if time.monotonic() > stall_deadline:
@@ -202,14 +207,23 @@ class AdkGeminiProvider(GeminiProvider):
                         )
 
                     active_prompt = (
-                        prompt + _schema_prompt_suffix(response_schema) if response_schema else prompt
+                        prompt + _schema_prompt_suffix(response_schema)
+                        if response_schema
+                        else prompt
                     )
                     if self.key_rotator and current_key in tried_keys_for_model:
                         all_pool = self.key_rotator.get_all_keys()
                         untried = [k for k in all_pool if k not in tried_keys_for_model]
                         if untried:
-                            not_in_cooldown = [k for k in untried if not self.key_rotator.is_in_cooldown(k)]
-                            current_key = not_in_cooldown[0] if not_in_cooldown else untried[0]
+                            not_in_cooldown = [
+                                k for k in untried if not self.key_rotator.is_in_cooldown(k)
+                            ]
+                            if not not_in_cooldown:
+                                raise GeminiProviderError(
+                                    "All Gemini credentials are cooling down; retry after "
+                                    f"{self.key_rotator.retry_after_seconds():.1f}s"
+                                )
+                            current_key = not_in_cooldown[0]
 
                     try:
                         text = self._run_agent(
@@ -237,7 +251,11 @@ class AdkGeminiProvider(GeminiProvider):
                             all_keys = self.key_rotator.get_all_keys()
                             remaining_keys = [k for k in all_keys if k not in tried_keys_for_model]
                             if remaining_keys:
-                                redacted = current_key[:4] + "..." + current_key[-4:] if len(current_key) > 8 else "***"
+                                redacted = (
+                                    current_key[:4] + "..." + current_key[-4:]
+                                    if len(current_key) > 8
+                                    else "***"
+                                )
                                 logger.warning(
                                     "ADK Gemini key [%s] hit rate limit (429/quota); rotating to next API key in pool for model %s (%d untried key(s) remaining)",
                                     redacted,
@@ -248,8 +266,7 @@ class AdkGeminiProvider(GeminiProvider):
 
                         can_fallback = model_index < len(models) - 1
                         if can_fallback and (
-                            _is_retryable_availability_error(exc, has_fallback=True)
-                            or is_quota
+                            _is_retryable_availability_error(exc, has_fallback=True) or is_quota
                         ):
                             next_model = models[model_index + 1]
                             logger.warning(
@@ -259,13 +276,17 @@ class AdkGeminiProvider(GeminiProvider):
                             )
                             break
                         if is_quota and not can_fallback:
-                            num_keys = len(self.key_rotator.get_all_keys()) if self.key_rotator else 1
+                            num_keys = (
+                                len(self.key_rotator.get_all_keys()) if self.key_rotator else 1
+                            )
                             raise GeminiProviderError(
                                 f"Gemini daily quota exhausted across all {num_keys} configured API key(s). "
                                 "Wait for quota reset or configure NOIR_AI_FALLBACK_MODEL."
                             ) from None
                         detail = str(exc)
-                        redact_keys = self.key_rotator.get_all_keys() if self.key_rotator else [self.api_key]
+                        redact_keys = (
+                            self.key_rotator.get_all_keys() if self.key_rotator else [self.api_key]
+                        )
                         for k in redact_keys:
                             if k:
                                 detail = detail.replace(k, "[REDACTED]")

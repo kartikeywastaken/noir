@@ -7,12 +7,24 @@ import shutil
 import sqlite3
 import subprocess
 import tarfile
+import tempfile
 import time
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.request import urlopen
 
 SECRET_ENVIRONMENT_KEYS = {"NOIR_OPENROUTER_API_KEY"}
+FORBIDDEN_ARCHIVE_PARTS = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "site-packages",
+    "venv",
+}
 
 
 def _read_environment(path: Path) -> dict[str, str]:
@@ -60,6 +72,53 @@ def _migrate_openrouter_credential(environment: dict[str, str]) -> None:
     temporary.replace(target)
 
 
+def _validate_archive_members(members: list[tarfile.TarInfo]) -> None:
+    """Reject files that could escape or contaminate a Linux deployment."""
+    for member in members:
+        path = PurePosixPath(member.name)
+        parts = path.parts
+        invalid_root = not parts or parts[0] not in {"backend", "tools"}
+        host_artifact = any(
+            part in FORBIDDEN_ARCHIVE_PARTS or part == ".DS_Store" or part.startswith("._")
+            for part in parts
+        )
+        if (
+            path.is_absolute()
+            or invalid_root
+            or ".." in parts
+            or host_artifact
+            or member.issym()
+            or member.islnk()
+            or not (member.isfile() or member.isdir())
+        ):
+            raise RuntimeError(f"Unexpected deployment archive member: {member.name}")
+
+
+def _stage_archive(source: Path, destination: Path) -> None:
+    with tarfile.open(source, "r:gz") as archive:
+        members = archive.getmembers()
+        _validate_archive_members(members)
+        archive.extractall(destination, members=members, filter="data")
+    if not (destination / "backend").is_dir() or not (destination / "tools").is_dir():
+        raise RuntimeError("Deployment archive must contain backend and tools directories")
+
+
+def _replace_directory(source: Path, destination: Path) -> None:
+    """Replace a deployed tree exactly, restoring the old tree if the move fails."""
+    retired = destination.with_name(f".{destination.name}.pre-upgrade-{os.getpid()}")
+    if retired.exists():
+        raise RuntimeError(f"Stale upgrade directory exists: {retired}")
+    if destination.exists():
+        destination.rename(retired)
+    try:
+        source.rename(destination)
+    except Exception:
+        if retired.exists() and not destination.exists():
+            retired.rename(destination)
+        raise
+    shutil.rmtree(retired, ignore_errors=True)
+
+
 def main() -> None:
     if os.geteuid() != 0:
         raise SystemExit("Run as root")
@@ -71,13 +130,29 @@ def main() -> None:
         ).fetchall()
     if active:
         raise SystemExit("Active jobs exist; let them finish before upgrading")
+    gemini_pool = Path("/etc/credstore.encrypted/noir-gemini-api-keys")
+    if not gemini_pool.is_file():
+        raise SystemExit(
+            "Encrypted Gemini key pool is missing; install "
+            "/etc/credstore.encrypted/noir-gemini-api-keys before upgrading"
+        )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup = Path("/var/backups/noir") / stamp
     backup.mkdir(parents=True, mode=0o700)
     backup.parent.chmod(0o700)
-    current_environment = _read_environment(Path("/etc/noir/backend.env"))
-    _migrate_openrouter_credential(current_environment)
-    subprocess.run(["systemctl", "stop", "noir"], check=True)
+    staging = Path(tempfile.mkdtemp(prefix=".noir-upgrade-", dir="/opt/noir"))
+    try:
+        _stage_archive(source, staging)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    try:
+        current_environment = _read_environment(Path("/etc/noir/backend.env"))
+        _migrate_openrouter_credential(current_environment)
+        subprocess.run(["systemctl", "stop", "noir"], check=True)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     try:
         with (
             sqlite3.connect(database) as connection,
@@ -97,24 +172,10 @@ def main() -> None:
         shutil.copy2("/opt/noir/deployment/service.py", backup / "service.py")
         _write_environment(backup / "backend.env", current_environment)
         shutil.copy2("/etc/systemd/system/noir.service", backup / "noir.service")
-        with tarfile.open(source, "r:gz") as archive:
-            # Only extract this application; refuse symlinks and path traversal.
-            for member in archive.getmembers():
-                if (
-                    (
-                        member.name not in {"backend", "tools"}
-                        and not member.name.startswith(("backend/", "tools/"))
-                    )
-                    or ".." in Path(member.name).parts
-                    or member.issym()
-                    or member.islnk()
-                ):
-                    raise RuntimeError("Unexpected deployment archive member")
-            archive.extractall("/opt/noir", filter="data")
-        # macOS tar archives can carry AppleDouble sidecars as extended metadata.
-        # They are never source files and make the Linux C# compiler reject the tree.
-        for metadata in Path("/opt/noir").rglob("._*"):
-            metadata.unlink()
+        # Replace both source trees exactly so removed or renamed modules cannot
+        # survive an upgrade and create a mixed-version deployment.
+        _replace_directory(staging / "backend", Path("/opt/noir/backend"))
+        _replace_directory(staging / "tools", Path("/opt/noir/tools"))
         if not shutil.which("dotnet"):
             subprocess.run(
                 [
@@ -160,14 +221,11 @@ def main() -> None:
         shutil.copy2(
             "/opt/noir/backend/deploy/ec2/noir.service", "/etc/systemd/system/noir.service"
         )
-        desired_environment = _read_environment(
-            Path("/opt/noir/backend/deploy/ec2/backend.env")
-        )
+        desired_environment = _read_environment(Path("/opt/noir/backend/deploy/ec2/backend.env"))
         for name in (
             "NOIR_AI_PROVIDER",
             "NOIR_AI_MODEL",
             "NOIR_AI_FALLBACK_MODEL",
-            "NOIR_GEMINI_API_KEYS",
             "NOIR_DISCOVERY_PROVIDER",
             "NOIR_OPENROUTER_DISCOVERY_MODEL",
             "NOIR_OPENROUTER_DISCOVERY_FALLBACK_MODEL",
@@ -207,6 +265,8 @@ def main() -> None:
         subprocess.run(["systemctl", "stop", "noir"], check=False)
         print(f"Upgrade stopped safely. Backup: {backup}")
         raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 if __name__ == "__main__":

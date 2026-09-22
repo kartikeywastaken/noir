@@ -152,7 +152,9 @@ def validate_apk(
             from noir.infrastructure.dex.integrity import verify_dex_header
 
             dex_entries = [
-                e for e in entries if e.filename.startswith("classes") and e.filename.endswith(".dex")
+                e
+                for e in entries
+                if e.filename.startswith("classes") and e.filename.endswith(".dex")
             ]
             result["has_dex"] = len(dex_entries) > 0
             dex_verification: dict[str, dict[str, Any]] = {}
