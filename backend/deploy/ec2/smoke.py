@@ -170,7 +170,9 @@ def main() -> None:
         verified = call("GET", f"{prefix}/builds/{build['build_id']}/verify")
         require(verified["verified"], verified)
         download = client.get(
-            f"{prefix}/builds/{build['build_id']}/download", params={"artifact": "signed"}
+            f"{prefix}/builds/{build['build_id']}/download",
+            params={"artifact": "signed"},
+            follow_redirects=True,
         )
         download.raise_for_status()
         output = DIRECTORY / "noir-cloud-verified-signed.apk"
