@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import sqlite3
@@ -14,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from urllib.request import urlopen
 
 SECRET_ENVIRONMENT_KEYS = {"NOIR_OPENROUTER_API_KEY"}
+APKTOOL_JAR = "apktool_3.0.3.jar"
 FORBIDDEN_ARCHIVE_PARTS = {
     ".git",
     ".mypy_cache",
@@ -103,6 +106,42 @@ def _stage_archive(source: Path, destination: Path) -> None:
         raise RuntimeError("Deployment archive must contain backend and tools directories")
 
 
+def _preserve_apktool_jar(staging: Path, deployed_tools: Path) -> None:
+    """Carry the pinned, non-Git Apktool runtime into the exact tools replacement."""
+    source = deployed_tools / APKTOOL_JAR
+    checksum_file = staging / "backend/deploy/ec2/apktool.sha256"
+    if not source.is_file():
+        raise RuntimeError(f"Required deployed runtime artifact is missing: {source}")
+    if not checksum_file.is_file():
+        raise RuntimeError(f"Apktool checksum manifest is missing: {checksum_file}")
+
+    expected: str | None = None
+    for line in checksum_file.read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1].lstrip("*") == APKTOOL_JAR:
+            expected = fields[0].lower()
+            break
+    if expected is None:
+        raise RuntimeError(f"No checksum recorded for {APKTOOL_JAR}")
+
+    with source.open("rb") as stream:
+        actual = hashlib.file_digest(stream, "sha256").hexdigest()
+    if actual != expected:
+        raise RuntimeError(
+            f"Deployed {APKTOOL_JAR} checksum mismatch: expected {expected}, got {actual}"
+        )
+    shutil.copy2(source, staging / "tools" / APKTOOL_JAR)
+
+
+def _health_is_release_ready(payload: object) -> bool:
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        return False
+    capabilities = payload.get("capabilities")
+    return isinstance(capabilities, dict) and all(
+        capabilities.get(name) is True for name in ("import", "build", "ai")
+    )
+
+
 def _replace_directory(source: Path, destination: Path) -> None:
     """Replace a deployed tree exactly, restoring the old tree if the move fails."""
     retired = destination.with_name(f".{destination.name}.pre-upgrade-{os.getpid()}")
@@ -143,6 +182,7 @@ def main() -> None:
     staging = Path(tempfile.mkdtemp(prefix=".noir-upgrade-", dir="/opt/noir"))
     try:
         _stage_archive(source, staging)
+        _preserve_apktool_jar(staging, Path("/opt/noir/tools"))
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -253,11 +293,13 @@ def main() -> None:
         for _ in range(30):
             try:
                 with urlopen("http://127.0.0.1:8787/v1/health", timeout=5) as response:
-                    if response.status == 200:
+                    payload = json.load(response)
+                    if response.status == 200 and _health_is_release_ready(payload):
                         print(f"Upgrade healthy. Pre-upgrade database/source backup: {backup}")
                         return
-            except OSError:
-                time.sleep(1)
+            except (OSError, ValueError):
+                pass
+            time.sleep(1)
         raise RuntimeError("Updated service did not become healthy")
     except Exception:
         # Never silently roll a private-workspace database back to an old server
