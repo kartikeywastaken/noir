@@ -16,7 +16,6 @@ import {
   FileArchive,
   History,
   RefreshCw,
-  ShieldCheck,
   Terminal,
   Trash2,
   X,
@@ -72,15 +71,12 @@ type Review = {
   paths: string[];
   operationCount: number;
 };
-type UploadSession = {
+type S3UploadSession = {
   upload_id: string;
   project_id: string;
-  upload_mode?: string;
-  part_size?: number;
-  total_parts?: number;
-  offset?: number;
-  chunk_size?: number;
-  size?: number;
+  upload_mode: "s3";
+  part_size: number;
+  total_parts: number;
   completed_parts?: CompletedPart[];
 };
 type PendingPart = { part_number: number; bytes: ArrayBuffer; checksum_sha256: string };
@@ -233,7 +229,6 @@ export default function Home() {
   const [logsDrawerOpen, setLogsDrawerOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [aiConsent, setAiConsent] = useState(true);
 
   const working = ["uploading", "importing", "previewing", "building"].includes(phase);
   const deterministic = isDeterministicPrompt(request);
@@ -391,16 +386,15 @@ export default function Home() {
     const fileBytes = await file.arrayBuffer();
     const sha256 = hexDigest(await crypto.subtle.digest("SHA-256", fileBytes));
     setProgress(5);
-
-    // Ask backend which upload mode it supports (s3 or proxy).
-    // Locally there is no S3, so the backend returns a proxy session.
-    // On production with S3 configured, it returns upload_mode=s3.
-    setStatusMessage("Opening upload session...");
-    addLog("UPLOAD", "Negotiating upload session with backend");
-    const session = await apiJson<UploadSession>(
+    setStatusMessage("Connecting to S3 upload...");
+    addLog("UPLOAD", "Opening direct S3 upload");
+    const session = await apiJson<S3UploadSession>(
       "/v1/uploads",
-      jsonRequest("POST", { filename: file.name, size: file.size, sha256 }, key),
+      jsonRequest("POST", { filename: file.name, size: file.size, sha256, upload_mode: "s3" }, key),
     );
+    if (session.upload_mode !== "s3" || !session.upload_id || !Number.isInteger(session.part_size) || session.part_size < 5 * 1024 * 1024) {
+      throw new Error("Direct S3 upload is unavailable.");
+    }
     const historyId = session.project_id;
     upsertHistory({
       id: historyId,
@@ -413,102 +407,70 @@ export default function Home() {
       updatedAt: new Date().toISOString(),
     });
 
-    if (session.upload_mode === "s3" && session.part_size && session.total_parts) {
-      // ── S3 multipart path (production) ────────────────────────────
-      addLog("AWS", "Direct S3 multipart upload");
-      const completedParts = new Map<number, CompletedPart>(
-        (session.completed_parts ?? []).map((part) => [part.part_number, part]),
-      );
-      let uploadedBytes = [...completedParts.values()].reduce((sum, part) => sum + part.size, 0);
-      const pendingNumbers = Array.from({ length: session.total_parts }, (_, index) => index + 1)
-        .filter((partNumber) => !completedParts.has(partNumber));
+    const completedParts = new Map<number, CompletedPart>(
+      (session.completed_parts ?? []).map((part) => [part.part_number, part]),
+    );
+    let uploadedBytes = [...completedParts.values()].reduce((sum, part) => sum + part.size, 0);
+    const pendingNumbers = Array.from({ length: session.total_parts }, (_, index) => index + 1)
+      .filter((partNumber) => !completedParts.has(partNumber));
 
-      for (let start = 0; start < pendingNumbers.length; start += 4) {
-        const numbers = pendingNumbers.slice(start, start + 4);
-        const pending = await Promise.all(numbers.map(async (partNumber): Promise<PendingPart> => {
-          const offset = (partNumber - 1) * session.part_size!;
-          const bytes = fileBytes.slice(offset, Math.min(offset + session.part_size!, file.size));
-          return {
-            part_number: partNumber,
-            bytes,
-            checksum_sha256: base64Digest(await crypto.subtle.digest("SHA-256", bytes)),
-          };
-        }));
-        const authorization = await retry(() => apiJson<{ parts: PresignedPart[] }>(
-          `/v1/uploads/${session.upload_id}/parts/presign`,
-          jsonRequest("POST", { parts: pending.map(({ part_number, checksum_sha256 }) => ({ part_number, checksum_sha256 })) }),
-        ));
-        const byNumber = new Map(authorization.parts.map((part) => [part.part_number, part]));
-        const uploaded = await Promise.all(pending.map(async (part): Promise<CompletedPart> => {
-          const signed = byNumber.get(part.part_number);
-          if (!signed) throw new Error(`Upload authorization missing for part ${part.part_number}.`);
-          const checksumHeader = Object.entries(signed.headers).find(([name]) => name.toLowerCase() === "x-amz-checksum-sha256");
-          if (Object.keys(signed.headers).length !== 1 || checksumHeader?.[1] !== part.checksum_sha256) {
-            throw new Error("The backend returned unsafe upload headers.");
-          }
-          const response = await retry(async () => {
-            const result = await fetch(signed.url, {
-              method: "PUT",
-              headers: { "x-amz-checksum-sha256": part.checksum_sha256 },
-              body: part.bytes,
-            });
-            if (!result.ok) throw new Error(`S3 rejected part ${part.part_number} (${result.status}).`);
-            return result;
+    for (let start = 0; start < pendingNumbers.length; start += 4) {
+      const numbers = pendingNumbers.slice(start, start + 4);
+      const pending = await Promise.all(numbers.map(async (partNumber): Promise<PendingPart> => {
+        const offset = (partNumber - 1) * session.part_size;
+        const bytes = fileBytes.slice(offset, Math.min(offset + session.part_size, file.size));
+        return {
+          part_number: partNumber,
+          bytes,
+          checksum_sha256: base64Digest(await crypto.subtle.digest("SHA-256", bytes)),
+        };
+      }));
+      const authorization = await retry(() => apiJson<{ parts: PresignedPart[] }>(
+        `/v1/uploads/${session.upload_id}/parts/presign`,
+        jsonRequest("POST", { parts: pending.map(({ part_number, checksum_sha256 }) => ({ part_number, checksum_sha256 })) }),
+      ));
+      const byNumber = new Map(authorization.parts.map((part) => [part.part_number, part]));
+      const uploaded = await Promise.all(pending.map(async (part): Promise<CompletedPart> => {
+        const signed = byNumber.get(part.part_number);
+        if (!signed) throw new Error(`Upload authorization missing for part ${part.part_number}.`);
+        const checksumHeader = Object.entries(signed.headers).find(([name]) => name.toLowerCase() === "x-amz-checksum-sha256");
+        if (Object.keys(signed.headers).length !== 1 || checksumHeader?.[1] !== part.checksum_sha256) {
+          throw new Error("The backend returned unsafe upload headers.");
+        }
+        const response = await retry(async () => {
+          const result = await fetch(signed.url, {
+            method: "PUT",
+            headers: { "x-amz-checksum-sha256": part.checksum_sha256 },
+            body: part.bytes,
           });
-          const etag = response.headers.get("etag")?.trim() ?? "";
-          if (!/^"?[a-f\d]{32}(?:-\d+)?"?$/i.test(etag)) throw new Error("S3 did not acknowledge the uploaded part.");
-          const result = { part_number: part.part_number, etag, checksum_sha256: part.checksum_sha256, size: part.bytes.byteLength };
-          completedParts.set(part.part_number, result);
-          uploadedBytes += result.size;
-          const pct = 5 + Math.round((uploadedBytes / file.size) * 25);
-          setProgress(pct);
-          setStatusMessage(`Uploading APK (${Math.round((uploadedBytes / file.size) * 100)}%)...`);
+          if (!result.ok) throw new Error(`S3 rejected part ${part.part_number} (${result.status}).`);
           return result;
-        }));
-        await retry(() => apiJson<UploadSession>(
-          `/v1/uploads/${session.upload_id}/parts`,
-          jsonRequest("PUT", { parts: uploaded }),
-        ));
-      }
-      if (uploadedBytes !== file.size || completedParts.size !== session.total_parts) throw new Error("S3 upload is incomplete.");
-      addLog("AWS", "Direct upload complete; import queued");
-    } else {
-      // ── Proxy chunked PATCH path (local dev + fallback) ────────────
-      addLog("PROXY", "Chunked proxy upload (local mode)");
-      const chunkSize = session.chunk_size ?? 2 * 1024 * 1024; // 2 MB default
-      let offset = session.offset ?? 0;
-      while (offset < file.size) {
-        const chunk = fileBytes.slice(offset, Math.min(offset + chunkSize, file.size));
-        const response = await retry(() =>
-          fetch(`/api/noir/v1/uploads/${session.upload_id}`, {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/octet-stream",
-              "Upload-Offset": String(offset),
-              "Content-Length": String(chunk.byteLength),
-            },
-            body: chunk,
-          }).then(async (res) => {
-            if (!res.ok) {
-              const body = await res.json().catch(() => null) as Record<string, unknown> | null;
-              throw new Error(String(body?.detail ?? `Upload chunk failed (${res.status})`));
-            }
-            return res;
-          }),
-        );
-        offset = parseInt(response.headers.get("upload-offset") ?? String(offset + chunk.byteLength), 10);
-        const pct = 5 + Math.round((offset / file.size) * 25);
+        });
+        const etag = response.headers.get("etag")?.trim() ?? "";
+        if (!/^"?[a-f\d]{32}(?:-\d+)?"?$/i.test(etag)) throw new Error("S3 did not acknowledge the uploaded part.");
+        const result = { part_number: part.part_number, etag, checksum_sha256: part.checksum_sha256, size: part.bytes.byteLength };
+        completedParts.set(part.part_number, result);
+        uploadedBytes += result.size;
+        const pct = 5 + Math.round((uploadedBytes / file.size) * 25);
         setProgress(pct);
-        setStatusMessage(`Uploading APK (${Math.round((offset / file.size) * 100)}%)...`);
-      }
-      addLog("PROXY", "Upload complete; import queued");
+        setStatusMessage(`Uploading APK (${Math.round((uploadedBytes / file.size) * 100)}%)...`);
+        return result;
+      }));
+      await retry(() => apiJson<S3UploadSession>(
+        `/v1/uploads/${session.upload_id}/parts`,
+        jsonRequest("PUT", { parts: uploaded }),
+      ));
     }
-
+    if (uploadedBytes !== file.size || completedParts.size !== session.total_parts) throw new Error("S3 upload is incomplete.");
+    addLog("AWS", "Direct upload complete; import queued");
     setPhase("importing");
     setStatusMessage("Decoding APK with Apktool...");
     const job = await apiJson<Job>(
       `/v1/uploads/${session.upload_id}/complete?authorized=true`,
-      jsonRequest("POST", { user_request: prompt }, key),
+      jsonRequest("POST", {
+        parts: [...completedParts.values()].sort((a, b) => a.part_number - b.part_number),
+        user_request: prompt,
+      }, key),
     );
     upsertHistory({
       id: historyId,
@@ -528,15 +490,10 @@ export default function Home() {
     return imported;
   }, [addLog, pollJob, upsertHistory]);
 
-  const startPreview = useCallback(async (overrideConsent?: boolean) => {
+  const startPreview = useCallback(async () => {
     if (!selectedFile && !project) {
       fileInputRef.current?.click();
       setError("Please attach an APK first.");
-      return;
-    }
-    const currentConsent = overrideConsent !== undefined ? overrideConsent : aiConsent;
-    if (!currentConsent) {
-      setError("Consent is required to send APK context to Gemini");
       return;
     }
     if (working) return;
@@ -552,7 +509,7 @@ export default function Home() {
         `/v1/projects/${activeProject.id}/workflow/prepare`,
         jsonRequest("POST", {
           user_request: request.trim(),
-          allow_ai_upload: true,
+          allow_ai_upload: !deterministic,
           revision: activeProject.workspace_revision,
           model: selectedModel,
         }, crypto.randomUUID()),
@@ -650,7 +607,7 @@ export default function Home() {
       setPhase("error");
       addLog("ERROR", message);
     }
-  }, [addLog, aiConsent, deterministic, project, request, selectedFile, selectedModel, uploadAndImport, upsertHistory, working, pollJob]);
+  }, [addLog, deterministic, project, request, selectedFile, selectedModel, uploadAndImport, upsertHistory, working, pollJob]);
 
   const approveBuild = useCallback(async () => {
     if (!project || !review || phase !== "review") return;
@@ -929,30 +886,13 @@ export default function Home() {
             {/* Error Notification */}
             {error && (
               <div className="error-pane">
-                <div className="error-msg-wrap">
-                  <span>{error}</span>
-                  {error.toLowerCase().includes("consent") && (
-                    <button
-                      type="button"
-                      className="error-consent-btn"
-                      onClick={() => {
-                        setAiConsent(true);
-                        setError("");
-                        void startPreview(true);
-                      }}
-                    >
-                      <ShieldCheck size={13} />
-                      <span>Grant Consent &amp; Retry</span>
-                    </button>
-                  )}
-                </div>
+                <span>{error}</span>
                 <button
                   type="button"
                   onClick={() => setError("")}
-                  className="error-close-btn"
-                  aria-label="Dismiss error"
+                  className="text-red-500 hover:text-red-700"
                 >
-                  <X size={13} />
+                  <X size={12} />
                 </button>
               </div>
             )}
@@ -976,19 +916,6 @@ export default function Home() {
 
               {/* Right Action Cluster */}
               <div className="desktop-right-cluster">
-                {/* AI Consent Toggle Button */}
-                <button
-                  type="button"
-                  className={`consent-btn ${aiConsent ? "is-granted" : "is-revoked"}`}
-                  onClick={() => setAiConsent((v) => !v)}
-                  disabled={working || phase === "complete"}
-                  title={aiConsent ? "AI upload consent is granted (click to toggle off)" : "Click to grant AI upload consent"}
-                  aria-label="Toggle AI Upload Consent"
-                >
-                  <ShieldCheck size={12} className={aiConsent ? "text-emerald-600" : "text-slate-400"} />
-                  <span>{aiConsent ? "AI Consent" : "No Consent"}</span>
-                </button>
-
                 {/* Model Selector Popover */}
                 {!deterministic && <div className="relative">
                   <button
@@ -1044,7 +971,7 @@ export default function Home() {
                 <button
                   type="button"
                   className="send-btn"
-                  onClick={() => (phase === "review" ? approveBuild() : startPreview())}
+                  onClick={phase === "review" ? approveBuild : startPreview}
                   disabled={working || (!selectedFile && !request.trim())}
                   aria-label="Submit APK Change"
                 >
