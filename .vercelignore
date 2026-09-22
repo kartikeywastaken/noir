@@ -1,0 +1,11 @@
+backend/
+frontend/
+website/
+.agents/
+localhost/
+.sites-runtime/
+android-tools/
+dist/
+*.apk
+*.zip
+*.tar.gz
