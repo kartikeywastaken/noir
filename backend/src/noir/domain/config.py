@@ -229,15 +229,26 @@ class NoirConfig(BaseSettings):
     def _detect_android_sdk(cls, v: str) -> str:
         if v:
             return v
-        # Check ANDROID_HOME and ANDROID_SDK_ROOT
-        for env_var in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        # Check explicit NOIR_ANDROID_SDK_DIR, ANDROID_HOME and ANDROID_SDK_ROOT
+        for env_var in ("NOIR_ANDROID_SDK_DIR", "ANDROID_HOME", "ANDROID_SDK_ROOT"):
             val = os.environ.get(env_var, "")
             if val and Path(val).is_dir():
                 return val
+        # Check Homebrew android-commandlinetools on macOS
+        brew_cmdline = Path("/opt/homebrew/share/android-commandlinetools")
+        if brew_cmdline.is_dir():
+            return str(brew_cmdline)
         # Check common macOS location
         mac_path = Path.home() / "Library" / "Android" / "sdk"
         if mac_path.is_dir():
             return str(mac_path)
+        # Check /usr/local/share standard locations
+        for p in (
+            Path("/usr/local/share/android-commandlinetools"),
+            Path("/usr/local/share/android-sdk"),
+        ):
+            if p.is_dir():
+                return str(p)
         # Check common Linux location
         linux_path = Path.home() / "Android" / "Sdk"
         if linux_path.is_dir():
@@ -278,6 +289,13 @@ class NoirConfig(BaseSettings):
             sdk_path = Path(self.android_sdk_dir) / "build-tools" / self.build_tools_version / tool
             if sdk_path.exists():
                 return str(sdk_path)
+            # Scan all versions in build-tools
+            build_tools_dir = Path(self.android_sdk_dir) / "build-tools"
+            if build_tools_dir.is_dir():
+                for version_dir in sorted(build_tools_dir.iterdir(), reverse=True):
+                    candidate = version_dir / tool
+                    if candidate.is_file() and os.access(candidate, os.X_OK):
+                        return str(candidate)
         if self.android_sdk_dir and tool == "adb":
             adb_path = Path(self.android_sdk_dir) / "platform-tools" / "adb"
             if adb_path.exists():

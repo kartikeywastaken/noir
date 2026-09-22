@@ -189,9 +189,31 @@ def _create_discovery_provider(config):
         return LocalDiscoveryProvider(config)
 
 
+def _apply_strategy_metadata(plan, detected_intents: list[str]):
+    """Describe how an advanced plan reaches the existing APK.
+
+    The deterministic runtime path sets this metadata directly. Advanced plans
+    are grounded in model-selected files, so derive the strategy only from the
+    approved plan shape instead of claiming that a runtime Dex was injected.
+    """
+    strategies: list[str] = []
+    if plan.file_changes:
+        strategies.append("existing_file")
+    if plan.component_changes:
+        strategies.append("manifest_component")
+    if any(
+        change.operation.value == "smali_insert_at_anchor"
+        for change in plan.file_changes
+    ):
+        strategies.append("minimal_smali_bridge")
+    if len(strategies) > 1:
+        strategies.append("hybrid")
+    plan.detected_intents = list(dict.fromkeys(detected_intents))
+    plan.patch_strategies = strategies
+    return plan
+
+
 def generate_plan(config, project_id, request, consent, *, analysis=None, model=None):
-    if not consent:
-        raise PlanServiceError("Explicit AI upload consent required")
     with project_lock(config, project_id):
         require_clean_workspace(config, project_id)
         analysis = analysis or AnalysisService(config).analyze(
@@ -200,8 +222,49 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         if not analysis:
             raise PlanServiceError("No analysis available")
 
-        # Check the plan cache before making any API calls.
+        workspace = ProjectWorkspace(project_id, config)
+
+        # Milestone 1: Pre-flight deterministic gates G1–G4 prior to model invocation or build
+        from noir.application.gates import PreflightGateEngine
+
+        gate_engine = PreflightGateEngine(config)
+        g1_result = gate_engine.evaluate_g1(request, analysis=analysis, workspace=workspace)
+        g2_result = gate_engine.evaluate_g2()
+        g3_result = gate_engine.evaluate_g3(request, analysis=analysis, workspace=workspace)
+        g4_result = gate_engine.evaluate_g4(workspace=workspace)
+
+        # Gate 2 blocks toolchain defects before corrupting APK
+        if not g2_result.passed:
+            raise PlanServiceError(f"Preflight gate G2 failed: {g2_result.message}")
+        # Gate 3 blocks cross-layer regressions (e.g. DEX patch on Flutter/Unity AOT)
+        if not g3_result.passed:
+            raise PlanServiceError(f"Preflight gate G3 failed: {g3_result.message}")
+        # Gate 4 blocks corrupted baseline workspaces
+        if not g4_result.passed:
+            raise PlanServiceError(f"Preflight gate G4 failed: {g4_result.message}")
+
+        # Gate 1: Guaranteed operations are parsed and generated locally. Intent routing
+        # is used only as a guard against silently dropping an advanced clause.
+        from noir.application.deterministic_service import (
+            create_deterministic_plan,
+            parse_operation_spec,
+        )
+        from noir.infrastructure.ai.intent_router import IntentRouter
+
+        deterministic_context = AiContextTools(workspace, analysis)
+        routed = IntentRouter().route(request, deterministic_context, analysis)
+        spec = parse_operation_spec(request, set(routed.matched_intents))
         project = ProjectRepository().get(project_id)
+        if spec and project:
+            plan = create_deterministic_plan(
+                project_id, project.workspace_revision, request, spec, workspace
+            )
+            return PlanService(config).create_plan(plan)
+
+        if not consent:
+            raise PlanServiceError("Explicit AI upload consent required for advanced requests")
+
+        # Check the plan cache before making any API calls.
         revision = project.workspace_revision if project else 0
         selected_model = model or config.ai_model
         cached = _plan_cache.get(project_id, revision, request, selected_model)
@@ -209,7 +272,6 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             logger.info("Plan cache hit for project=%s revision=%d", project_id, revision)
             return cached
 
-        workspace = ProjectWorkspace(project_id, config)
         context_tools = AiContextTools(workspace, analysis)
         generation_provider = _create_generation_provider(config, selected_model)
         budget = _WorkflowCallBudget(config)
@@ -218,6 +280,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         discovery_transcript: list[dict] = []
         discovery_api_calls = 0
         discovery_stop_reason = ""
+        detected_intents: list[str] = []
         try:
             from noir.infrastructure.ai.discovery import build_discovered_context
             from noir.infrastructure.ai.intent_router import IntentRouter
@@ -231,6 +294,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
                     context_tools, route_result, user_request=request
                 )
                 context["detected_intents"] = route_result.matched_intents
+                detected_intents = route_result.matched_intents
             else:
                 logger.warning(
                     "No intent matched for request; falling through to AI discovery"
@@ -272,6 +336,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
         plan.discovery_transcript = discovery_transcript
         plan.discovery_api_calls = discovery_api_calls
         plan.discovery_stop_reason = discovery_stop_reason
+        _apply_strategy_metadata(plan, detected_intents)
 
         # The human-readable inventory is independently byte-bounded and can omit a
         # binary that was deliberately selected for structured inspection. Evidence
@@ -292,6 +357,7 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             plan.discovery_transcript = discovery_transcript
             plan.discovery_api_calls = discovery_api_calls
             plan.discovery_stop_reason = discovery_stop_reason
+            _apply_strategy_metadata(plan, detected_intents)
             invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
         if invalid:
             missing = ", ".join(invalid[:10])
@@ -320,6 +386,23 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None,
         ):
             raise PlanServiceError("Approve the plan before any AI patch request")
         require_clean_workspace(config, project_id)
+        if plan.execution_mode == "deterministic":
+            from noir.application.deterministic_service import (
+                create_deterministic_patch,
+                operation_spec_from_plan,
+            )
+
+            try:
+                spec = operation_spec_from_plan(plan)
+            except ValueError as exc:
+                raise PlanServiceError(str(exc)) from exc
+            patch = create_deterministic_patch(
+                ProjectWorkspace(project_id, config),
+                plan,
+                spec,
+                project.original_sha256,
+            )
+            return PatchService(config).store_patch(patch, preview=preview)
         analysis = analysis or AnalysisService(config).analyze(
             project_id, ProjectWorkspace(project_id, config), persist=False
         )
@@ -327,4 +410,7 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None,
             [change.relative_path for change in plan.file_changes], user_request=plan.user_request
         )
         patch = _create_generation_provider(config, model).generate_patch(plan, context)
+        patch.detected_intents = plan.detected_intents
+        patch.patch_strategies = plan.patch_strategies
+        patch.runtime_configuration = plan.runtime_configuration
         return PatchService(config).store_patch(patch, preview=preview)

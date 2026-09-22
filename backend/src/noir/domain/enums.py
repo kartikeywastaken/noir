@@ -57,6 +57,8 @@ class PatchOperationType(StrEnum):
     NATIVE_BYTE_PATCH = "native_byte_patch"
     NATIVE_NOP_RANGE = "native_nop_range"
     NATIVE_BRANCH_REDIRECT = "native_branch_redirect"
+    DEX_STRING_PATCH = "dex_string_patch"
+    DEX_BYTE_PATCH = "dex_byte_patch"
 
 
 class Provenance(StrEnum):

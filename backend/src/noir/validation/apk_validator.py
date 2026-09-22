@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from noir.domain.config import NoirConfig
 
@@ -20,7 +21,12 @@ class ApkValidationError(Exception):
         self.code = code
 
 
-def validate_apk(apk_path: str | Path, config: NoirConfig | None = None) -> dict:
+def validate_apk(
+    apk_path: str | Path,
+    config: NoirConfig | None = None,
+    *,
+    require_valid_dex_headers: bool = False,
+) -> dict:
     """Validate an APK file for processing.
 
     Returns a dict with validation results and metadata.
@@ -41,6 +47,7 @@ def validate_apk(apk_path: str | Path, config: NoirConfig | None = None) -> dict
         "has_manifest": False,
         "has_dex": False,
         "classification": "unknown",
+        "dex_verification": {},
     }
 
     # File existence and readability
@@ -141,10 +148,28 @@ def validate_apk(apk_path: str | Path, config: NoirConfig | None = None) -> dict
             if not result["has_manifest"]:
                 raise ApkValidationError("APK does not contain AndroidManifest.xml", "no_manifest")
 
-            # Check for classes.dex (not required — resource-only packages exist)
-            result["has_dex"] = any(
-                n.startswith("classes") and n.endswith(".dex") for n in entry_names
-            )
+            # Check for classes*.dex and verify DEX headers
+            from noir.infrastructure.dex.integrity import verify_dex_header
+
+            dex_entries = [
+                e for e in entries if e.filename.startswith("classes") and e.filename.endswith(".dex")
+            ]
+            result["has_dex"] = len(dex_entries) > 0
+            dex_verification: dict[str, dict[str, Any]] = {}
+            for de in dex_entries:
+                raw_dex = zf.read(de.filename)
+                ok, msg = verify_dex_header(raw_dex)
+                dex_verification[de.filename] = {"valid": ok, "message": msg}
+                if not ok:
+                    result["warnings"].append(
+                        f"DEX header verification failed for '{de.filename}': {msg}"
+                    )
+                    if require_valid_dex_headers:
+                        raise ApkValidationError(
+                            f"Corrupted DEX header in '{de.filename}': {msg}",
+                            "corrupted_dex_header",
+                        )
+            result["dex_verification"] = dex_verification
 
             # Classify
             if result["has_dex"]:
@@ -178,3 +203,25 @@ def validate_apk(apk_path: str | Path, config: NoirConfig | None = None) -> dict
 
     result["valid"] = True
     return result
+
+
+def validate_apk_dex_headers(apk_path: str | Path) -> dict[str, tuple[bool, str]]:
+    """Container-level verification of all DEX headers in an APK archive.
+
+    Returns a dict mapping entry name (e.g. 'classes.dex') to (is_valid, message).
+    """
+    from noir.infrastructure.dex.integrity import verify_dex_header
+
+    path = Path(apk_path)
+    if not path.is_file():
+        raise ApkValidationError(f"File not found: {path}", "file_not_found")
+    if not zipfile.is_zipfile(path):
+        raise ApkValidationError(f"Not a valid ZIP container: {path}", "not_zip")
+
+    results: dict[str, tuple[bool, str]] = {}
+    with zipfile.ZipFile(path, "r") as zf:
+        for entry in zf.infolist():
+            if entry.filename.startswith("classes") and entry.filename.endswith(".dex"):
+                raw = zf.read(entry.filename)
+                results[entry.filename] = verify_dex_header(raw)
+    return results
