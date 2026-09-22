@@ -3,31 +3,29 @@
 import {
   ChangeEvent,
   DragEvent,
+  PointerEvent,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
 import {
-  ArrowUp,
+  Check,
   CheckCircle2,
-  ChevronDown,
   Download,
   FileArchive,
-  History,
-  RefreshCw,
+  LockKeyhole,
+  Radio,
+  RotateCcw,
   Terminal,
-  Trash2,
-  X,
+  Upload,
 } from "lucide-react";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
+import { NoirApkCoreHero } from "@/components/noir-android-hero";
 
 type Phase =
   | "empty"
@@ -50,18 +48,6 @@ type Job = {
   result_data?: Record<string, unknown>;
 };
 type Project = { id: string; workspace_revision: number; original_filename: string };
-type HistoryRecord = {
-  id: string;
-  projectId: string;
-  jobId?: string;
-  buildId?: string;
-  filename: string;
-  prompt: string;
-  operations: string[];
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-};
 type Review = {
   planId: string;
   patchId: string;
@@ -71,13 +57,18 @@ type Review = {
   paths: string[];
   operationCount: number;
 };
-type S3UploadSession = {
+type UploadSession = {
   upload_id: string;
-  project_id: string;
-  upload_mode: "s3";
-  part_size: number;
-  total_parts: number;
+  project_id?: string;
+  upload_mode: "s3" | "proxy";
+  // S3 mode fields
+  part_size?: number;
+  total_parts?: number;
   completed_parts?: CompletedPart[];
+  // Proxy mode fields
+  chunk_size?: number;
+  offset?: number;
+  size?: number;
 };
 type PendingPart = { part_number: number; bytes: ArrayBuffer; checksum_sha256: string };
 type CompletedPart = { part_number: number; etag: string; checksum_sha256: string; size: number };
@@ -96,33 +87,18 @@ type ModelId =
 const models: Array<{ id: ModelId; label: string; note: string }> = [
   { id: "gemini-3.6-flash",              label: "3.6 Flash",       note: "Balanced" },
   { id: "gemini-3.5-flash",              label: "3.5 Flash",       note: "Fallback" },
+  { id: "gemini-3.5-flash-lite",         label: "3.5 Flash Lite",  note: "Fast" },
+  { id: "gemini-flash-latest",           label: "Flash Latest",    note: "Stable" },
+  { id: "gemini-3.7-flash",              label: "3.7 Flash",       note: "Preview" },
   { id: "gemini-3.8-flash",              label: "3.8 Flash",       note: "Preview" },
   { id: "gemini-3.1-pro-preview",        label: "3.1 Pro",         note: "Deep plan" },
-  { id: "gemini-3.5-flash-lite",         label: "3.5 Flash Lite",  note: "Fast" },
+  { id: "gemini-3.1-flash-lite",         label: "3.1 Flash Lite",  note: "Light" },
   { id: "openrouter:nvidia/nemotron-3.5-lightning:free", label: "Nemotron", note: "OpenRouter" },
 ];
 
-const quickChips = [
-  {
-    label: "Rename App",
-    prompt: "Rename the app to NOIR Notes and preserve all permissions.",
-  },
-  {
-    label: "Add Toast",
-    prompt: "Display a toast message saying 'Welcome to NOIR' whenever MainActivity starts.",
-  },
-  {
-    label: "Internet Perm",
-    prompt: "Add android.permission.INTERNET permission to AndroidManifest.xml.",
-  },
-  {
-    label: "Network Ping",
-    prompt: "Ping https://example.com/heartbeat on application launch.",
-  },
-];
 
 const openingLogs: Log[] = [
-  { time: "--:--:--", tag: "NOIR", message: "Connecting to NOIR backend" },
+  { time: "--:--:--", tag: "AWS", message: "Connecting to NOIR" },
 ];
 
 const wait = (milliseconds: number) =>
@@ -137,23 +113,6 @@ const stamp = () =>
   }).format(new Date());
 
 const quietStatus = new Set(["queued", "running", "succeeded"]);
-const HISTORY_KEY = "noir.browser.history.v1";
-
-const operationLabels = (prompt: string) => {
-  const labels: string[] = [];
-  if (/\b(rename|change\s+(?:the\s+)?app\s+name|name\s+the\s+app)\b/i.test(prompt)) labels.push("Rename");
-  if (/https?:\/\//i.test(prompt) && /\b(launch|startup|open|redirect|website|site)\b/i.test(prompt)) labels.push("Launch redirect");
-  if (/\b(toast|flash|pop-?up|message)\b/i.test(prompt)) {
-    labels.push(/\b(tap|touch|click|interact|interaction)\b/i.test(prompt) ? "Interaction toast" : "Startup message");
-  }
-  return labels;
-};
-
-const isDeterministicPrompt = (prompt: string) => {
-  const operations = operationLabels(prompt);
-  const unsupported = /\b(?:add|grant|remove|revoke)\s+(?:the\s+)?(?:[\w.]+\s+){0,3}permission|\b(?:layout|button\s+colou?r|native\s+code|unity|il2cpp|service|receiver)\b/i.test(prompt);
-  return operations.length > 0 && !unsupported;
-};
 
 const logTag = (value: string) => value
   .replace(/^validating_input$/i, "VALIDATE")
@@ -207,45 +166,25 @@ const jsonRequest = (method: string, body: unknown, idempotencyKey?: string): Re
 });
 
 export default function Home() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLElement>(null);
+  const feed = useRef<HTMLDivElement>(null);
+  const heroPointerFrame = useRef<number | null>(null);
   const eventCursor = useRef<string | null>(null);
   const lastJobState = useRef("");
-
   const [phase, setPhase] = useState<Phase>("empty");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [request, setRequest] = useState(
     "Rename the app to NOIR Notes and preserve all permissions.",
   );
   const [progress, setProgress] = useState(0);
-  const [statusMessage, setStatusMessage] = useState("");
   const [logs, setLogs] = useState<Log[]>(openingLogs);
   const [project, setProject] = useState<Project | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [buildId, setBuildId] = useState("");
   const [error, setError] = useState("");
   const [backendOnline, setBackendOnline] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ModelId>("gemini-3.6-flash");
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [logsDrawerOpen, setLogsDrawerOpen] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [history, setHistory] = useState<HistoryRecord[]>([]);
-
-  const working = ["uploading", "importing", "previewing", "building"].includes(phase);
-  const deterministic = isDeterministicPrompt(request);
-
-  const saveHistory = useCallback((records: HistoryRecord[]) => {
-    const limited = records.slice(0, 30);
-    setHistory(limited);
-    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(limited));
-  }, []);
-
-  const upsertHistory = useCallback((record: HistoryRecord) => {
-    setHistory((current) => {
-      const next = [record, ...current.filter((item) => item.id !== record.id)].slice(0, 30);
-      window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, []);
 
   const addLog = useCallback((tag: string, message: string) => {
     setLogs((current) => [
@@ -262,10 +201,10 @@ export default function Home() {
       ]);
       const ready = health.status === "ok" && health.capabilities?.import && health.capabilities?.build && Boolean(account.user_id);
       setBackendOnline(Boolean(ready));
-      setLogs([{ time: stamp(), tag: ready ? "LIVE" : "WAIT", message: ready ? "Backend & build tools online" : "Backend is not build-ready" }]);
+      setLogs([{ time: stamp(), tag: ready ? "AWS" : "WAIT", message: ready ? "Backend and build tools online" : "Backend is not build-ready" }]);
     } catch {
       setBackendOnline(false);
-      setLogs([{ time: stamp(), tag: "OFF", message: "Backend currently unreachable" }]);
+      setLogs([{ time: stamp(), tag: "OFF", message: "Backend unavailable" }]);
     }
   }, []);
 
@@ -274,34 +213,9 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [checkBackend]);
 
-  useEffect(() => {
-    try {
-      const parsed = JSON.parse(window.localStorage.getItem(HISTORY_KEY) || "[]") as HistoryRecord[];
-      const records = Array.isArray(parsed) ? parsed.slice(0, 30) : [];
-      setHistory(records);
-      void Promise.all(records.map(async (record) => {
-        if (!record.jobId || ["complete", "failed", "cancelled"].includes(record.status)) return record;
-        try {
-          const job = await apiJson<Job>(`/v1/jobs/${record.jobId}`);
-          const result = (job.result_data?.result || {}) as Record<string, unknown>;
-          return {
-            ...record,
-            status: job.state === "succeeded" && result.build_id ? "complete" : job.state,
-            buildId: result.build_id ? String(result.build_id) : record.buildId,
-            updatedAt: new Date().toISOString(),
-          };
-        } catch {
-          return record;
-        }
-      })).then((reconciled) => saveHistory(reconciled));
-    } catch {
-      window.localStorage.removeItem(HISTORY_KEY);
-    }
-  }, [saveHistory]);
-
   const loadFile = useCallback((file: File) => {
     if (!file.name.toLowerCase().endsWith(".apk")) {
-      setError("Please choose a valid .apk file.");
+      setError("Choose an .apk file.");
       addLog("REFUSE", "Only APK files are accepted");
       return;
     }
@@ -316,22 +230,11 @@ export default function Home() {
     setReview(null);
     setBuildId("");
     setError("");
+    setAuthorized(false);
     eventCursor.current = null;
     lastJobState.current = "";
-    addLog("INPUT", `${file.name} ready (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+    setLogs([{ time: stamp(), tag: "INPUT", message: `${file.name} ready` }]);
   }, [addLog]);
-
-  const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) loadFile(file);
-  };
-
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) loadFile(file);
-  };
 
   const syncEvents = useCallback(async (projectId: string) => {
     const query = eventCursor.current ? `?after=${encodeURIComponent(eventCursor.current)}&limit=100` : "?limit=100";
@@ -355,7 +258,7 @@ export default function Home() {
     ].slice(-160));
   }, []);
 
-  const pollJob = useCallback(async (initial: Job, from: number, to: number, labelPrefix: string) => {
+  const pollJob = useCallback(async (initial: Job, from: number, to: number) => {
     let job = initial;
     for (let attempt = 0; attempt < 900; attempt += 1) {
       if (job.project_id) await syncEvents(job.project_id).catch(() => undefined);
@@ -363,7 +266,6 @@ export default function Home() {
       if (stateKey !== lastJobState.current) {
         lastJobState.current = stateKey;
         addLog(job.stage.toUpperCase(), job.state);
-        setStatusMessage(`${labelPrefix}: ${job.stage.replace(/_/g, " ")} (${job.state})...`);
       }
       if (["succeeded", "failed", "cancelled"].includes(job.state)) break;
       setProgress(Math.min(to - 2, from + Math.round((to - from) * Math.min(attempt / 24, .9))));
@@ -377,48 +279,72 @@ export default function Home() {
     return job;
   }, [addLog, syncEvents]);
 
-  const uploadAndImport = useCallback(async (file: File, prompt: string) => {
+  const uploadAndImport = useCallback(async (file: File) => {
     setPhase("uploading");
-    setStatusMessage("Verifying APK locally...");
     setProgress(2);
     addLog("HASH", "Verifying APK locally");
     const key = crypto.randomUUID();
     const fileBytes = await file.arrayBuffer();
     const sha256 = hexDigest(await crypto.subtle.digest("SHA-256", fileBytes));
     setProgress(5);
-    setStatusMessage("Connecting to S3 upload...");
-    addLog("UPLOAD", "Opening direct S3 upload");
-    const session = await apiJson<S3UploadSession>(
-      "/v1/uploads",
-      jsonRequest("POST", { filename: file.name, size: file.size, sha256, upload_mode: "s3" }, key),
-    );
-    if (session.upload_mode !== "s3" || !session.upload_id || !Number.isInteger(session.part_size) || session.part_size < 5 * 1024 * 1024) {
-      throw new Error("Direct S3 upload is unavailable.");
-    }
-    const historyId = session.project_id;
-    upsertHistory({
-      id: historyId,
-      projectId: session.project_id,
-      filename: file.name,
-      prompt,
-      operations: operationLabels(prompt),
-      status: "uploading",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
 
+    addLog("UPLOAD", "Opening upload session");
+    const session = await apiJson<UploadSession>(
+      "/v1/uploads",
+      jsonRequest("POST", { filename: file.name, size: file.size, sha256 }, key),
+    );
+
+    if (session.upload_mode === "proxy") {
+      // ── Proxy chunked PATCH (localhost / no-S3) ──────────────────────────
+      const chunkSize = session.chunk_size ?? 2 * 1024 * 1024;
+      let offset = session.offset ?? 0;
+      while (offset < file.size) {
+        const chunk = fileBytes.slice(offset, offset + chunkSize);
+        await retry(() => apiJson<UploadSession>(
+          `/v1/uploads/${session.upload_id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/octet-stream",
+              "Upload-Offset": String(offset),
+              "Upload-Length": String(file.size),
+            },
+            body: chunk,
+          },
+        ));
+        offset += chunk.byteLength;
+        setProgress(5 + Math.round((offset / file.size) * 25));
+      }
+      addLog("PROXY", "Upload complete; import queued");
+      setPhase("importing");
+      const job = await apiJson<Job>(
+        `/v1/uploads/${session.upload_id}/complete?authorized=true`,
+        jsonRequest("POST", {}, key),
+      );
+      const completed = await pollJob(job, 30, 48);
+      const projectId = completed.project_id ?? session.upload_id;
+      const imported = await apiJson<Project>(`/v1/projects/${projectId}`);
+      setProject(imported);
+      addLog("IMPORT", "APK decoded and indexed");
+      return imported;
+    }
+
+    // ── S3 multipart (production) ────────────────────────────────────────
+    if (!session.upload_id || !Number.isInteger(session.part_size) || (session.part_size ?? 0) < 5 * 1024 * 1024) {
+      throw new Error("Upload session is invalid.");
+    }
     const completedParts = new Map<number, CompletedPart>(
       (session.completed_parts ?? []).map((part) => [part.part_number, part]),
     );
     let uploadedBytes = [...completedParts.values()].reduce((sum, part) => sum + part.size, 0);
-    const pendingNumbers = Array.from({ length: session.total_parts }, (_, index) => index + 1)
+    const pendingNumbers = Array.from({ length: session.total_parts ?? 1 }, (_, index) => index + 1)
       .filter((partNumber) => !completedParts.has(partNumber));
 
     for (let start = 0; start < pendingNumbers.length; start += 4) {
       const numbers = pendingNumbers.slice(start, start + 4);
       const pending = await Promise.all(numbers.map(async (partNumber): Promise<PendingPart> => {
-        const offset = (partNumber - 1) * session.part_size;
-        const bytes = fileBytes.slice(offset, Math.min(offset + session.part_size, file.size));
+        const offset = (partNumber - 1) * (session.part_size ?? 0);
+        const bytes = fileBytes.slice(offset, Math.min(offset + (session.part_size ?? 0), file.size));
         return {
           part_number: partNumber,
           bytes,
@@ -451,90 +377,48 @@ export default function Home() {
         const result = { part_number: part.part_number, etag, checksum_sha256: part.checksum_sha256, size: part.bytes.byteLength };
         completedParts.set(part.part_number, result);
         uploadedBytes += result.size;
-        const pct = 5 + Math.round((uploadedBytes / file.size) * 25);
-        setProgress(pct);
-        setStatusMessage(`Uploading APK (${Math.round((uploadedBytes / file.size) * 100)}%)...`);
+        setProgress(5 + Math.round((uploadedBytes / file.size) * 25));
         return result;
       }));
-      await retry(() => apiJson<S3UploadSession>(
+      await retry(() => apiJson<UploadSession>(
         `/v1/uploads/${session.upload_id}/parts`,
         jsonRequest("PUT", { parts: uploaded }),
       ));
     }
-    if (uploadedBytes !== file.size || completedParts.size !== session.total_parts) throw new Error("S3 upload is incomplete.");
+    if (uploadedBytes !== file.size || completedParts.size !== (session.total_parts ?? 0)) throw new Error("S3 upload is incomplete.");
     addLog("AWS", "Direct upload complete; import queued");
     setPhase("importing");
-    setStatusMessage("Decoding APK with Apktool...");
     const job = await apiJson<Job>(
       `/v1/uploads/${session.upload_id}/complete?authorized=true`,
-      jsonRequest("POST", {
-        parts: [...completedParts.values()].sort((a, b) => a.part_number - b.part_number),
-        user_request: prompt,
-      }, key),
+      jsonRequest("POST", { parts: [...completedParts.values()].sort((a, b) => a.part_number - b.part_number) }, key),
     );
-    upsertHistory({
-      id: historyId,
-      projectId: session.project_id,
-      jobId: job.job_id,
-      filename: file.name,
-      prompt,
-      operations: operationLabels(prompt),
-      status: job.state,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    const completed = await pollJob(job, 30, 48, "Decoding APK");
+    const completed = await pollJob(job, 30, 48);
     const imported = await apiJson<Project>(`/v1/projects/${completed.project_id}`);
     setProject(imported);
     addLog("IMPORT", "APK decoded and indexed");
     return imported;
-  }, [addLog, pollJob, upsertHistory]);
+  }, [addLog, pollJob]);
 
   const startPreview = useCallback(async () => {
-    if (!selectedFile && !project) {
-      fileInputRef.current?.click();
-      setError("Please attach an APK first.");
-      return;
-    }
-    if (working) return;
+    if (!selectedFile || !authorized || ["uploading", "importing", "previewing", "building"].includes(phase)) return;
     setError("");
     setReview(null);
     try {
-      const activeProject = project ?? await uploadAndImport(selectedFile as File, request.trim());
+      const activeProject = project ?? await uploadAndImport(selectedFile);
       setPhase("previewing");
       setProgress(50);
-      setStatusMessage(deterministic ? "Generating deterministic patch preview..." : "AI generating plan & patch preview...");
-      addLog(deterministic ? "LOCAL" : "AI", deterministic ? "Preparing deterministic operation spec" : "Preparing grounded change plan");
+      addLog("AI", "Preparing grounded change plan");
       const job = await apiJson<Job>(
         `/v1/projects/${activeProject.id}/workflow/prepare`,
         jsonRequest("POST", {
           user_request: request.trim(),
-          allow_ai_upload: !deterministic,
+          allow_ai_upload: true,
           revision: activeProject.workspace_revision,
           model: selectedModel,
         }, crypto.randomUUID()),
       );
-      const completed = await pollJob(job, 50, 88, "Generating Patch");
-      upsertHistory({
-        id: activeProject.id,
-        projectId: activeProject.id,
-        jobId: job.job_id,
-        filename: activeProject.original_filename || selectedFile?.name || "APK",
-        prompt: request.trim(),
-        operations: operationLabels(request),
-        status: completed.state,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      const completed = await pollJob(job, 50, 88);
       const result = (completed.result_data?.result || {}) as Record<string, unknown>;
-      if (result.build_id) {
-        setBuildId(String(result.build_id));
-        setProgress(100);
-        setStatusMessage("Build complete & signed!");
-        setPhase("complete");
-        addLog("VERIFY", "Signed APK verified and ready");
-        return;
-      }
       if (result.plan_id && result.unsupported) {
         const unsupportedPlan = await apiJson<Record<string, unknown>>(
           `/v1/projects/${activeProject.id}/plans/${String(result.plan_id)}`,
@@ -542,7 +426,7 @@ export default function Home() {
         const reasons = Array.isArray(unsupportedPlan.unsupported_aspects)
           ? unsupportedPlan.unsupported_aspects.map(String).filter(Boolean)
           : [];
-        throw new Error(reasons.join(" ") || "NOIR could not find enough evidence to make this change safely.");
+        throw new Error(reasons.join(" ") || "NOIR could not find enough grounded evidence to make this change safely.");
       }
       if (!result.plan_id || !result.patch_id) throw new Error("The backend did not return a reviewable patch.");
       const [plan, patch, diff] = await Promise.all([
@@ -552,7 +436,7 @@ export default function Home() {
       ]);
       const operations = Array.isArray(patch.operations) ? patch.operations as Array<Record<string, unknown>> : [];
       const paths = [...new Set(operations.map((operation) => String(operation.relative_path || "")).filter(Boolean))];
-      const reviewData = {
+      setReview({
         planId: String(plan.plan_id),
         patchId: String(patch.patch_id),
         planHash: String(plan.plan_hash),
@@ -560,60 +444,22 @@ export default function Home() {
         revision: Number(plan.workspace_revision),
         paths,
         operationCount: operations.length || diff.diff?.length || 0,
-      };
-      setReview(reviewData);
-      addLog("REVIEW", "Exact patch generated; automatically proceeding to rebuild & sign");
-
-      // Automated End-to-End Progression: Patch generation -> Rebuild & Sign (R5)
-      setPhase("building");
-      setProgress(88);
-      setStatusMessage("Rebuilding APK with Apktool & signing...");
-      addLog("APPROVE", "Patch accepted; executing automated rebuild & signing");
-
-      const finishJob = await apiJson<Job>(
-        `/v1/projects/${activeProject.id}/workflow/finish`,
-        jsonRequest("POST", {
-          plan_id: reviewData.planId,
-          patch_id: reviewData.patchId,
-          plan_hash: reviewData.planHash,
-          patch_hash: reviewData.patchHash,
-          revision: reviewData.revision,
-          confirm: true,
-        }, crypto.randomUUID()),
-      );
-      const finishCompleted = await pollJob(finishJob, 90, 99, "Rebuilding & Signing");
-      const resultData = (finishCompleted.result_data?.result || {}) as Record<string, string>;
-      if (!resultData.build_id) throw new Error("The backend did not return a verified build.");
-      setBuildId(resultData.build_id);
-      setProgress(100);
-      setStatusMessage("Build complete & signed!");
-      setPhase("complete");
-      addLog("VERIFY", "Signed APK verified and stored in S3");
-      upsertHistory({
-        id: activeProject.id,
-        projectId: activeProject.id,
-        jobId: finishJob.job_id,
-        buildId: resultData.build_id,
-        filename: activeProject.original_filename || selectedFile?.name || "APK",
-        prompt: request.trim(),
-        operations: operationLabels(request),
-        status: "complete",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
       });
+      setProgress(100);
+      setPhase("review");
+      addLog("REVIEW", "Exact patch ready for approval");
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Workflow failed.";
+      const message = caught instanceof Error ? caught.message : "Preview failed.";
       setError(message);
       setPhase("error");
       addLog("ERROR", message);
     }
-  }, [addLog, deterministic, project, request, selectedFile, selectedModel, uploadAndImport, upsertHistory, working, pollJob]);
+  }, [addLog, authorized, phase, pollJob, project, request, selectedFile, selectedModel, uploadAndImport]);
 
   const approveBuild = useCallback(async () => {
     if (!project || !review || phase !== "review") return;
     setPhase("building");
     setProgress(5);
-    setStatusMessage("Rebuilding APK with Apktool & signing...");
     setError("");
     addLog("APPROVE", "Exact plan and patch approved");
     try {
@@ -628,12 +474,11 @@ export default function Home() {
           confirm: true,
         }, crypto.randomUUID()),
       );
-      const completed = await pollJob(job, 8, 94, "Rebuilding & Signing");
+      const completed = await pollJob(job, 8, 94);
       const result = (completed.result_data?.result || {}) as Record<string, string>;
       if (!result.build_id) throw new Error("The backend did not return a verified build.");
       setBuildId(result.build_id);
       setProgress(100);
-      setStatusMessage("Build complete & signed!");
       setPhase("complete");
       addLog("VERIFY", "Signed APK verified and stored in S3");
     } catch (caught) {
@@ -647,382 +492,213 @@ export default function Home() {
   const reset = useCallback(() => {
     setPhase("empty");
     setSelectedFile(null);
-    setProgress(0);
-    setStatusMessage("");
     setProject(null);
     setReview(null);
     setBuildId("");
+    setProgress(0);
     setError("");
+    setAuthorized(false);
     eventCursor.current = null;
     lastJobState.current = "";
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    void checkBackend();
+  }, [checkBackend]);
+
+  useEffect(() => () => {
+    if (heroPointerFrame.current !== null) window.cancelAnimationFrame(heroPointerFrame.current);
   }, []);
 
-  const resumeHistory = useCallback(async (record: HistoryRecord) => {
-    setError("");
-    setRequest(record.prompt);
-    try {
-      const savedProject = await apiJson<Project>(`/v1/projects/${record.projectId}`);
-      setProject(savedProject);
-      if (record.buildId) {
-        setBuildId(record.buildId);
-        setPhase("complete");
-        return;
-      }
-      if (record.jobId && !["failed", "cancelled"].includes(record.status)) {
-        setPhase("previewing");
-        const job = await apiJson<Job>(`/v1/jobs/${record.jobId}`);
-        const completed = ["succeeded", "failed", "cancelled"].includes(job.state)
-          ? job
-          : await pollJob(job, 20, 88, "Resuming");
-        const result = (completed.result_data?.result || {}) as Record<string, unknown>;
-        if (result.build_id) {
-          setBuildId(String(result.build_id));
-          setPhase("complete");
-          upsertHistory({ ...record, buildId: String(result.build_id), status: "complete", updatedAt: new Date().toISOString() });
-          return;
-        }
-      }
-      setPhase("ready");
-      setStatusMessage("Workspace restored. Submit to retry from the clean revision.");
-    } catch (caught) {
-      setPhase("error");
-      setError(caught instanceof Error ? caught.message : "Unable to resume this build.");
-    }
-  }, [pollJob, upsertHistory]);
+  const moveHeroSpotlight = useCallback((event: PointerEvent<HTMLElement>) => {
+    const hero = event.currentTarget;
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+    if (heroPointerFrame.current !== null) return;
+    heroPointerFrame.current = window.requestAnimationFrame(() => {
+      const bounds = hero.getBoundingClientRect();
+      hero.style.setProperty("--grid-x", `${clientX - bounds.left}px`);
+      hero.style.setProperty("--grid-y", `${clientY - bounds.top}px`);
+      heroPointerFrame.current = null;
+    });
+  }, []);
 
-  const removeHistory = useCallback((id: string) => {
-    saveHistory(history.filter((record) => record.id !== id));
-  }, [history, saveHistory]);
+  useEffect(() => {
+    if (feed.current) feed.current.scrollTop = feed.current.scrollHeight;
+  }, [logs]);
 
-  const selectedModelObj = models.find((m) => m.id === selectedModel) || models[0];
+  useEffect(() => {
+    const modelContext = (document as Document & { modelContext?: { registerTool: (tool: Record<string, unknown>, options?: { signal?: AbortSignal }) => void | Promise<void> } }).modelContext;
+    if (!modelContext?.registerTool) return;
+    const lifecycle = new AbortController();
+    void Promise.resolve(modelContext.registerTool({
+      name: "read_noir_workspace",
+      title: "Read NOIR workspace",
+      description: "Read the connected NOIR workspace state without making changes.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: true, untrustedContentHint: false },
+      execute: async (input: unknown) => {
+        if (!input || typeof input !== "object" || Object.keys(input).length > 0) throw new Error("read_noir_workspace does not accept input fields");
+        return { phase, backendOnline, file: selectedFile?.name || null, progress, latestLog: logs.at(-1)?.message || null };
+      },
+    }, { signal: lifecycle.signal })).catch(() => undefined);
+    return () => lifecycle.abort();
+  }, [backendOnline, logs, phase, progress, selectedFile]);
+
+  const working = ["uploading", "importing", "previewing", "building"].includes(phase);
+  const stage = phase === "complete" ? 3 : phase === "building" ? 2 : phase === "review" ? 1 : 0;
+  const buttonText = phase === "uploading" ? "Uploading APK…"
+    : phase === "importing" ? "Decoding APK…"
+      : phase === "previewing" ? "Preparing preview…"
+        : phase === "review" ? "Approve patch & build"
+          : phase === "building" ? "Building verified APK…"
+            : phase === "complete" ? "Build verified"
+              : project ? "Retry preview" : "Preview exact changes";
+
+  const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) loadFile(file);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files?.[0];
+    if (file) loadFile(file);
+  };
 
   return (
-    <div className="stage">
-      {/* Background Video: something_bright_no_logo_no_audio.mp4 (No audio, autoplay, loop, cover) */}
-      <video
-        className="stage-video"
-        autoPlay
-        muted
-        loop
-        playsInline
-        src="/something_bright_no_logo_no_audio.mp4"
-      />
-      <div className="stage-overlay" />
+    <>
+      <div className="scanline" aria-hidden="true" />
+      <div id="smooth-wrapper">
+        <main ref={root} id="smooth-content" className="noir-shell">
+      <header className="site-nav" data-reveal>
+        <a className="wordmark" href="#top" aria-label="NOIR home"><span>NOIR</span></a>
+        <a className="nav-link" href="#workspace">Workspace</a>
+        <div className="nav-status"><span className={`pulse-dot ${backendOnline ? "" : "offline"}`} /> {backendOnline ? "AWS online" : "Connecting"}</div>
+      </header>
 
-      {/* Main Responsive Frame */}
-      <div className="frame">
-        {/* Navigation Bar: Actual NOIR Brand Only */}
-        <header className="nav">
-          <a
-            href="#"
-            className="brand"
-            aria-label="NOIR home"
-            onClick={(e) => { e.preventDefault(); reset(); }}
-          >
-            <img
-              src="/noir-logo.png"
-              alt="NOIR"
-              className="brand-mark-img"
-            />
-            <span className="brand-name">NOIR</span>
-          </a>
-          <Sheet>
-            <SheetTrigger asChild>
-              <button type="button" className="history-trigger">
-                <History size={15} /> History
-              </button>
-            </SheetTrigger>
-            <SheetContent className="history-sheet">
-              <SheetHeader className="history-head">
-                <SheetTitle>History</SheetTitle>
-                <SheetDescription>Builds saved in this browser.</SheetDescription>
-              </SheetHeader>
-              <div className="history-list">
-                {history.length === 0 ? (
-                  <p className="history-empty">Your recent APK builds will appear here.</p>
-                ) : history.map((record) => (
-                  <article className="history-card" key={record.id}>
-                    <div className="history-card-top">
-                      <div>
-                        <strong>{record.filename}</strong>
-                        <span>{new Date(record.updatedAt).toLocaleString()}</span>
-                      </div>
-                      <span className={`history-status status-${record.status}`}>{record.status}</span>
-                    </div>
-                    <p>{record.prompt}</p>
-                    <div className="history-ops">
-                      {record.operations.map((operation) => <span key={operation}>{operation}</span>)}
-                    </div>
-                    <div className="history-actions">
-                      {record.buildId ? (
-                        <a href={`/api/noir/v1/projects/${record.projectId}/builds/${record.buildId}/download?artifact=signed`} download>
-                          <Download size={13} /> Download
-                        </a>
-                      ) : (
-                        <button type="button" onClick={() => void resumeHistory(record)}>
-                          <RefreshCw size={13} /> {record.status === "failed" ? "Retry" : "Resume"}
-                        </button>
-                      )}
-                      <button type="button" className="history-remove" onClick={() => removeHistory(record.id)} aria-label={`Remove ${record.filename} from this browser`}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </SheetContent>
-          </Sheet>
-        </header>
+      <section
+        id="top"
+        className="landing-hero"
+        onPointerMove={moveHeroSpotlight}
+      >
+        <div className="hero-backdrop" aria-hidden="true">
+          <svg className="circuit-map" viewBox="0 0 1600 820" preserveAspectRatio="none">
+            <path id="route-a" d="M0 168H188L238 218H422L468 172H620" />
+            <path id="route-b" d="M1600 142H1390L1338 194H1190L1142 242H1012" />
+            <path id="route-c" d="M0 628H205L260 574H424L482 632H650" />
+            <path id="route-d" d="M1600 660H1434L1384 610H1220L1168 558H1010" />
+            <path id="route-e" d="M800 0V94L748 146V238" />
+            <path id="route-f" d="M800 820V742L854 688V604" />
+            <circle cx="238" cy="218" r="4" />
+            <circle cx="1338" cy="194" r="4" />
+            <circle cx="260" cy="574" r="4" />
+            <circle cx="1384" cy="610" r="4" />
+            {[
+              ["route-a", "7.2s", "-1.4s"],
+              ["route-b", "8.4s", "-5.1s"],
+              ["route-c", "9.1s", "-3.2s"],
+              ["route-d", "7.8s", "-6.4s"],
+              ["route-e", "5.6s", "-2.8s"],
+              ["route-f", "6.2s", "-4.7s"],
+            ].map(([route, duration, delay]) => (
+              <g className="signal-pulse" key={route}>
+                <circle className="signal-halo" r="9" />
+                <circle className="signal-core" r="3.2" />
+                <animateMotion
+                  dur={duration}
+                  begin={delay}
+                  repeatCount="indefinite"
+                  calcMode="linear"
+                  keyPoints="0;0.25;0.5;0.75;1"
+                  keyTimes="0;0.4;0.68;0.87;1"
+                >
+                  <mpath href={`#${route}`} />
+                </animateMotion>
+              </g>
+            ))}
+          </svg>
+          <div className="calibration-rings"><i /><i /><i /></div>
+          <div className="side-scale side-scale-left">{["00", "16", "32", "48", "64"].map((tick) => <span key={tick}>{tick}</span>)}</div>
+          <div className="side-scale side-scale-right">{["A", "B", "C", "D", "E"].map((tick) => <span key={tick}>{tick}</span>)}</div>
+        </div>
+        <div className="hero-layout">
+          <div className="hero-object" data-reveal><NoirApkCoreHero /></div>
+        </div>
 
-        {/* Hero Section */}
-        <main className="hero">
-          {/* Floating Glassmorphic Logo in Teleportation Chamber */}
-          <div className="chamber-emblem-wrapper" aria-hidden="true">
-            <div className="chamber-emblem-glass">
-              <img src="/noir-logo.png" alt="NOIR Hologram" className="chamber-logo-img" />
-              <div className="chamber-emblem-glow" />
-            </div>
+      </section>
+
+      <section className="workspace-section">
+        <div className="workspace-intro" data-scroll-reveal><div><p>NOIR / WORKSPACE</p><h2>Make the change.</h2></div></div>
+        <section id="workspace" className="workspace" aria-labelledby="workspace-title" data-scroll-reveal>
+          <div className="workspace-head">
+            <div><p>LIVE AWS WORKSPACE</p><h2 id="workspace-title">APK workspace</h2></div>
+            <span className="secure-chip"><LockKeyhole size={13} /> Private</span>
           </div>
-
-          <h1 className="h1">Describe an APK change. We&apos;ll build it.</h1>
-
-          {/* Composer Card */}
-          <div
-            className={`composer-card ${isDragOver ? "drag-active" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={() => setIsDragOver(false)}
-            onDrop={handleDrop}
-          >
-            {/* Hidden File Input */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept=".apk,application/vnd.android.package-archive"
-              onChange={handleFileInput}
-              style={{ display: "none" }}
-            />
-
-            {/* Attached File Badge */}
-            {selectedFile && (
-              <div className="attached-badge">
-                <FileArchive size={13} className="text-orange-400" />
-                <span className="badge-name">{selectedFile.name}</span>
-                <span className="badge-size">({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)</span>
-                {!working && (
-                  <button
-                    type="button"
-                    className="remove-btn"
-                    onClick={(e) => { e.stopPropagation(); reset(); }}
-                    aria-label="Remove attached file"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
+          <div className="workspace-body">
+            <div className="controls-column">
+              <label className={`upload-zone ${selectedFile ? "has-file" : ""}`} htmlFor="apk-input" onDrop={handleDrop} onDragOver={(event) => event.preventDefault()}>
+                <input id="apk-input" type="file" accept=".apk,application/vnd.android.package-archive" onChange={handleFile} disabled={working} />
+                <span className="upload-icon">{selectedFile ? <Check size={21} /> : <Upload size={21} />}</span>
+                <span><strong>{selectedFile?.name || "Drop APK"}</strong><small>{selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(1)} MB · local file` : "or browse files"}</small></span>
+                <FileArchive size={19} />
+              </label>
+              <div className="request-block">
+                <div className="field-label"><label htmlFor="change-request">Change request</label></div>
+                <Textarea id="change-request" className="request-input" value={request} onChange={(event) => setRequest(event.target.value)} disabled={working || phase === "complete"} />
               </div>
-            )}
-
-            {/* Textarea Input */}
-            <textarea
-              className="prompt-ta"
-              value={request}
-              onChange={(e) => setRequest(e.target.value)}
-              placeholder="Describe what you want to change in the APK (e.g. rename app, add toast on launch, ping server)..."
-              disabled={working || phase === "complete"}
-              rows={2}
-            />
-
-            {/* Status / Progress Indicator */}
-            {working && (
-              <div className="status-bar">
-                <div className="status-label">
-                  <span>{statusMessage}</span>
-                  <span>{progress}%</span>
+              <fieldset className="model-picker" disabled={working || phase === "complete"}>
+                <legend>Model</legend>
+                <div className="model-options">
+                  {models.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      className={selectedModel === model.id ? "active" : ""}
+                      aria-pressed={selectedModel === model.id}
+                      onClick={() => setSelectedModel(model.id)}
+                    >
+                      <strong>{model.label}</strong>
+                      <small>{model.note}</small>
+                    </button>
+                  ))}
                 </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${progress}%` }} />
-                </div>
+              </fieldset>
+              <label className="consent-row" htmlFor="authorization">
+                <Checkbox id="authorization" className="consent-check" checked={authorized} onCheckedChange={(value) => setAuthorized(value === true)} disabled={working} />
+                <span>I own or may modify this APK and allow bounded AI context.</span>
+              </label>
+              {review && phase === "review" && (
+                <div className="review-card"><span>EXACT PATCH READY</span><strong>{review.operationCount} operation{review.operationCount === 1 ? "" : "s"}</strong><small>{review.paths.join(" · ") || "Grounded file changes"}</small></div>
+              )}
+              {phase === "complete" && project && buildId && (
+                <div className="success-card"><CheckCircle2 size={18} /><span><strong>Verified APK ready</strong><small>Stored privately in S3</small></span></div>
+              )}
+              {error && <div className="error-card">{error}</div>}
+              <Button className={`run-button ${selectedFile && authorized && backendOnline ? "enabled" : ""}`} disabled={!selectedFile || !authorized || !request.trim() || !backendOnline || working || phase === "complete"} onClick={phase === "review" ? approveBuild : startPreview}>
+                {working && <span className="button-spinner" />}{buttonText}
+              </Button>
+              {phase === "complete" && project && buildId && (
+                <Button className="download-button" asChild><a href={`/api/noir/v1/projects/${project.id}/builds/${buildId}/download?artifact=signed`}><Download size={14} /> Download APK</a></Button>
+              )}
+              {(phase === "complete" || phase === "error") && <button className="reset-button" onClick={reset}><RotateCcw size={13} /> Start another</button>}
+            </div>
+
+            <div className="console-column">
+              <div className="console-head"><span><Terminal size={14} /> Activity</span><span className="live-state"><Radio size={12} /> Live</span></div>
+              <div className="stage-strip" aria-label="Workflow stages">
+                {["Input", "Review", "Build", "Verify"].map((label, index) => <span key={label} className={index <= stage ? "active" : ""}>{label}{index < 3 && <i />}</span>)}
               </div>
-            )}
-
-            {/* Exact Patch Ready Review Badge */}
-            {phase === "review" && review && (
-              <div className="patch-review-pane">
-                <div className="patch-info">
-                  <span>Exact Patch Ready</span>
-                  <strong>{review.operationCount} operation{review.operationCount === 1 ? "" : "s"}</strong>
-                  <small>{review.paths.join(" · ") || "Grounded smali modifications"}</small>
-                </div>
-                <button
-                  type="button"
-                  className="approve-btn"
-                  onClick={approveBuild}
-                >
-                  Approve &amp; Rebuild
-                </button>
-              </div>
-            )}
-
-            {/* Success Pane */}
-            {phase === "complete" && project && buildId && (
-              <div className="complete-pane">
-                <div className="flex items-center gap-2 text-emerald-600">
-                  <CheckCircle2 size={18} />
-                  <div>
-                    <strong className="block text-slate-900 text-sm font-semibold">Verified APK Ready</strong>
-                    <span className="text-xs text-emerald-700">Signed, aligned, and ready to install</span>
-                  </div>
-                </div>
-                <a
-                  className="download-link"
-                  href={`/api/noir/v1/projects/${project.id}/builds/${buildId}/download?artifact=signed`}
-                  download
-                >
-                  <Download size={14} /> Download APK
-                </a>
-              </div>
-            )}
-
-            {/* Error Notification */}
-            {error && (
-              <div className="error-pane">
-                <span>{error}</span>
-                <button
-                  type="button"
-                  onClick={() => setError("")}
-                  className="text-red-500 hover:text-red-700"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            )}
-
-            {/* Toolbar Row */}
-            <div className="tools-row">
-              {/* Quick Suggestion Chips */}
-              <div className="chips-group">
-                {quickChips.map((chip) => (
-                  <button
-                    key={chip.label}
-                    type="button"
-                    className="chip-btn"
-                    onClick={() => setRequest(chip.prompt)}
-                    disabled={working || phase === "complete"}
-                  >
-                    <span>{chip.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Right Action Cluster */}
-              <div className="desktop-right-cluster">
-                {/* Model Selector Popover */}
-                {!deterministic && <div className="relative">
-                  <button
-                    type="button"
-                    className="model-trigger"
-                    onClick={() => setModelDropdownOpen((v) => !v)}
-                    disabled={working || phase === "complete"}
-                    aria-label="Select AI Model"
-                  >
-                    <span>{selectedModelObj.label}</span>
-                    <ChevronDown size={11} className="opacity-80" />
-                  </button>
-
-                  {modelDropdownOpen && (
-                    <div className="model-dropdown">
-                      {models.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`model-item ${selectedModel === m.id ? "active" : ""}`}
-                          onClick={() => {
-                            setSelectedModel(m.id);
-                            setModelDropdownOpen(false);
-                          }}
-                        >
-                          <span className="font-medium">{m.label}</span>
-                          <span className="model-tag">{m.note}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>}
-
-                {/* Paperclip Attach Button */}
-                <button
-                  type="button"
-                  className={`attach-btn ${selectedFile ? "has-file" : ""}`}
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={working || phase === "complete"}
-                  title={selectedFile ? `Selected: ${selectedFile.name}` : "Attach APK file"}
-                  aria-label="Attach APK file"
-                >
-                  <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor">
-                    <path
-                      d="M14.5 6.5L7.91421 13.0858C6.74264 14.2574 4.84315 14.2574 3.67157 13.0858C2.5 11.9142 2.5 10.0147 3.67157 8.84315L10.2574 2.25736C11.0384 1.47631 12.3047 1.47631 13.0858 2.25736C13.8668 3.03841 13.8668 4.30474 13.0858 5.08579L6.5 11.6716C6.10948 12.0621 5.47631 12.0621 5.08579 11.6716C4.69526 11.281 4.69526 10.6479 5.08579 10.2574L11 4.34315"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-
-                {/* Send / Upload Button */}
-                <button
-                  type="button"
-                  className="send-btn"
-                  onClick={phase === "review" ? approveBuild : startPreview}
-                  disabled={working || (!selectedFile && !request.trim())}
-                  aria-label="Submit APK Change"
-                >
-                  {working ? (
-                    <RefreshCw className="animate-spin text-black stroke-black w-3.5 h-3.5" strokeWidth={2.8} />
-                  ) : (
-                    <ArrowUp className="text-black stroke-black w-3.5 h-3.5" strokeWidth={2.8} />
-                  )}
-                </button>
+              <Progress value={progress} className="process-progress" />
+              <div className="terminal-feed" ref={feed} aria-live="polite">
+                {logs.map((log, index) => <p key={`${log.time}-${log.tag}-${index}`}><time>{log.time}</time><b>[{log.tag}]</b><span>{log.message}</span></p>)}
+                <span className="cursor-line"><i /> {working ? "processing" : phase === "complete" ? "complete" : phase === "error" ? "attention" : "ready"}</span>
               </div>
             </div>
           </div>
+        </section>
+      </section>
+
+          <footer><a className="wordmark" href="#top"><span className="mark">N</span><span>NOIR</span></a><p>Draft. Decide. Build.</p><span>© 2026</span></footer>
         </main>
       </div>
-
-      {/* Floating Bottom Drawer for Live Activity Logs */}
-      <button
-        type="button"
-        className="logs-toggle-btn"
-        onClick={() => setLogsDrawerOpen((v) => !v)}
-      >
-        <Terminal size={12} />
-        <span>Activity ({logs.length})</span>
-        <span className={`w-1.5 h-1.5 rounded-full ${backendOnline ? "bg-emerald-400" : "bg-amber-400"} animate-pulse`} />
-      </button>
-
-      {logsDrawerOpen && (
-        <div className="logs-drawer">
-          <div className="logs-header">
-            <span className="flex items-center gap-2">
-              <Terminal size={13} /> Real-time Audit &amp; Build Activity
-            </span>
-            <button
-              type="button"
-              onClick={() => setLogsDrawerOpen(false)}
-              className="text-slate-400 hover:text-white"
-            >
-              <X size={13} />
-            </button>
-          </div>
-          <div className="logs-content">
-            {logs.map((log, idx) => (
-              <p key={`${log.time}-${log.tag}-${idx}`}>
-                <time>{log.time}</time>
-                <b>[{log.tag}]</b>
-                <span>{log.message}</span>
-              </p>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
