@@ -18,3 +18,4 @@ node-modules
 node_modules
 .next/
 next-env.d.ts
+.vercel/
