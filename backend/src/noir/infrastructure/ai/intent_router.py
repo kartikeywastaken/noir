@@ -907,12 +907,14 @@ INTENT_RULES: list[IntentRule] = [
                 re.IGNORECASE,
             ),
             re.compile(
-                r"\b(receiver|service|broadcast)\b.*?\b(add|modify|register|create|update|change|start|hook|implement|remove|delete|unregister)\b",
-                re.IGNORECASE | re.DOTALL,
+                r"\b(receiver|service(?!\s+(?:carrier|provider)\b)|broadcast)\b"
+                r"[^.!?;\n]{0,120}\b(add|modify|register|create|update|change|start|hook|implement|remove|delete|unregister)\b",
+                re.IGNORECASE,
             ),
             re.compile(
-                r"\b(add|modify|register|create|update|change|start|hook|implement|remove|delete|unregister)\b.*?\b(receiver|service|broadcast)\b",
-                re.IGNORECASE | re.DOTALL,
+                r"\b(add|modify|register|create|update|change|start|hook|implement|remove|delete|unregister)\b"
+                r"[^.!?;\n]{0,120}\b(receiver|service(?!\s+(?:carrier|provider)\b)|broadcast)\b",
+                re.IGNORECASE,
             ),
         ],
         apk_types={"dalvik"},

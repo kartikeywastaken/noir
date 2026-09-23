@@ -22,6 +22,180 @@ from noir.security.locking import project_lock, require_clean_workspace
 
 logger = logging.getLogger(__name__)
 
+
+_EXECUTABLE_PLAN_OPERATIONS = {
+    PatchOperationType.SMALI_REPLACE_METHOD,
+    PatchOperationType.SMALI_INSERT_AT_ANCHOR,
+    PatchOperationType.CIL_REPLACE_METHOD_BODY,
+    PatchOperationType.CIL_INSERT_METHOD,
+    PatchOperationType.CIL_REPLACE_FIELD_INIT,
+    PatchOperationType.IL2CPP_FORCE_RETURN,
+    PatchOperationType.IL2CPP_NOP_RANGE,
+    PatchOperationType.NATIVE_BYTE_PATCH,
+    PatchOperationType.NATIVE_NOP_RANGE,
+    PatchOperationType.NATIVE_BRANCH_REDIRECT,
+    PatchOperationType.DEX_STRING_PATCH,
+    PatchOperationType.DEX_BYTE_PATCH,
+}
+
+
+def _request_requirements(request: str) -> dict[str, str]:
+    """Extract high-risk semantics that must not disappear from a compound request.
+
+    Intent routing is deliberately finite. These requirements cover stateful
+    triggers and device-data requests that the reusable deterministic runtime
+    cannot implement by reducing them to a plain launch action.
+    """
+    normalized = " ".join(request.strip().split())
+    requirements: dict[str, str] = {}
+    if re.search(
+        r"(?i)\b(?:once|one[ -]?time|first(?:\s+time)?)\b[^.!?;]{0,100}"
+        r"\b(?:after|on|when|upon)?\s*(?:login|log\s*in|sign[- ]?in)\b|"
+        r"\b(?:login|log\s*in|sign[- ]?in)\b[^.!?;]{0,100}"
+        r"\b(?:once|one[ -]?time|first(?:\s+time)?)\b",
+        normalized,
+    ):
+        requirements["trigger_once_after_login"] = (
+            "run only once after the user logs in, not on every application launch"
+        )
+
+    data_action = (
+        r"(?:collect|send|post|provide|transmit|report|include|upload|capture|read|"
+        r"retrieve|obtain|share)"
+    )
+    category_patterns = {
+        "android_version": r"android\s+(?:os\s+)?version",
+        "service_carrier": r"(?:service\s+)?carrier|network\s+operator|mobile\s+operator",
+        "location": r"(?:device\s+|user\s+)?location|gps",
+        "battery_status": r"battery(?:\s+(?:status|level|state))?",
+        "device_information": r"device\s+info(?:rmation)?",
+    }
+    for category, pattern in category_patterns.items():
+        if re.search(
+            rf"(?i)\b{data_action}\b[^.!?;]{{0,260}}\b(?:{pattern})\b|"
+            rf"\b(?:{pattern})\b[^.!?;]{{0,260}}\b{data_action}\b",
+            normalized,
+        ):
+            requirements[f"data_{category}"] = (
+                f"collect or transmit requested device data: {category.replace('_', ' ')}"
+            )
+    return requirements
+
+
+def _is_executable_plan_change(change) -> bool:
+    """Return whether a planned binding can change runtime behavior."""
+    if change.operation in _EXECUTABLE_PLAN_OPERATIONS:
+        return True
+    suffix = change.relative_path.lower().rsplit(".", 1)[-1]
+    return suffix in {"dex", "smali", "dll", "so"} and change.operation in {
+        PatchOperationType.CREATE_FILE,
+        PatchOperationType.REPLACE_FILE,
+        PatchOperationType.REPLACE_BLOCK,
+    }
+
+
+def _plan_coverage_gaps(
+    plan,
+    detected_intents: list[str],
+    request_requirements: dict[str, str] | None = None,
+) -> list[str]:
+    """Find requested or claimed behavior with no capable authorized edit.
+
+    This structural check does not claim that an operation works. It prevents a
+    resource-only patch from claiming executable behavior and leaves runtime
+    verification to the later APK verification gates.
+    """
+    if plan.unsupported_aspects:
+        # Any disclosed residual stops patch generation in the workflow. Do not
+        # pretend a textual heuristic can improve on an explicit limitation.
+        return []
+
+    changes = list(plan.file_changes)
+    has_executable = any(_is_executable_plan_change(change) for change in changes)
+    has_smali = any(
+        change.operation
+        in {
+            PatchOperationType.SMALI_REPLACE_METHOD,
+            PatchOperationType.SMALI_INSERT_AT_ANCHOR,
+        }
+        for change in changes
+    )
+    has_manifest = any(change.relative_path == "AndroidManifest.xml" for change in changes)
+    has_resource = any(
+        change.relative_path.startswith(("res/", "resources/"))
+        and change.relative_path.lower().endswith(".xml")
+        for change in changes
+    )
+    normalized_triggers = " ".join(plan.runtime_triggers).lower().replace("-", " ")
+    normalized_data = " ".join(plan.data_categories).lower().replace("-", " ")
+
+    gaps: list[str] = []
+    for intent in dict.fromkeys(detected_intents):
+        covered = True
+        if intent == "app_name":
+            covered = has_manifest or has_resource
+        elif intent == "permission":
+            covered = has_manifest
+        elif intent == "ui_layout":
+            covered = has_resource
+        elif intent in {"network_ping", "toast_flash"}:
+            covered = has_executable
+        elif intent == "receiver_service":
+            covered = has_manifest or has_executable
+        elif intent in {
+            "react_native_js",
+            "flutter_dart",
+            "unity_mono",
+            "unity_il2cpp",
+            "native_elf",
+            "xamarin_dotnet",
+        }:
+            covered = has_executable
+        if not covered:
+            gaps.append(
+                f"requested intent {intent!r} has no authorized file change capable of implementing it"
+            )
+
+    if plan.network_destinations and not has_executable:
+        gaps.append("declared network behavior has no executable Smali, DEX, managed, or native edit")
+    if plan.data_categories and not has_executable:
+        gaps.append("declared data collection has no executable Smali, DEX, managed, or native edit")
+    if plan.smali_integration_points and not has_smali:
+        gaps.append("declared Smali integration points have no authorized Smali operation")
+    if plan.component_changes and not has_manifest:
+        gaps.append("declared Android component changes have no AndroidManifest.xml operation")
+    if (plan.runtime_triggers or plan.background_behavior) and not has_executable:
+        gaps.append("declared runtime/background behavior has no executable file change")
+    for requirement_id, description in (request_requirements or {}).items():
+        if requirement_id == "trigger_once_after_login":
+            has_login = bool(re.search(r"\b(?:login|log in|sign in)\b", normalized_triggers))
+            has_once = bool(re.search(r"\b(?:once|one time|first time)\b", normalized_triggers))
+            if not (has_executable and has_login and has_once):
+                gaps.append(f"requested behavior is unaccounted for: {description}")
+            continue
+        if requirement_id.startswith("data_"):
+            category = requirement_id.removeprefix("data_").replace("_", " ")
+            aliases = {
+                "android version": ("android version", "os version"),
+                "service carrier": ("service carrier", "carrier", "network operator"),
+                "battery status": ("battery status", "battery level", "battery state", "battery"),
+                "device information": ("device information", "device info"),
+            }.get(category, (category,))
+            if not (has_executable and any(alias in normalized_data for alias in aliases)):
+                gaps.append(f"requested behavior is unaccounted for: {description}")
+    return list(dict.fromkeys(gaps))
+
+
+def _coverage_feedback(gaps: list[str]) -> str:
+    lines = [
+        "Your previous plan was semantically incomplete. A disclosure or intended outcome is not "
+        "an implementation. For every item below, either add an exact evidence-backed file change "
+        "whose operation can implement it, or list that item explicitly in unsupported_aspects. "
+        "Do not retain a claimed behavior without one of those outcomes:"
+    ]
+    lines.extend(f"- {gap}" for gap in gaps)
+    return "\n".join(lines)[:12_000]
+
 # ── Workflow call budget ─────────────────────────────────────────────
 
 
@@ -253,9 +427,10 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
 
         deterministic_context = AiContextTools(workspace, analysis)
         routed = IntentRouter().route(request, deterministic_context, analysis)
+        request_requirements = _request_requirements(request)
         spec = parse_operation_spec(request, set(routed.matched_intents))
         project = ProjectRepository().get(project_id)
-        if spec and project:
+        if spec and project and not request_requirements:
             plan = create_deterministic_plan(
                 project_id, project.workspace_revision, request, spec, workspace
             )
@@ -286,7 +461,13 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             from noir.infrastructure.ai.intent_router import IntentRouter
 
             route_result = IntentRouter().route(request, context_tools, analysis)
-            if route_result and route_result.matched_intents and route_result.seen_files:
+            detected_intents = list(route_result.matched_intents)
+            if (
+                route_result
+                and route_result.matched_intents
+                and route_result.seen_files
+                and not request_requirements
+            ):
                 discovery_stop_reason = "intent_matched"
                 discovery_api_calls = 0
                 discovery_transcript = []
@@ -294,9 +475,10 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
                     context_tools, route_result, user_request=request
                 )
                 context["detected_intents"] = route_result.matched_intents
-                detected_intents = route_result.matched_intents
             else:
-                logger.warning("No intent matched for request; falling through to AI discovery")
+                logger.warning(
+                    "Intent routing was absent or incomplete; falling through to AI discovery"
+                )
                 discovery_provider = _create_discovery_provider(config)
 
                 if discovery_provider is not None:
@@ -311,6 +493,14 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
                     discovery = EvidenceDiscovery(
                         gemini_discovery, context_tools, config, analysis
                     ).discover(request)
+
+                # Preserve deterministic evidence for the clauses the router did
+                # understand while discovery investigates the remaining clauses.
+                if route_result:
+                    for path, content in route_result.seen_files.items():
+                        discovery.seen_files.setdefault(path, content)
+                    for path, inspection in route_result.binary_inspections.items():
+                        discovery.binary_inspections.setdefault(path, inspection)
 
                 discovery_transcript = [r.to_dict() for r in discovery.transcript]
                 discovery_api_calls = discovery.api_calls
@@ -329,6 +519,8 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             # Any discovery failure falls back to static selection (requirement #4).
             context = context_tools.build_context(user_request=request)
 
+        context["request_requirements"] = list(request_requirements.values())
+
         budget.consume(1, label="plan generation")
         plan = generation_provider.generate_plan(request, analysis, context, project_id=project_id)
         plan.discovery_transcript = discovery_transcript
@@ -346,9 +538,15 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             | set(context["binary_inspection"])
         )
         invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
-        if invalid:
-            budget.consume(1, label="grounding correction")
-            context["planning_feedback"] = _grounding_feedback(invalid, sorted(allowed_paths))
+        coverage_gaps = _plan_coverage_gaps(plan, detected_intents, request_requirements)
+        if invalid or coverage_gaps:
+            budget.consume(1, label="plan completeness correction")
+            feedback: list[str] = []
+            if invalid:
+                feedback.append(_grounding_feedback(invalid, sorted(allowed_paths)))
+            if coverage_gaps:
+                feedback.append(_coverage_feedback(coverage_gaps))
+            context["planning_feedback"] = "\n\n".join(feedback)
             plan = generation_provider.generate_plan(
                 request, analysis, context, project_id=project_id
             )
@@ -357,11 +555,16 @@ def generate_plan(config, project_id, request, consent, *, analysis=None, model=
             plan.discovery_stop_reason = discovery_stop_reason
             _apply_strategy_metadata(plan, detected_intents)
             invalid = _invalid_plan_paths(plan, workspace, allowed_paths)
+            coverage_gaps = _plan_coverage_gaps(plan, detected_intents, request_requirements)
         if invalid:
             missing = ", ".join(invalid[:10])
             raise PlanServiceError(
                 "AI proposed files that do not exist after one automatic grounded correction: "
                 f"{missing}. No plan was saved."
+            )
+        if coverage_gaps:
+            plan.unsupported_aspects.extend(
+                f"NOIR could not prove complete implementation: {gap}" for gap in coverage_gaps
             )
         result = PlanService(config).create_plan(plan)
         _plan_cache.put(project_id, revision, request, result, selected_model)
@@ -378,6 +581,11 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None,
             raise PlanServiceError(
                 "This plan contains no safe, supported file changes. Revise the request instead "
                 "of generating a patch."
+            )
+        if plan.unsupported_aspects:
+            raise PlanServiceError(
+                "This plan contains unsupported or unimplemented request clauses; revise the "
+                "request before generating a patch"
             )
         if not preview and not ApprovalRepository().find_valid(
             project_id, ApprovalScope.PLAN, plan.compute_hash(), project.workspace_revision
@@ -407,8 +615,14 @@ def generate_patch(config, project_id, plan_id, *, preview=False, analysis=None,
         context = AiContextTools(ProjectWorkspace(project_id, config), analysis).build_context(
             [change.relative_path for change in plan.file_changes], user_request=plan.user_request
         )
-        patch = _create_generation_provider(config, model).generate_patch(plan, context)
-        patch.detected_intents = plan.detected_intents
-        patch.patch_strategies = plan.patch_strategies
-        patch.runtime_configuration = plan.runtime_configuration
-        return PatchService(config).store_patch(patch, preview=preview)
+        try:
+            patch = _create_generation_provider(config, model).generate_patch(plan, context)
+            patch.detected_intents = plan.detected_intents
+            patch.patch_strategies = plan.patch_strategies
+            patch.runtime_configuration = plan.runtime_configuration
+            return PatchService(config).store_patch(patch, preview=preview)
+        except Exception:
+            # A retry must regenerate the plan instead of reusing the exact plan
+            # whose patch proved invalid or incomplete.
+            invalidate_plan_cache(project_id)
+            raise

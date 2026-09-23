@@ -38,6 +38,15 @@ def test_http_request_on_launch_is_not_misclassified_as_browser_redirect():
     assert parse_operation_spec("Send an HTTP request to https://example.com on app launch") is None
 
 
+def test_stateful_redirect_and_device_data_fall_back_instead_of_being_partially_applied():
+    request = (
+        "redirect the user to https://example.com just once on login, change the name to Expo, "
+        "and provide android version, service carrier, location, and battery status"
+    )
+
+    assert parse_operation_spec(request, {"app_name", "network_ping"}) is None
+
+
 def test_internet_permission_uses_deterministic_manifest_path():
     spec = parse_operation_spec(
         "Add android.permission.INTERNET permission to AndroidManifest.xml.",

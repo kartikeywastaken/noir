@@ -165,6 +165,54 @@ def test_prepare_with_auto_build_executes_rebuild_and_signing(workflow_setup, mo
     assert saved_job.stage == WorkflowStage.REPORTING
 
 
+def test_prepare_stops_partial_plan_before_patch_or_build(workflow_setup, monkeypatch):
+    cfg, project_id, _ = workflow_setup
+    plan = ChangePlan(
+        plan_id="partial_plan",
+        project_id=project_id,
+        workspace_revision=0,
+        user_request="rename and add unsupported runtime behavior",
+        file_changes=[
+            PlanFileChange(
+                relative_path="AndroidManifest.xml",
+                operation=PatchOperationType.MANIFEST_UPDATE,
+            )
+        ],
+        unsupported_aspects=["No executable change covers the requested runtime behavior"],
+    )
+    monkeypatch.setattr(
+        "noir.application.workflow_service.generate_plan", lambda *args, **kwargs: plan
+    )
+    monkeypatch.setattr(
+        "noir.application.workflow_service.generate_patch",
+        lambda *args, **kwargs: pytest.fail("partial plan reached patch generation"),
+    )
+    job = JobRepository().create(
+        JobInfo(
+            project_id=project_id,
+            stage=WorkflowStage.PLANNING,
+            result_data={
+                "operation": "workflow_prepare",
+                "payload": {
+                    "user_request": plan.user_request,
+                    "allow_ai_upload": True,
+                    "revision": 0,
+                    "auto_build": True,
+                    "user_id": "test_user",
+                },
+            },
+        )
+    )
+
+    result = prepare(cfg, job)
+
+    assert result == {
+        "plan_id": "partial_plan",
+        "unsupported": True,
+        "unsupported_aspects": plan.unsupported_aspects,
+    }
+
+
 def test_run_automated_workflow_end_to_end(workflow_setup, monkeypatch):
     """Direct invocation of run_automated_workflow executes complete end-to-end pipeline."""
     cfg, project_id, ws = workflow_setup

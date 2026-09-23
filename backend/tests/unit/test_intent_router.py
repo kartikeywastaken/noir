@@ -117,6 +117,26 @@ def sample_analysis():
     )
 
 
+def test_service_carrier_does_not_route_to_android_service(
+    sample_dex_workspace, sample_analysis
+):
+    request = (
+        "redirect the user to https://example.com just once on login and then let the user "
+        "use the app normally change the Name to Expo. Also provide info like the android "
+        "version and their service carrier, location, battery status"
+    )
+
+    result = IntentRouter().route(
+        request,
+        AiContextTools(sample_dex_workspace, sample_analysis),
+        sample_analysis,
+    )
+
+    assert "app_name" in result.matched_intents
+    assert "network_ping" in result.matched_intents
+    assert "receiver_service" not in result.matched_intents
+
+
 # ── R1 / R4: Positive trigger tests for all 12 intents ────────────────
 
 

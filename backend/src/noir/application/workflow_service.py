@@ -59,6 +59,10 @@ def check_finish(config, project_id, payload):
         or patch.plan_id != plan.plan_id
     ):
         raise ValueError("Preview not found in this workspace")
+    if plan.unsupported_aspects:
+        raise ValueError(
+            "Preview contains unsupported or unimplemented request clauses; generate a complete plan"
+        )
     if (
         plan.compute_hash() != payload["plan_hash"]
         or patch.compute_hash() != payload["patch_hash"]
@@ -102,9 +106,19 @@ def prepare(config, job):
             analysis=analysis,
             model=payload.get("model"),
         )
-        if not plan.file_changes:
-            _checkpoint(job, "planning", plan_id=plan.plan_id, unsupported=True)
-            return {"plan_id": plan.plan_id, "unsupported": True}
+        if not plan.file_changes or plan.unsupported_aspects:
+            _checkpoint(
+                job,
+                "planning",
+                plan_id=plan.plan_id,
+                unsupported=True,
+                unsupported_aspects=plan.unsupported_aspects,
+            )
+            return {
+                "plan_id": plan.plan_id,
+                "unsupported": True,
+                "unsupported_aspects": plan.unsupported_aspects,
+            }
         _checkpoint(job, "generating_patch", plan_id=plan.plan_id)
         patch = generate_patch(
             config,
@@ -243,9 +257,19 @@ def run_automated_workflow(
             analysis=analysis,
             model=model,
         )
-        if not plan.file_changes:
-            _checkpoint(job, "planning", plan_id=plan.plan_id, unsupported=True)
-            return {"plan_id": plan.plan_id, "unsupported": True}
+        if not plan.file_changes or plan.unsupported_aspects:
+            _checkpoint(
+                job,
+                "planning",
+                plan_id=plan.plan_id,
+                unsupported=True,
+                unsupported_aspects=plan.unsupported_aspects,
+            )
+            return {
+                "plan_id": plan.plan_id,
+                "unsupported": True,
+                "unsupported_aspects": plan.unsupported_aspects,
+            }
 
         _checkpoint(job, "generating_patch", plan_id=plan.plan_id)
         patch = generate_patch(

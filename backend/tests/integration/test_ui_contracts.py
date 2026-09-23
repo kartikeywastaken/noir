@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from noir.api.app import create_app
-from noir.application.patch_service import PatchService, PlanService
+from noir.application.patch_service import PatchService, PlanService, PlanServiceError
 from noir.domain.config import NoirConfig, reset_config
 from noir.domain.enums import PatchOperationType, Provenance
 from noir.domain.models import (
@@ -27,6 +27,7 @@ from noir.infrastructure.database.repositories import (
     TokenRepository,
 )
 from noir.infrastructure.filesystem.workspace import ProjectWorkspace
+from noir.patches.engine import PatchValidationError
 
 
 @pytest.fixture
@@ -80,6 +81,79 @@ def stored_plan_patch(cfg, ws):
         )
     )
     return plan, patch
+
+
+def test_patch_must_cover_every_approved_plan_binding(ui_workspace):
+    _, cfg, ws = ui_workspace
+    second = ws.decoded_dir / "second.txt"
+    second.write_text("before\n")
+    plan = PlanService(cfg).create_plan(
+        ChangePlan(
+            project_id=ws.project_id,
+            workspace_revision=0,
+            user_request="Change both files",
+            file_changes=[
+                PlanFileChange(
+                    relative_path="label.txt", operation=PatchOperationType.REPLACE_BLOCK
+                ),
+                PlanFileChange(
+                    relative_path="second.txt", operation=PatchOperationType.REPLACE_BLOCK
+                ),
+            ],
+        )
+    )
+
+    with pytest.raises(PlanServiceError, match="does not implement every approved plan change"):
+        PatchService(cfg).store_patch(
+            PatchSet(
+                provenance=Provenance.MANUAL,
+                project_id=ws.project_id,
+                plan_id=plan.plan_id,
+                workspace_revision=0,
+                operations=[
+                    PatchOperation(
+                        relative_path="label.txt",
+                        operation=PatchOperationType.REPLACE_BLOCK,
+                        match_content="before",
+                        new_content="after",
+                    )
+                ],
+            )
+        )
+
+
+def test_patch_rejects_approved_noop_operation(ui_workspace):
+    _, cfg, ws = ui_workspace
+    plan = PlanService(cfg).create_plan(
+        ChangePlan(
+            project_id=ws.project_id,
+            workspace_revision=0,
+            user_request="Change label",
+            file_changes=[
+                PlanFileChange(
+                    relative_path="label.txt", operation=PatchOperationType.REPLACE_BLOCK
+                )
+            ],
+        )
+    )
+
+    with pytest.raises(PatchValidationError, match="produces no change"):
+        PatchService(cfg).store_patch(
+            PatchSet(
+                provenance=Provenance.MANUAL,
+                project_id=ws.project_id,
+                plan_id=plan.plan_id,
+                workspace_revision=0,
+                operations=[
+                    PatchOperation(
+                        relative_path="label.txt",
+                        operation=PatchOperationType.REPLACE_BLOCK,
+                        match_content="before",
+                        new_content="before",
+                    )
+                ],
+            )
+        )
 
 
 def test_review_recovery_exact_hashes_and_real_diff(ui_workspace):

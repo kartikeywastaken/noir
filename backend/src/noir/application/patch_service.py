@@ -159,9 +159,14 @@ class PatchService:
         plan = self.plan_repo.get(patch.plan_id)
         if not plan or plan.project_id != patch.project_id:
             raise PlanServiceError("Patch plan does not belong to this project")
+        if plan.unsupported_aspects:
+            raise PlanServiceError(
+                "Patch generation is blocked because the plan contains unsupported request clauses"
+            )
         if patch.workspace_revision != project.workspace_revision:
             raise PlanServiceError("Patch was generated against a stale revision")
         allowed = {(change.relative_path, change.operation) for change in plan.file_changes}
+        actual = {(op.relative_path, op.operation) for op in patch.operations}
         mismatched = [
             op for op in patch.operations if (op.relative_path, op.operation) not in allowed
         ]
@@ -175,6 +180,14 @@ class PatchService:
                 for op in mismatched
             )
             raise PlanServiceError(f"Patch operations exceed the approved plan ({details})")
+        missing = allowed - actual
+        if missing:
+            details = "; ".join(
+                f"{path}: missing {operation.value}" for path, operation in sorted(missing)
+            )
+            raise PlanServiceError(
+                f"Patch does not implement every approved plan change ({details})"
+            )
         # Verify plan is approved
         plan_approval = self.approval_repo.find_valid(
             patch.project_id,

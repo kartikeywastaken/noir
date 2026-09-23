@@ -765,6 +765,7 @@ class GeminiProvider(AiProvider):
             "il2cpp_metadata_files": analysis.il2cpp_metadata_files,
             "native_abis": analysis.native_abis,
             "binary_inspection": context.get("binary_inspection", {}),
+            "request_requirements": context.get("request_requirements", []),
         }
 
         def render(context_str: str) -> str:
@@ -784,6 +785,8 @@ limitation in unsupported_aspects instead of guessing. When no safe, evidence-ba
 implement the request, return an empty file_changes array and explain why in unsupported_aspects.
 Never add a placeholder, no-op, unrelated manifest edit, or validation-only file change merely
 to make the plan appear actionable.
+Every requested behavior needs a capable exact file_change or an unsupported_aspects entry.
+Disclosure fields are not implementation; runtime/network/data behavior needs executable code.
 For label-only tasks, consider changing application and launcher android:label attributes
 instead of editing every localized resource. Keep the plan minimal and within 20 files.
 

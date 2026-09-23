@@ -92,9 +92,21 @@ def parse_operation_spec(
     text = " ".join(request.strip().split())
     if not text or (matched_intents and not matched_intents.issubset(SUPPORTED_INTENTS)):
         return None
+    # The reusable runtime implements literal launch behavior. App-specific state
+    # such as "once after login" and data collection require a grounded advanced
+    # plan; treating those clauses as a plain launch redirect silently drops work.
+    if re.search(
+        r"(?i)\b(?:once|first(?:\s+time)?)\b[^.!?;]{0,80}\b(?:login|log\s*in|sign[- ]?in)\b|"
+        r"\b(?:collect|send|post|provide|transmit|report|include)\b[^.!?;]{0,160}"
+        r"\b(?:device\s+info(?:rmation)?|android\s+version|service\s+carrier|carrier|location|battery(?:\s+status)?)\b",
+        text,
+    ):
+        return None
     if re.search(
         r"(?i)\b(?:remove|revoke)\s+(?:the\s+)?(?:[\w.]+\s+){0,3}permission|"
-        r"\b(?:layout|button\s+colou?r|native\s+code|unity|il2cpp|service|receiver)\b",
+        r"\b(?:layout|button\s+colou?r|native\s+code|unity|il2cpp|receiver|"
+        r"background\s+service|foreground\s+service|intent\s+service|job\s+service|"
+        r"service\s+component)\b",
         text,
     ):
         return None

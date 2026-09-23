@@ -100,6 +100,175 @@ def test_plan_generation_regrounds_an_invented_path_before_saving(workspace, mon
     assert len(PlanRepository().list_by_project(ws.project_id)) == 1
 
 
+def test_plan_generation_corrects_or_reports_unimplemented_network_behavior(
+    workspace, monkeypatch
+):
+    from noir.application.ai_service import generate_plan
+    from noir.domain.models import AnalysisResult, ChangePlan, ComponentInfo, PlanFileChange
+
+    cfg, ws = workspace
+    (ws.decoded_dir / "AndroidManifest.xml").write_text(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+        'package="com.noir.regression"><application><activity '
+        'android:name=".MainActivity"><intent-filter><action '
+        'android:name="android.intent.action.MAIN"/><category '
+        'android:name="android.intent.category.LAUNCHER"/></intent-filter>'
+        "</activity></application></manifest>",
+        encoding="utf-8",
+    )
+    smali = ws.decoded_dir / "smali/com/noir/regression/MainActivity.smali"
+    smali.parent.mkdir(parents=True)
+    smali.write_text(".class public Lcom/noir/regression/MainActivity;\n", encoding="utf-8")
+    FileManifestRepository().save(ws.project_id, 1, ws.build_file_manifest())
+    analysis = AnalysisResult(
+        project_id=ws.project_id,
+        package_name="com.noir.regression",
+        runtime="dalvik",
+        runtimes={"dalvik"},
+        components=[
+            ComponentInfo(
+                name="com.noir.regression.MainActivity",
+                component_type="activity",
+                is_launcher=True,
+            )
+        ],
+    )
+
+    class Provider:
+        calls = 0
+
+        def __init__(self, **kwargs):
+            pass
+
+        def generate_plan(self, request, analysis, context, *, project_id):
+            self.__class__.calls += 1
+            if self.calls == 1:
+                assert not context.get("planning_feedback")
+                unsupported = []
+            else:
+                assert "semantically incomplete" in context["planning_feedback"]
+                assert "network_ping" in context["planning_feedback"]
+                unsupported = ["No evidence-backed executable network edit was identified"]
+            return ChangePlan(
+                project_id=project_id,
+                workspace_revision=0,
+                user_request=request,
+                intended_outcome="Send a request on launch",
+                file_changes=[
+                    PlanFileChange(
+                        relative_path="AndroidManifest.xml",
+                        operation=PatchOperationType.MANIFEST_UPDATE,
+                    )
+                ],
+                network_destinations=["https://example.com"],
+                runtime_triggers=["launch"],
+                unsupported_aspects=unsupported,
+            )
+
+    monkeypatch.setattr("noir.application.ai_service.GeminiProvider", Provider)
+    monkeypatch.setattr(
+        "noir.application.ai_service.AnalysisService.analyze",
+        lambda *args, **kwargs: analysis,
+    )
+
+    plan = generate_plan(
+        cfg,
+        ws.project_id,
+        "Send an HTTP request to https://example.com on app launch",
+        True,
+    )
+
+    assert Provider.calls == 2
+    assert plan.unsupported_aspects == [
+        "No evidence-backed executable network edit was identified"
+    ]
+
+
+def test_partial_intent_match_runs_discovery_for_remaining_request_clauses(
+    workspace, monkeypatch
+):
+    from noir.application.ai_service import generate_plan
+    from noir.domain.models import AnalysisResult, ChangePlan, ComponentInfo, PlanFileChange
+    from noir.infrastructure.ai.discovery import DiscoveryResult
+
+    cfg, ws = workspace
+    (ws.decoded_dir / "AndroidManifest.xml").write_text(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+        'package="com.noir.regression"><application><activity '
+        'android:name=".MainActivity"><intent-filter><action '
+        'android:name="android.intent.action.MAIN"/><category '
+        'android:name="android.intent.category.LAUNCHER"/></intent-filter>'
+        "</activity></application></manifest>",
+        encoding="utf-8",
+    )
+    smali = ws.decoded_dir / "smali/com/noir/regression/MainActivity.smali"
+    smali.parent.mkdir(parents=True)
+    smali.write_text(".class public Lcom/noir/regression/MainActivity;\n", encoding="utf-8")
+    FileManifestRepository().save(ws.project_id, 1, ws.build_file_manifest())
+    analysis = AnalysisResult(
+        project_id=ws.project_id,
+        package_name="com.noir.regression",
+        runtime="dalvik",
+        runtimes={"dalvik"},
+        components=[
+            ComponentInfo(
+                name="com.noir.regression.MainActivity",
+                component_type="activity",
+                is_launcher=True,
+            )
+        ],
+    )
+
+    class DiscoveryProvider:
+        called = False
+
+        def discover(self, request, context_tools, analysis):
+            self.__class__.called = True
+            return DiscoveryResult(used_static_fallback=True, stop_reason="test")
+
+    class Provider:
+        def __init__(self, **kwargs):
+            pass
+
+        def generate_plan(self, request, analysis, context, *, project_id):
+            assert context["request_requirements"] == [
+                "run only once after the user logs in, not on every application launch"
+            ]
+            return ChangePlan(
+                project_id=project_id,
+                workspace_revision=0,
+                user_request=request,
+                intended_outcome="Report the unsupported stateful trigger",
+                file_changes=[
+                    PlanFileChange(
+                        relative_path="AndroidManifest.xml",
+                        operation=PatchOperationType.MANIFEST_UPDATE,
+                    )
+                ],
+                unsupported_aspects=["No grounded once-after-login hook was identified"],
+            )
+
+    monkeypatch.setattr("noir.application.ai_service.GeminiProvider", Provider)
+    monkeypatch.setattr(
+        "noir.application.ai_service._create_discovery_provider",
+        lambda config: DiscoveryProvider(),
+    )
+    monkeypatch.setattr(
+        "noir.application.ai_service.AnalysisService.analyze",
+        lambda *args, **kwargs: analysis,
+    )
+
+    plan = generate_plan(
+        cfg,
+        ws.project_id,
+        "Redirect to https://example.com only once on login",
+        True,
+    )
+
+    assert DiscoveryProvider.called
+    assert plan.unsupported_aspects == ["No grounded once-after-login hook was identified"]
+
+
 def test_plan_accepts_real_binary_selected_outside_truncated_inventory(workspace, monkeypatch):
     from noir.application.ai_service import generate_plan
     from noir.domain.models import AnalysisResult, ChangePlan, PlanFileChange
